@@ -23,10 +23,10 @@ jobs:
         toolchain: stable
         override: true
     - name: Check
-      uses: actions-rs/cargo
+      uses: actions-rs/cargo@v1
       with:
         command: check
     - name: Test
-      uses: actions-rs/cargo
+      uses: actions-rs/cargo@v1
       with:
         command: test
