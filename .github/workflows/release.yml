@@ -24,7 +24,8 @@ jobs:
         run: echo "::set-output name=version::$(grep "^version" Cargo.toml | head -1 | awk -F' = ' '{print $2}' | sed 's/\"//g')"
 
       - name: Create tarball
-        run: tar --exclude='./.github' -czvf scim_v2_v${{ steps.get_version.outputs.version }}.tar.gz .
+        run: git archive --format=tar.gz --output=scim_v2_v${{ steps.get_version.outputs.version }}.tar.gz HEAD
+
 
       - name: Upload tarball
         uses: actions/upload-release-asset@v1
@@ -37,7 +38,7 @@ jobs:
           asset_content_type: application/gzip
 
       - name: Create zip
-        run: zip -r scim_v2_v${{ steps.get_version.outputs.version }}.zip . -x ./.github/\*
+        run: git archive --format=zip --output=scim_v2_v${{ steps.get_version.outputs.version }}.zip HEAD
 
       - name: Upload zip
         uses: actions/upload-release-asset@v1
