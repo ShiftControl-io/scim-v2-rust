@@ -1,5 +1,4 @@
 name: Run tests on scim_v2 crate
-
 on:
   push:
     branches:
@@ -7,26 +6,17 @@ on:
       - '!main'
   pull_request:
     branches: [ main ]
-
 env:
   CARGO_TERM_COLOR: always
-
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-    - uses: actions/checkout@v4
-    - name: Setup Rust
-      uses: actions-rs/toolchain@v1
+    - uses: hecrj/setup-rust-action@v2
       with:
-        toolchain: stable
-        override: true
-    - name: Check
-      uses: actions-rs/cargo@v1
-      with:
-        command: check
-    - name: Test
-      uses: actions-rs/cargo@v1
-      with:
-        command: test
+        rust-version: stable
+    - uses: actions/checkout@master
+    - name: Cargo Check
+      run: cargo check
+    - name: Cargo Test
+      run: cargo test
