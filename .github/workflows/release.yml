@@ -19,11 +19,8 @@ jobs:
       - name: Create Release and Upload Assets
         id: create_release
         uses: softprops/action-gh-release@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: v${{ env.crate_version }}
-          release_name: v${{ env.crate_version }}
           draft: false
           prerelease: false
           files: |
