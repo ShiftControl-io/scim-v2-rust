@@ -1,6 +1,7 @@
 //Schema for group
 use serde::{Deserialize, Serialize};
 use crate::models::scim_schema::Meta;
+use crate::utils::error::SCIMError;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Group {
@@ -10,6 +11,16 @@ pub struct Group {
     pub display_name: String,
     pub members: Option<Vec<Member>>,
     pub meta: Option<Meta>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Member {
+    pub value: Option<String>,
+    #[serde(rename = "$ref")]
+    pub ref_: Option<String>,
+    #[serde(rename = "type")]
+    pub type_: Option<String>,
+    pub display: Option<String>,
 }
 impl Default for Group {
     fn default() -> Self {
@@ -22,16 +33,59 @@ impl Default for Group {
         }
     }
 }
-#[derive(Serialize, Deserialize, Debug)]
-pub struct Member {
-    pub value: Option<String>,
-    #[serde(rename = "$ref")]
-    pub ref_: Option<String>,
-    #[serde(rename = "type")]
-    pub type_: Option<String>,
-    pub display: Option<String>,
+impl TryFrom<&str> for Group {
+    type Error = SCIMError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        serde_json::from_str(value).map_err(SCIMError::DeserializationError)
+    }
 }
 
+impl Group {
+    /// Validates a group.
+    ///
+    /// This function checks if the group has `schemas`, `id`, and `display_name`. If any of these fields are missing, it returns an error.
+    ///
+    /// # Arguments
+    ///
+    /// * `group` - A reference to a Group instance.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - If the group is valid.
+    /// * `Err(SCIMError::MissingRequiredField)` - If a required field is missing.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use scim_v2::models::group::Group;
+    ///
+    /// let group = Group {
+    ///     schemas: vec!["urn:ietf:params:scim:schemas:core:2.0:Group".to_string()],
+    ///     id: "e9e30dba-f08f-4109-8486-d5c6a331660a".to_string(),
+    ///     display_name: "Tour Guides".to_string(),
+    ///     // other fields...
+    ///     ..Default::default()
+    /// };
+    ///
+    /// match group.verify() {
+    ///     Ok(_) => println!("Group is valid."),
+    ///     Err(e) => println!("Group is invalid: {}", e),
+    /// }
+    /// ```
+    pub fn verify(&self) -> Result<(), SCIMError> {
+        if self.schemas.is_empty() {
+            return Err(SCIMError::MissingRequiredField("schemas".to_string()));
+        }
+        if self.id.is_empty() {
+            return Err(SCIMError::MissingRequiredField("id".to_string()));
+        }
+        if self.display_name.is_empty() {
+            return Err(SCIMError::MissingRequiredField("display_name".to_string()));
+        }
+        Ok(())
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
