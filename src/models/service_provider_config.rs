@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+
 use crate::utils::error::SCIMError;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -55,11 +56,11 @@ impl Default for ServiceProviderConfig {
             bulk: Bulk {
                 supported: false,
                 max_operations: 0,
-                max_payload_size: 0
+                max_payload_size: 0,
             },
             filter: Filter {
                 supported: false,
-                max_results: 0
+                max_results: 0,
             },
             change_password: Supported { supported: false },
             sort: Supported { supported: false },
@@ -69,6 +70,57 @@ impl Default for ServiceProviderConfig {
     }
 }
 
+/// Converts a JSON string into a `ServiceProviderConfig` struct.
+///
+/// This method attempts to parse a JSON string to construct a `ServiceProviderConfig` object. It's useful for scenarios where
+/// you receive a JSON representation of a user from an external source (e.g., a web request) and you need to
+/// work with this data in a strongly-typed manner within your application.
+///
+/// # Errors
+///
+/// Returns `SCIMError::DeserializationError` if the provided JSON string cannot be parsed into a `ServiceProviderConfig` object.
+///
+/// # Examples
+///
+/// ```rust
+/// use scim_v2::models::service_provider_config::ServiceProviderConfig;
+///
+/// let config_json = r#"{
+///             "schemas": ["urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"],
+///             "documentationUri": "http:///example.com/help/scim.html",
+///             "patch": { "supported": true },
+///             "bulk": {
+///                 "supported": true,
+///                 "maxOperations": 1000,
+///                 "maxPayloadSize": 1048576
+///             },
+///             "filter": {
+///                 "supported": true,
+///                 "maxResults": 200
+///             },
+///             "changePassword": { "supported": true },
+///             "sort": { "supported": true },
+///             "etag": { "supported": true },
+///             "authenticationSchemes": [
+///                 {
+///                     "name": "OAuth Bearer Token",
+///                     "description": "Authentication scheme using the OAuth Bearer Token Standard",
+///                     "specUri": "http:///www.rfc-editor.org/info/rfc6750",
+///                     "documentationUri": "http:///example.com/help/oauth.html"
+///                 },
+///                 {
+///                     "name": "HTTP Basic",
+///                     "description": "Authentication scheme using the HTTP Basic Standard",
+///                     "specUri": "http:///www.rfc-editor.org/info/rfc2617",
+///                     "documentationUri": "http:///example.com/help/httpBasic.html"
+///                 }
+///             ]
+///         }"#;
+/// match ServiceProviderConfig::try_from(config_json) {
+///     Ok(config) => println!("Successfully converted JSON to ServiceProviderConfig: {:?}", config),
+///     Err(e) => println!("Error converting from JSON to ServiceProviderConfig: {}", e),
+/// }
+/// ```
 impl TryFrom<&str> for ServiceProviderConfig {
     type Error = SCIMError;
 
@@ -128,11 +180,97 @@ impl ServiceProviderConfig {
         }
         Ok(())
     }
+
+    /// Serializes the `ServiceProviderConfig` instance to a JSON string, using the custom SCIMError for error handling.
+    ///
+    /// # Returns
+    ///
+    /// This method returns a `Result<String, SCIMError>`, where `Ok(String)` contains
+    /// the JSON string representation of the `ServiceProviderConfig` instance, and `Err(SCIMError)` contains
+    /// the custom error encountered during serialization.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use scim_v2::models::service_provider_config::ServiceProviderConfig;
+    ///
+    /// let config = ServiceProviderConfig {
+    ///     // Initialize config fields here...
+    ///     // ...
+    ///     ..Default::default()
+    /// };
+    ///
+    /// match config.serialize() {
+    ///     Ok(json) => println!("Serialized ServiceProviderConfig: {}", json),
+    ///     Err(e) => println!("Serialization error: {}", e),
+    /// }
+    /// ```
+    pub fn serialize(&self) -> Result<String, SCIMError> {
+        serde_json::to_string(&self).map_err(SCIMError::SerializationError)
+    }
+
+    /// Deserializes a JSON string into a `ServiceProviderConfig` instance, using the custom SCIMError for error handling.
+    ///
+    /// # Parameters
+    ///
+    /// * `json` - A string slice that holds the JSON representation of a `ServiceProviderConfig`.
+    ///
+    /// # Returns
+    ///
+    /// This method returns a `Result<ServiceProviderConfig, SCIMError>`, where `Ok(ServiceProviderConfig)` is the deserialized `ServiceProviderConfig` instance,
+    /// and `Err(SCIMError)` is the custom error encountered during deserialization.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use scim_v2::models::service_provider_config::ServiceProviderConfig;
+    ///
+    /// let config_json = r#"{
+    ///             "schemas": ["urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"],
+    ///             "documentationUri": "http:///example.com/help/scim.html",
+    ///             "patch": { "supported": true },
+    ///             "bulk": {
+    ///                 "supported": true,
+    ///                 "maxOperations": 1000,
+    ///                 "maxPayloadSize": 1048576
+    ///             },
+    ///             "filter": {
+    ///                 "supported": true,
+    ///                 "maxResults": 200
+    ///             },
+    ///             "changePassword": { "supported": true },
+    ///             "sort": { "supported": true },
+    ///             "etag": { "supported": true },
+    ///             "authenticationSchemes": [
+    ///                 {
+    ///                     "name": "OAuth Bearer Token",
+    ///                     "description": "Authentication scheme using the OAuth Bearer Token Standard",
+    ///                     "specUri": "http:///www.rfc-editor.org/info/rfc6750",
+    ///                     "documentationUri": "http:///example.com/help/oauth.html"
+    ///                 },
+    ///                 {
+    ///                     "name": "HTTP Basic",
+    ///                     "description": "Authentication scheme using the HTTP Basic Standard",
+    ///                     "specUri": "http:///www.rfc-editor.org/info/rfc2617",
+    ///                     "documentationUri": "http:///example.com/help/httpBasic.html"
+    ///                 }
+    ///             ]
+    ///         }"#;
+    /// match ServiceProviderConfig::deserialize(config_json) {
+    ///     Ok(user) => println!("Deserialized User: {:?}", user),
+    ///     Err(e) => println!("Deserialization error: {}", e),
+    /// }
+    /// ```
+    pub fn deserialize(json: &str) -> Result<Self, SCIMError> {
+        serde_json::from_str(json).map_err(SCIMError::DeserializationError)
+    }
 }
+
 #[cfg(test)]
 mod tests {
-    use super::*;
     use pretty_assertions::assert_eq;
+
+    use super::*;
 
     #[test]
     fn service_provider_config_deserialization() {

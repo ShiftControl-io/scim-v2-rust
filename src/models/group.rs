@@ -1,5 +1,6 @@
 //Schema for group
 use serde::{Deserialize, Serialize};
+
 use crate::models::scim_schema::Meta;
 use crate::utils::error::SCIMError;
 
@@ -22,6 +23,7 @@ pub struct Member {
     pub type_: Option<String>,
     pub display: Option<String>,
 }
+
 impl Default for Group {
     fn default() -> Self {
         Group {
@@ -34,15 +36,15 @@ impl Default for Group {
     }
 }
 
-/// Converts a JSON string into a `User` struct.
+/// Converts a JSON string into a `Group` struct.
 ///
-/// This method attempts to parse a JSON string to construct a `User` object. It's useful for scenarios where
+/// This method attempts to parse a JSON string to construct a `Group` object. It's useful for scenarios where
 /// you receive a JSON representation of a user from an external source (e.g., a web request) and you need to
 /// work with this data in a strongly-typed manner within your application.
 ///
 /// # Errors
 ///
-/// Returns `SCIMError::DeserializationError` if the provided JSON string cannot be parsed into a `User` object.
+/// Returns `SCIMError::DeserializationError` if the provided JSON string cannot be parsed into a `Group` object.
 ///
 /// # Examples
 ///
@@ -146,7 +148,7 @@ impl Group {
     ///
     /// # Returns
     ///
-    /// This method returns a `Result<User, SCIMError>`, where `Ok(Group)` is the deserialized `Group` instance,
+    /// This method returns a `Result<Group, SCIMError>`, where `Ok(Group)` is the deserialized `Group` instance,
     /// and `Err(SCIMError)` is the custom error encountered during deserialization.
     ///
     /// # Examples
@@ -164,11 +166,12 @@ impl Group {
         serde_json::from_str(json).map_err(SCIMError::DeserializationError)
     }
 }
+
 #[cfg(test)]
 mod tests {
-    use super::*;
     use pretty_assertions::assert_eq;
 
+    use super::*;
 
     #[test]
     fn group_deserialization_succeeds_for_valid_full_json() {

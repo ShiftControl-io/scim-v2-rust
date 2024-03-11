@@ -1,6 +1,8 @@
 use std::convert::TryFrom;
 use std::convert::TryInto;
+
 use serde::{Deserialize, Serialize};
+
 use crate::models::enterprise_user::EnterpriseUser;
 use crate::models::scim_schema::Meta;
 use crate::utils::error::SCIMError;
@@ -144,6 +146,7 @@ pub struct X509Certificate {
     pub type_: Option<String>,
     pub primary: Option<bool>,
 }
+
 impl Default for User {
     fn default() -> Self {
         User {
@@ -175,6 +178,7 @@ impl Default for User {
         }
     }
 }
+
 /// Converts a JSON string into a `User` struct.
 ///
 /// This method attempts to parse a JSON string to construct a `User` object. It's useful for scenarios where
@@ -307,12 +311,13 @@ impl User {
         serde_json::from_str(json).map_err(SCIMError::DeserializationError)
     }
 }
+
 #[cfg(test)]
 mod tests {
-    use super::*;
     // Import everything from the outer module
     use pretty_assertions::assert_eq;
 
+    use super::*;
 
     #[test]
     fn user_deserialization_with_minimum_fields() {

@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+
 use crate::utils::error::SCIMError;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -12,6 +13,7 @@ pub struct EnterpriseUser {
     pub department: Option<String>,
     pub manager: Option<Manager>,
 }
+
 impl Default for EnterpriseUser {
     fn default() -> Self {
         EnterpriseUser {
@@ -24,6 +26,7 @@ impl Default for EnterpriseUser {
         }
     }
 }
+
 /// Converts a JSON string into a `EnterpriseUser` struct.
 ///
 /// This method attempts to parse a JSON string to construct a `EnterpriseUser` object. It's useful for scenarios where
@@ -145,7 +148,7 @@ impl EnterpriseUser {
     ///
     /// # Returns
     ///
-    /// This method returns a `Result<User, SCIMError>`, where `Ok(EnterpriseUser)` is the deserialized `EnterpriseUser` instance,
+    /// This method returns a `Result<EnterpriseUser, SCIMError>`, where `Ok(EnterpriseUser)` is the deserialized `EnterpriseUser` instance,
     /// and `Err(SCIMError)` is the custom error encountered during deserialization.
     ///
     /// # Examples
@@ -168,6 +171,7 @@ impl EnterpriseUser {
         serde_json::from_str(json).map_err(SCIMError::DeserializationError)
     }
 }
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Manager {
     pub value: Option<String>,

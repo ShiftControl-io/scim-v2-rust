@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
-use crate::utils::error::SCIMError;
 
+use crate::utils::error::SCIMError;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ResourceType {
@@ -85,10 +85,12 @@ impl ResourceType {
         Ok(())
     }
 }
+
 #[cfg(test)]
 mod tests {
-    use super::*;
     use pretty_assertions::assert_eq;
+
+    use super::*;
 
     #[test]
     fn resource_type_deserialization_user() {
