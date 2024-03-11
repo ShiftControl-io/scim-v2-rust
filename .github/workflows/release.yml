@@ -2,7 +2,7 @@ name: Release scim_v2 crate
 on:
   push:
     branches:
-      - '**'
+      - main
 permissions:
   contents: write
 jobs:
