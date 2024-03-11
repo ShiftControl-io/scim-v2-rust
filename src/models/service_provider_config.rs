@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use crate::models::user::User;
 use crate::utils::error::SCIMError;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -96,19 +95,19 @@ impl ServiceProviderConfig {
     ///
     /// ```
     /// use scim_v2::models::service_provider_config::ServiceProviderConfig;
-\    ///
+    ///
     /// let config = ServiceProviderConfig {
     ///     // Initialize config fields here...
     ///     // ...
     ///     ..Default::default()
     /// };
     ///
-    /// match config.verify() {
+    /// match config.validate() {
     ///     Ok(_) => println!("ServiceProviderConfig is valid."),
     ///     Err(e) => println!("ServiceProviderConfig is invalid: {}", e),
     /// }
     /// ```
-    pub fn verify(&self) -> Result<(), SCIMError> {
+    pub fn validate(&self) -> Result<(), SCIMError> {
         if self.patch.supported == false {
             return Err(SCIMError::MissingRequiredField("patch".to_string()));
         }

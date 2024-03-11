@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use crate::models::user::User;
 use crate::utils::error::SCIMError;
 
 
@@ -68,12 +67,12 @@ impl ResourceType {
     ///     ..Default::default()
     /// };
     ///
-    /// match resource_type.verify() {
+    /// match resource_type.validate() {
     ///     Ok(_) => println!("ResourceType is valid."),
     ///     Err(e) => println!("ResourceType is invalid: {}", e),
     /// }
     /// ```
-    pub fn verify(&self) -> Result<(), SCIMError> {
+    pub fn validate(&self) -> Result<(), SCIMError> {
         if self.name.is_empty() {
             return Err(SCIMError::MissingRequiredField("name".to_string()));
         }
