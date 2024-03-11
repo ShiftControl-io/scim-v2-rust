@@ -151,57 +151,7 @@ pub fn validate_resource_type(resource_type: &ResourceType) -> Result<(), SCIMEr
 }
 
 
-/// Validates a service provider config.
-///
-/// This function checks if the service provider config has `patch`, `bulk`, `filter`, `change_password`, `sort`, and `etag`. If any of these fields are missing, it returns an error.
-///
-/// # Arguments
-///
-/// * `config` - A reference to a ServiceProviderConfig instance.
-///
-/// # Returns
-///
-/// * `Ok(())` - If the service provider config is valid.
-/// * `Err(SCIMError::MissingRequiredField)` - If a required field is missing.
-///
-/// # Example
-///
-/// ```
-/// use scim_v2::models::service_provider_config::ServiceProviderConfig;
-/// use scim_v2::validate_service_provider_config;
-///
-/// let config = ServiceProviderConfig {
-///     // Initialize config fields here...
-///     // ...
-///     ..Default::default()
-/// };
-///
-/// match validate_service_provider_config(&config) {
-///     Ok(_) => println!("ServiceProviderConfig is valid."),
-///     Err(e) => println!("ServiceProviderConfig is invalid: {}", e),
-/// }
-/// ```
-pub fn validate_service_provider_config(config: &ServiceProviderConfig) -> Result<(), SCIMError> {
-    if config.patch.supported == false {
-        return Err(SCIMError::MissingRequiredField("patch".to_string()));
-    }
-    if config.bulk.supported == false {
-        return Err(SCIMError::MissingRequiredField("bulk".to_string()));
-    }
-    if config.filter.supported == false {
-        return Err(SCIMError::MissingRequiredField("filter".to_string()));
-    }
-    if config.change_password.supported == false {
-        return Err(SCIMError::MissingRequiredField("change_password".to_string()));
-    }
-    if config.sort.supported == false {
-        return Err(SCIMError::MissingRequiredField("sort".to_string()));
-    }
-    if config.etag.supported == false {
-        return Err(SCIMError::MissingRequiredField("etag".to_string()));
-    }
-    Ok(())
-}
+
 
 
 

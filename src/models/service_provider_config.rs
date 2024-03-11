@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+use crate::models::user::User;
+use crate::utils::error::SCIMError;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ServiceProviderConfig {
@@ -65,6 +67,67 @@ impl Default for ServiceProviderConfig {
             etag: Supported { supported: false },
             authentication_schemes: vec![],
         }
+    }
+}
+
+impl TryFrom<&str> for ServiceProviderConfig {
+    type Error = SCIMError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        serde_json::from_str(value).map_err(SCIMError::DeserializationError)
+    }
+}
+
+impl ServiceProviderConfig {
+    /// Validates a service provider config.
+    ///
+    /// This function checks if the service provider config has `patch`, `bulk`, `filter`, `change_password`, `sort`, and `etag`. If any of these fields are missing, it returns an error.
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - A reference to a ServiceProviderConfig instance.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - If the service provider config is valid.
+    /// * `Err(SCIMError::MissingRequiredField)` - If a required field is missing.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use scim_v2::models::service_provider_config::ServiceProviderConfig;
+\    ///
+    /// let config = ServiceProviderConfig {
+    ///     // Initialize config fields here...
+    ///     // ...
+    ///     ..Default::default()
+    /// };
+    ///
+    /// match config.verify() {
+    ///     Ok(_) => println!("ServiceProviderConfig is valid."),
+    ///     Err(e) => println!("ServiceProviderConfig is invalid: {}", e),
+    /// }
+    /// ```
+    pub fn verify(&self) -> Result<(), SCIMError> {
+        if self.patch.supported == false {
+            return Err(SCIMError::MissingRequiredField("patch".to_string()));
+        }
+        if self.bulk.supported == false {
+            return Err(SCIMError::MissingRequiredField("bulk".to_string()));
+        }
+        if self.filter.supported == false {
+            return Err(SCIMError::MissingRequiredField("filter".to_string()));
+        }
+        if self.change_password.supported == false {
+            return Err(SCIMError::MissingRequiredField("change_password".to_string()));
+        }
+        if self.sort.supported == false {
+            return Err(SCIMError::MissingRequiredField("sort".to_string()));
+        }
+        if self.etag.supported == false {
+            return Err(SCIMError::MissingRequiredField("etag".to_string()));
+        }
+        Ok(())
     }
 }
 #[cfg(test)]
