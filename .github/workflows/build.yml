@@ -16,8 +16,6 @@ jobs:
       with:
         rust-version: stable
     - uses: actions/checkout@master
-    - name: Setup Rust
-      uses: actions/setup-rust-action@v1
     - name: Cargo Check
       run: cargo check
     - name: Cargo Test
