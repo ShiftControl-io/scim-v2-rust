@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+use crate::models::user::User;
+use crate::utils::error::SCIMError;
 
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -28,6 +30,60 @@ impl Default for ResourceType {
             schema: "".to_string(),
             schema_extensions: None,
         }
+    }
+}
+
+impl TryFrom<&str> for ResourceType {
+    type Error = SCIMError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        serde_json::from_str(value).map_err(SCIMError::DeserializationError)
+    }
+}
+
+impl ResourceType {
+    /// Validates a resource type.
+    ///
+    /// This function checks if the resource type has `name`, `endpoint`, and `schema`. If any of these fields are missing, it returns an error.
+    ///
+    /// # Arguments
+    ///
+    /// * `resource_type` - A reference to a ResourceType instance.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - If the resource type is valid.
+    /// * `Err(SCIMError::MissingRequiredField)` - If a required field is missing.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use scim_v2::models::resource_types::ResourceType;
+    ///
+    /// let resource_type = ResourceType {
+    ///     name: "User".to_string(),
+    ///     endpoint: "/Users".to_string(),
+    ///     schema: "urn:ietf:params:scim:schemas:core:2.0:User".to_string(),
+    ///     // other fields...
+    ///     ..Default::default()
+    /// };
+    ///
+    /// match resource_type.verify() {
+    ///     Ok(_) => println!("ResourceType is valid."),
+    ///     Err(e) => println!("ResourceType is invalid: {}", e),
+    /// }
+    /// ```
+    pub fn verify(&self) -> Result<(), SCIMError> {
+        if self.name.is_empty() {
+            return Err(SCIMError::MissingRequiredField("name".to_string()));
+        }
+        if self.endpoint.is_empty() {
+            return Err(SCIMError::MissingRequiredField("endpoint".to_string()));
+        }
+        if self.schema.is_empty() {
+            return Err(SCIMError::MissingRequiredField("schema".to_string()));
+        }
+        Ok(())
     }
 }
 #[cfg(test)]

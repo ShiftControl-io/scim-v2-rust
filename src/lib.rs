@@ -102,59 +102,6 @@ pub mod utils {
 
 
 
-
-
-
-/// Validates a resource type.
-///
-/// This function checks if the resource type has `name`, `endpoint`, and `schema`. If any of these fields are missing, it returns an error.
-///
-/// # Arguments
-///
-/// * `resource_type` - A reference to a ResourceType instance.
-///
-/// # Returns
-///
-/// * `Ok(())` - If the resource type is valid.
-/// * `Err(SCIMError::MissingRequiredField)` - If a required field is missing.
-///
-/// # Example
-///
-/// ```
-/// use scim_v2::models::resource_types::ResourceType;
-/// use scim_v2::validate_resource_type;
-///
-/// let resource_type = ResourceType {
-///     name: "User".to_string(),
-///     endpoint: "/Users".to_string(),
-///     schema: "urn:ietf:params:scim:schemas:core:2.0:User".to_string(),
-///     // other fields...
-///     ..Default::default()
-/// };
-///
-/// match validate_resource_type(&resource_type) {
-///     Ok(_) => println!("ResourceType is valid."),
-///     Err(e) => println!("ResourceType is invalid: {}", e),
-/// }
-/// ```
-pub fn validate_resource_type(resource_type: &ResourceType) -> Result<(), SCIMError> {
-    if resource_type.name.is_empty() {
-        return Err(SCIMError::MissingRequiredField("name".to_string()));
-    }
-    if resource_type.endpoint.is_empty() {
-        return Err(SCIMError::MissingRequiredField("endpoint".to_string()));
-    }
-    if resource_type.schema.is_empty() {
-        return Err(SCIMError::MissingRequiredField("schema".to_string()));
-    }
-    Ok(())
-}
-
-
-
-
-
-
 /// Validates an enterprise user.
 ///
 /// This function checks if the enterprise user has `employee_number`, `cost_center`, `organization`, `division`, `department`, and `manager`. If any of these fields are missing, it returns an error.
