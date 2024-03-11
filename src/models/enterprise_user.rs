@@ -24,7 +24,32 @@ impl Default for EnterpriseUser {
         }
     }
 }
-
+/// Converts a JSON string into a `EnterpriseUser` struct.
+///
+/// This method attempts to parse a JSON string to construct a `EnterpriseUser` object. It's useful for scenarios where
+/// you receive a JSON representation of a user from an external source (e.g., a web request) and you need to
+/// work with this data in a strongly-typed manner within your application.
+///
+/// # Errors
+///
+/// Returns `SCIMError::DeserializationError` if the provided JSON string cannot be parsed into a `EnterpriseUser` object.
+///
+/// # Examples
+///
+/// ```rust
+/// use scim_v2::models::enterprise_user::EnterpriseUser;
+///
+/// let ent_user_json = r#"{
+///             "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+///             "id": "2819c223-7f76-453a-919d-413861904646",
+///             "userName": "bjensen@example.com"
+///         }"#;
+///
+/// match EnterpriseUser::try_from(ent_user_json) {
+///     Ok(user) => println!("Successfully converted JSON to EnterpriseUser: {:?}", user),
+///     Err(e) => println!("Error converting from JSON to EnterpriseUser: {}", e),
+/// }
+/// ```
 impl TryFrom<&str> for EnterpriseUser {
     type Error = SCIMError;
 
@@ -83,6 +108,64 @@ impl EnterpriseUser {
             return Err(SCIMError::MissingRequiredField("manager".to_string()));
         }
         Ok(())
+    }
+    /// Serializes the `EnterpriseUser` instance to a JSON string, using the custom SCIMError for error handling.
+    ///
+    /// # Returns
+    ///
+    /// This method returns a `Result<String, SCIMError>`, where `Ok(String)` contains
+    /// the JSON string representation of the `EnterpriseUser` instance, and `Err(SCIMError)` contains
+    /// the custom error encountered during serialization.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use scim_v2::models::enterprise_user::EnterpriseUser;
+    ///
+    /// let ent_user = EnterpriseUser {
+    ///     // Initialize enterprise_user fields here...
+    ///     // ...
+    ///     ..Default::default()
+    /// };
+    ///
+    /// match ent_user.serialize() {
+    ///     Ok(json) => println!("Serialized EnterpriseUser: {}", json),
+    ///     Err(e) => println!("Serialization error: {}", e),
+    /// }
+    /// ```
+    pub fn serialize(&self) -> Result<String, SCIMError> {
+        serde_json::to_string(&self).map_err(SCIMError::SerializationError)
+    }
+
+    /// Deserializes a JSON string into a `EnterpriseUser` instance, using the custom SCIMError for error handling.
+    ///
+    /// # Parameters
+    ///
+    /// * `json` - A string slice that holds the JSON representation of a `EnterpriseUser`.
+    ///
+    /// # Returns
+    ///
+    /// This method returns a `Result<User, SCIMError>`, where `Ok(EnterpriseUser)` is the deserialized `EnterpriseUser` instance,
+    /// and `Err(SCIMError)` is the custom error encountered during deserialization.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use scim_v2::models::enterprise_user::EnterpriseUser;
+    ///
+    ///
+    /// let ent_user_json = r#"{
+    ///             "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+    ///             "id": "2819c223-7f76-453a-919d-413861904646",
+    ///             "userName": "bjensen@example.com"
+    ///         }"#;
+    /// match EnterpriseUser::deserialize(ent_user_json) {
+    ///     Ok(ent_user) => println!("Deserialized User: {:?}", ent_user),
+    ///     Err(e) => println!("Deserialization error: {}", e),
+    /// }
+    /// ```
+    pub fn deserialize(json: &str) -> Result<Self, SCIMError> {
+        serde_json::from_str(json).map_err(SCIMError::DeserializationError)
     }
 }
 #[derive(Serialize, Deserialize, Debug)]
