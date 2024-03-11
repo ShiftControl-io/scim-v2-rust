@@ -17,7 +17,7 @@ To use \`scim_v2\` in your project, add the following to your \`Cargo.toml\`:
 
 ```toml
 [dependencies]
-scim_v2 = "0.1.0"
+scim_v2 = "0.1.2"
 ```
 
 Then run \`cargo build\` to download and compile the \`scim_v2\` crate and all its dependencies.
@@ -30,17 +30,16 @@ Here are some examples of how you can use this crate:
 
 ```rust
 use scim_v2::models::user::User;
-use scim_v2::validate_user;
 
 let user = User {
-    // Initialize user fields here...
-    // ...
-    ..Default::default()
+user_name: "jdoe@example.com".to_string(),
+// other fields...
+..Default::default()
 };
 
-match validate_user(&user) {
-    Ok(_) => println!("User is valid."),
-    Err(e) => println!("User is invalid: {}", e),
+match user.validate() {
+Ok(_) => println!("User is valid."),
+Err(e) => println!("User is invalid: {}", e),
 }
 ```
 
@@ -48,17 +47,17 @@ match validate_user(&user) {
 
 ```rust
 use scim_v2::models::user::User;
-use scim_v2::user_to_json;
 
 let user = User {
-    // Initialize user fields here...
-    // ...
-    ..Default::default()
+schemas: vec!["urn:ietf:params:scim:schemas:core:2.0:User".to_string()],
+user_name: "jdoe@example.com".to_string(),
+// Initialize other fields as necessary...
+..Default::default()
 };
 
-match user_to_json(&user) {
-    Ok(json) => println!("User in JSON format: {}", json),
-    Err(e) => println!("Error serializing user to JSON: {}", e),
+match user.serialize() {
+Ok(json) => println!("Serialized User: {}", json),
+Err(e) => println!("Serialization error: {}", e),
 }
 ```
 
@@ -66,20 +65,26 @@ match user_to_json(&user) {
 
 ```rust
 use scim_v2::models::user::User;
-use scim_v2::json_to_user;
 
-let json = r#"{
-    "userName": "jdoe",
-    "name": {
-        "formatted": "Mr. John Doe"
-    }
-}"#;
-
-match json_to_user(json) {
-    Ok(user) => println!("User: {:?}", user),
-    Err(e) => println!("Error deserializing JSON to User: {}", e),
+let user_json = r#"{"schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"], "userName": "jdoe@example.com"}"#;
+match User::try_from(user_json) {
+Ok(user) => println!("Successfully converted JSON to User: {:?}", user),
+Err(e) => println!("Error converting from JSON to User: {}", e),
 }
 ```
+
+You can also use a built-in deserialize function if you’d prefer.
+
+```rust
+use scim_v2::models::user::User;
+
+let user_json = r#"{"schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"], "userName": "jdoe@example.com"}"#;
+match User::deserialize(user_json) {
+Ok(user) => println!("Deserialized User: {:?}", user),
+Err(e) => println!("Deserialization error: {}", e),
+}
+```
+
 
 For more examples and usage details, refer to the documentation of each function and struct.
 
