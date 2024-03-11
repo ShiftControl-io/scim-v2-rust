@@ -23,6 +23,17 @@ jobs:
         id: get_version
         run: echo "::set-output name=version::$(grep "^version" Cargo.toml | head -1 | awk -F' = ' '{print $2}' | sed 's/\"//g')"
 
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ steps.get_version.outputs.version }}
+          release_name: v${{ steps.get_version.outputs.version }}
+          draft: false
+          prerelease: false
+
       - name: Create tarball
         run: git archive --format=tar.gz --output=scim_v2_v${{ steps.get_version.outputs.version }}.tar.gz HEAD
 
@@ -49,14 +60,3 @@ jobs:
           asset_path: ./scim_v2_v${{ steps.get_version.outputs.version }}.zip
           asset_name: scim_v2_v${{ steps.get_version.outputs.version }}.zip
           asset_content_type: application/zip
-
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: v${{ steps.get_version.outputs.version }}
-          release_name: v${{ steps.get_version.outputs.version }}
-          draft: false
-          prerelease: false
