@@ -16,17 +16,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout
+    - uses: actions/checkout@v4
     - name: Setup Rust
-      uses: actions-rs/toolchain
+      uses: actions-rs/toolchain@v1
       with:
         toolchain: stable
         override: true
     - name: Check
-      uses: actions-rs/cargo
+      uses: actions-rs/cargo@v1
       with:
         command: check
     - name: Test
-      uses: actions-rs/cargo
+      uses: actions-rs/cargo@v1
       with:
         command: test
