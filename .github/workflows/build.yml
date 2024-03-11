@@ -18,15 +18,10 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Setup Rust
-      uses: actions-rs/toolchain@v1
+      uses: actions/setup-rust-action@v1
       with:
-        toolchain: stable
-        override: true
+        rust-version: stable
     - name: Check
-      uses: actions-rs/cargo@v1
-      with:
-        command: check
+      uses: cargo check
     - name: Test
-      uses: actions-rs/cargo@v1
-      with:
-        command: test
+      uses: cargo test

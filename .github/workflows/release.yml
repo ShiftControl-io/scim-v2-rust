@@ -3,7 +3,7 @@ name: Release scim_v2 crate
 on:
   push:
     branches:
-      - main
+      - '**'
 
 jobs:
   release:
@@ -13,15 +13,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
-
       - name: Get version
         id: get_version
-        run: echo "::set-output name=version::$(grep "^version" Cargo.toml | head -1 | awk -F' = ' '{print $2}' | sed 's/\"//g')"
+        run: echo "name=version::$(grep "^version" Cargo.toml | head -1 | awk -F' = ' '{print $2}' | sed 's/\"//g')" >> $GITHUB_OUTPUT
 
       - name: Create Release
         id: create_release
