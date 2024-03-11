@@ -1,6 +1,9 @@
+use std::convert::TryFrom;
 use serde::{Deserialize, Serialize};
+use crate::models;
 use crate::models::enterprise_user::EnterpriseUser;
 use crate::models::scim_schema::Meta;
+use crate::utils::error::SCIMError;
 #[derive(Serialize, Deserialize, Debug)]
 pub struct User {
     // urn:ietf:params:scim:schemas:core:2.0:User
@@ -172,8 +175,62 @@ impl Default for User {
     }
 }
 
+impl TryFrom<&str> for User {
+    type Error = SCIMError;
 
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        serde_json::from_str(value).map_err(SCIMError::DeserializationError)
+    }
+}
 
+impl User {
+    /// Validates a user.
+    ///
+    /// This function checks if the user has a `name` and `user_name`. If either is missing, it returns an error.
+    /// It also checks if the `emails` field is present and if each email in the vector is in a valid email format.
+    ///
+    /// # Arguments
+    ///
+    /// * `user` - A reference to a User instance.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - If the user is valid.
+    /// * `Err(SCIMError::MissingRequiredField)` - If a required field is missing.
+    /// * `Err(SCIMError::InvalidFieldValue)` - If a field value is invalid.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use scim_v2::models::user::User;
+    ///
+    /// let user = User {
+    ///     user_name: "jdoe".to_string(),
+    ///     // other fields...
+    ///     ..Default::default()
+    /// };
+    ///
+    /// match user.verify() {
+    ///     Ok(_) => println!("User is valid."),
+    ///     Err(e) => println!("User is invalid: {}", e),
+    /// }
+    /// ```
+    ///
+    /// # Note
+    ///
+    /// The actual validation requirements will depend on the specifics of your application and the SCIM (System for Cross-domain Identity Management) protocol you are implementing.
+
+    pub fn verify(&self) -> Result<(), SCIMError> {
+        // Pretty much every field is optional in the schema except for 2. We'll check for those here.
+        if self.schemas.is_empty() {
+            return Err(SCIMError::MissingRequiredField("schemas".to_string()));
+        }
+        if self.user_name.is_empty() {
+            return Err(SCIMError::MissingRequiredField("user_name".to_string()));
+        }
+        Ok(())
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;

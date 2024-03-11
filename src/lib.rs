@@ -73,8 +73,8 @@
 
 /// External crate imports
 extern crate serde;
-extern crate serde_json; // Importing the serde_json crate for JSON serialization and deserialization
-use utils::error::SCIMError; // Importing the SCIMError enum from the utils::error module
+extern crate serde_json;
+use utils::error::SCIMError;
 use crate::models::user::User;
 use crate::models::group::Group;
 use crate::models::resource_types::ResourceType;
@@ -100,131 +100,7 @@ pub mod utils {
     pub mod error;
 }
 
-/// Validates a user.
-///
-/// This function checks if the user has a `name` and `user_name`. If either is missing, it returns an error.
-/// It also checks if the `emails` field is present and if each email in the vector is in a valid email format.
-///
-/// # Arguments
-///
-/// * `user` - A reference to a User instance.
-///
-/// # Returns
-///
-/// * `Ok(())` - If the user is valid.
-/// * `Err(SCIMError::MissingRequiredField)` - If a required field is missing.
-/// * `Err(SCIMError::InvalidFieldValue)` - If a field value is invalid.
-///
-/// # Example
-///
-/// ```
-/// use scim_v2::models::user::User;
-/// use scim_v2::validate_user;
-///
-/// let user = User {
-///     user_name: "jdoe".to_string(),
-///     // other fields...
-///     ..Default::default()
-/// };
-///
-/// match validate_user(&user) {
-///     Ok(_) => println!("User is valid."),
-///     Err(e) => println!("User is invalid: {}", e),
-/// }
-/// ```
-///
-/// # Note
-///
-/// The actual validation requirements will depend on the specifics of your application and the SCIM (System for Cross-domain Identity Management) protocol you are implementing.
 
-pub fn validate_user(user: &models::user::User) -> Result<(), SCIMError> {
-    // Pretty much every field is optional in the schema except for 2. We'll check for those here.
-    if user.schemas.is_empty() {
-        return Err(SCIMError::MissingRequiredField("schemas".to_string()));
-    }
-    if user.user_name.is_empty() {
-        return Err(SCIMError::MissingRequiredField("user_name".to_string()));
-    }
-    Ok(())
-}
-
-/// Converts a User instance into a JSON string.
-///
-/// This function takes a reference to a User instance and uses the `serde_json::to_string` function
-/// to serialize the User instance into a JSON string. If the serialization is successful, it returns
-/// the JSON string. If the serialization fails, it returns a `serde_json::Error`.
-///
-/// # Arguments
-///
-/// * `user` - A reference to a User instance.
-///
-/// # Returns
-///
-/// * `Ok(String)` - If the serialization is successful, it returns the JSON string.
-/// * `Err(serde_json::Error)` - If the serialization fails, it returns a `serde_json::Error`.
-///
-/// # Example
-///
-/// ```
-/// use scim_v2::models::user::User;
-/// use scim_v2::user_to_json;
-///
-/// let user = User {
-///     // Initialize user fields here...
-///     // ...
-///     ..Default::default()
-/// };
-///
-/// match user_to_json(&user) {
-///     Ok(json) => println!("User in JSON format: {}", json),
-///     Err(e) => println!("Error serializing user to JSON: {}", e),
-/// }
-/// ```
-///
-/// This will print the `User` instance in JSON format if the serialization is successful, or it will print an error message if the serialization fails.
-
-pub fn user_to_json(user: &models::user::User) -> Result<String, SCIMError> {
-    serde_json::to_string(user).map_err(SCIMError::SerializationError)
-}
-
-/// Parses a JSON string into a User instance.
-///
-/// This function takes a JSON string and uses the `serde_json::from_str` function
-/// to deserialize the JSON string into a User instance. If the deserialization is successful, it returns
-/// the User instance. If the deserialization fails, it returns a `SCIMError`.
-///
-/// # Arguments
-///
-/// * `json` - A JSON string.
-///
-/// # Returns
-///
-/// * `Ok(User)` - If the deserialization is successful, it returns the User instance.
-/// * `Err(SCIMError)` - If the deserialization fails, it returns a `SCIMError`.
-///
-/// # Example
-///
-/// ```
-/// use scim_v2::models::user::User;
-/// use scim_v2::json_to_user;
-///
-/// let json = r#"{
-///     "userName": "jdoe",
-///     "name": {
-///         "formatted": "Mr. John Doe"
-///     }
-/// }"#;
-///
-/// match json_to_user(json) {
-///     Ok(user) => println!("User: {:?}", user),
-///     Err(e) => println!("Error deserializing JSON to User: {}", e),
-/// }
-/// ```
-///
-/// This will print the `User` instance if the deserialization is successful, or it will print an error message if the deserialization fails.
-pub fn json_to_user(json: &str) -> Result<User, SCIMError> {
-    serde_json::from_str(json).map_err(SCIMError::DeserializationError)
-}
 
 /// Validates a group.
 ///
