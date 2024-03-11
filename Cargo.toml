@@ -1,0 +1,34 @@
+[package]
+name = "scim_v2"
+version = "0.1.0"
+edition = "2021"
+authors = ["Dan Gericke <dan@shiftcontrol.io>"]
+description = "A crate that provides utilities for working with the System for Cross-domain Identity Management (SCIM) version 2.0 protocol. (rfc7642, rfc7643, rfc7644)"
+documentation = "https://docs.rs/scim_v2"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ShiftControl-io/scim_v2"
+rust-version = "1.56"
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+serde = { version = "1.0.197", features = ["derive"] }
+serde_json = "1.0.114"
+log = "0.4.21"
+
+[dev-dependencies]
+automod = "1.0.14"
+indoc = "2.0.4"
+ref-cast = "1.0.22"
+rustversion = "1.0.14"
+pretty_assertions = "0.7.2"
+
+[lib]
+doc-scrape-examples = false
+
+[package.metadata.docs.rs]
+features = ["preserve_order", "raw_value", "unbounded_depth"]
+targets = ["x86_64-unknown-linux-gnu"]
+rustdoc-args = ["--cfg", "docsrs", "--generate-link-to-definition"]
+
+[package.metadata.playground]
+features = ["raw_value"]
