@@ -1,25 +1,24 @@
 name: Release scim_v2 crate
-
 on:
   push:
     branches:
       - '**'
-
 jobs:
   release:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
       - name: Get version
         id: get_version
         run: echo "crate_version=$(grep '^version = ' Cargo.toml | cut -d'"' -f2)" >> $GITHUB_ENV
-
-      - name: Create Release
+      - name: Create tarball
+        run: git archive --format=tar.gz --output=scim_v2_v${{ env.crate_version }}.tar.gz HEAD
+      - name: Create zip
+        run: git archive --format=zip --output=scim_v2_v${{ env.crate_version }}.zip HEAD
+      - name: Create Release and Upload Assets
         id: create_release
-        uses: actions/create-release@v1
+        uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -27,29 +26,6 @@ jobs:
           release_name: v${{ env.crate_version }}
           draft: false
           prerelease: false
-
-      - name: Create tarball
-        run: git archive --format=tar.gz --output=scim_v2_v${{ env.crate_version }}.tar.gz HEAD
-
-      - name: Upload tarball
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./scim_v2_v${{ env.crate_version }}.tar.gz
-          asset_name: scim_v2_v${{ env.crate_version }}.tar.gz
-          asset_content_type: application/gzip
-
-      - name: Create zip
-        run: git archive --format=zip --output=scim_v2_v${{ env.crate_version }}.zip HEAD
-
-      - name: Upload zip
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./scim_v2_v${{ env.crate_version }}.zip
-          asset_name: scim_v2_v${{ env.crate_version }}.zip
-          asset_content_type: application/zip
+          files: |
+            ./scim_v2_v${{ env.crate_version }}.tar.gz
+            ./scim_v2_v${{ env.crate_version }}.zip
