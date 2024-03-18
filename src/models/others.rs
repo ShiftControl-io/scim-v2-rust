@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::models::user::User;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct SearchRequest {
     pub schemas: Vec<String>,
     pub attributes: Option<Vec<String>>,
@@ -45,7 +45,7 @@ impl Default for ListQuery {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct ListResponse {
     pub items_per_page: i64,
     #[serde(rename = "totalResults")]

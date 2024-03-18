@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::utils::error::SCIMError;
+use crate::models::scim_schema::Meta;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ServiceProviderConfig {
@@ -15,6 +16,7 @@ pub struct ServiceProviderConfig {
     pub etag: Supported,
     #[serde(rename = "authenticationSchemes")]
     pub authentication_schemes: Vec<AuthenticationScheme>,
+    pub meta: Option<Meta>,
 }
 
 impl Default for ServiceProviderConfig {
@@ -35,6 +37,7 @@ impl Default for ServiceProviderConfig {
             sort: Supported { supported: false },
             etag: Supported { supported: false },
             authentication_schemes: vec![],
+            meta: None,
         }
     }
 }
