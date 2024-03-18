@@ -83,9 +83,9 @@ extern crate serde;
 extern crate serde_json;
 
 // Include the schema files into the binary.
-const USER_SCHEMA: &'static str = include_str!("schemas/user.json");
-const GROUP_SCHEMA: &'static str = include_str!("schemas/group.json");
-const ENTERPRISE_USER_SCHEMA: &'static str = include_str!("schemas/enterprise_user.json");
+const USER_SCHEMA: &str = include_str!("schemas/user.json");
+const GROUP_SCHEMA: &str = include_str!("schemas/group.json");
+const ENTERPRISE_USER_SCHEMA: &str = include_str!("schemas/enterprise_user.json");
 
 /// Declaring the models module which contains various submodules
 pub mod models {
