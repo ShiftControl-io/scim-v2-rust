@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use crate::models::user::User;
 
 #[derive(Serialize, Deserialize)]
-struct SearchRequest {
+pub struct SearchRequest {
     pub schemas: Vec<String>,
     pub attributes: Vec<String>,
     pub filter: String,
@@ -23,11 +23,11 @@ impl Default for SearchRequest {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct ListQuery {
-    filter: String,
+pub struct ListQuery {
+    pub filter: String,
     #[serde(rename = "startIndex")]
-    start_index: i64,
-    count: Option<i64>,
+    pub start_index: i64,
+    pub count: Option<i64>,
 }
 impl Default for ListQuery {
     fn default() -> Self {
@@ -41,14 +41,14 @@ impl Default for ListQuery {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ListResponse {
-    items_per_page: i64,
+    pub items_per_page: i64,
     #[serde(rename = "totalResults")]
-    total_results: i64,
+    pub total_results: i64,
     #[serde(rename = "startIndex")]
-    start_index: i64,
-    schemas: Vec<String>,
+    pub start_index: i64,
+    pub schemas: Vec<String>,
     #[serde(rename = "Resources")]
-    resources: Vec<User>,
+    pub resources: Vec<User>,
 }
 
 impl Default for ListResponse {
