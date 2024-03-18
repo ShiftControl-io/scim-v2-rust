@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use crate::models::scim_schema::Meta;
 use crate::utils::error::SCIMError;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -11,6 +12,7 @@ pub struct ResourceType {
     pub schema: String,
     #[serde(rename = "schemaExtensions")]
     pub schema_extensions: Option<Vec<SchemaExtension>>,
+    pub meta: Option<Meta>,
 }
 
 impl Default for ResourceType {
@@ -22,6 +24,7 @@ impl Default for ResourceType {
             endpoint: "".to_string(),
             schema: "".to_string(),
             schema_extensions: None,
+            meta: None,
         }
     }
 }
@@ -39,6 +42,96 @@ impl Default for SchemaExtension {
             required: false,
         }
     }
+}
+
+/// Returns a vector of `ResourceType` instances based on the provided resource type names.
+///
+/// This function creates `ResourceType` instances for "user" and "group" with default values if their names are included in the `resource_type_names` vector.
+/// If "enterprise_user" is included in the `resource_type_names` vector, the "user" `ResourceType` will include the enterprise user schema extension.
+///
+/// # Parameters
+///
+/// * `resource_type_names` - A vector of string slices that represent the names of the resource types to be returned. Options are: user, group, enterprise_user
+///
+/// # Returns
+///
+/// * `Ok(Vec<ResourceType>)` - If all requested resource types are found. The returned vector includes the requested `ResourceType` instances.
+/// * `Err(SCIMError::ResourceTypeNotFound)` - If a requested resource type is not found. The error includes the name of the resource type that was not found.
+///
+/// # Examples
+///
+/// ```rust
+/// use scim_v2::models::resource_types::get_resource_types;
+///
+/// let resource_type_names = vec!["user", "group", "enterprise_user"];
+/// match get_resource_types(resource_type_names) {
+///     Ok(resource_types) => {
+///         for resource_type in resource_types {
+///             println!("ResourceType: {:?}", resource_type);
+///         }
+///     }
+///     Err(e) => println!("Error getting resource types: {}", e),
+/// }
+/// ```
+pub fn get_resource_types(mut resource_type_names: Vec<&str>) -> Result<Vec<ResourceType>, SCIMError> {
+    let mut resource_types = Vec::new();
+    let has_enterprise_user = resource_type_names.contains(&"enterprise_user");
+    // Remove "enterprise_user" from the vector
+    if has_enterprise_user {
+        resource_type_names.retain(|&name| name != "enterprise_user");
+    }
+
+    for resource_type_name in resource_type_names {
+        match resource_type_name {
+            "user" => {
+                let user_resource_type = ResourceType {
+                    id: Some("User".to_string()),
+                    name: "User".to_string(),
+                    endpoint: "/Users".to_string(),
+                    description: Some("User Account".to_string()),
+                    schema: "urn:ietf:params:scim:schemas:core:2.0:User".to_string(),
+                    schema_extensions: if has_enterprise_user {
+                        Some(vec![
+                            SchemaExtension {
+                                schema: "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User".to_string(),
+                                required: true,
+                            },
+                        ])
+                    } else {
+                        None
+                    },
+                    meta: Some(Meta {
+                        location: Some("https://example.com/v2/ResourceTypes/User".to_string()),
+                        resource_type: Some("ResourceType".to_string()),
+                        created: None,
+                        last_modified: None,
+                        version: None,
+                    }),
+                };
+                resource_types.push(user_resource_type);
+            }
+            "group" => {
+                let group_resource_type = ResourceType {
+                    id: Some("Group".to_string()),
+                    name: "Group".to_string(),
+                    endpoint: "/Groups".to_string(),
+                    description: Some("Group".to_string()),
+                    schema: "urn:ietf:params:scim:schemas:core:2.0:Group".to_string(),
+                    schema_extensions: None,
+                    meta: Some(Meta {
+                        location: Some("https://example.com/v2/ResourceTypes/Group".to_string()),
+                        resource_type: Some("ResourceType".to_string()),
+                        created: None,
+                        last_modified: None,
+                        version: None,
+                    }),
+                };
+                resource_types.push(group_resource_type);
+            }
+            _ => return Err(SCIMError::ResourceTypeNotFound(resource_type_name.to_string())),
+        }
+    }
+    Ok(resource_types)
 }
 
 
@@ -300,5 +393,25 @@ mod tests {
         assert_eq!(resource_type.endpoint, "/Groups");
         assert_eq!(resource_type.description, Some("Group".to_string()));
         assert_eq!(resource_type.schema, "urn:ietf:params:scim:schemas:core:2.0:Group");
+    }
+
+    #[test]
+    fn test_get_resource_types() {
+        let resource_type_names = vec!["user", "group", "enterprise_user"];
+        let resource_types = get_resource_types(resource_type_names).unwrap();
+
+        std::assert_eq!(resource_types.len(), 2);
+
+        let user_resource_type = &resource_types[0];
+        std::assert_eq!(user_resource_type.name, "User");
+        std::assert_eq!(user_resource_type.endpoint, "/Users");
+        std::assert_eq!(user_resource_type.schema, "urn:ietf:params:scim:schemas:core:2.0:User");
+        assert!(user_resource_type.schema_extensions.is_some());
+
+        let group_resource_type = &resource_types[1];
+        std::assert_eq!(group_resource_type.name, "Group");
+        std::assert_eq!(group_resource_type.endpoint, "/Groups");
+        std::assert_eq!(group_resource_type.schema, "urn:ietf:params:scim:schemas:core:2.0:Group");
+        assert!(group_resource_type.schema_extensions.is_none());
     }
 }
