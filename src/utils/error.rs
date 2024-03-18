@@ -9,6 +9,7 @@ pub enum SCIMError {
     MissingRequiredField(String),
     InvalidFieldValue(String),
     SchemaNotFound(String),
+    ResourceTypeNotFound(String),
 }
 
 
@@ -21,6 +22,7 @@ impl Display for SCIMError {
             SCIMError::MissingRequiredField(field) => write!(f, "Missing required field: {}", field),
             SCIMError::InvalidFieldValue(field) => write!(f, "Invalid field value: {}", field),
             SCIMError::SchemaNotFound(field) => write!(f, "Schema not found: {}", field),
+            SCIMError::ResourceTypeNotFound(field) => write!(f, "Resource type not found: {}", field),
         }
     }
 }
