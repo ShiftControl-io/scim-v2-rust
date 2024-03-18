@@ -102,8 +102,6 @@ pub struct Supported {
 }
 
 
-
-
 /// Converts a JSON string into a `ServiceProviderConfig` struct.
 ///
 /// This method attempts to parse a JSON string to construct a `ServiceProviderConfig` object. It's useful for scenarios where

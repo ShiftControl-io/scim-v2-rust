@@ -12,11 +12,11 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - uses: hecrj/setup-rust-action@v2
-      with:
-        rust-version: stable
-    - uses: actions/checkout@master
-    - name: Cargo Check
-      run: cargo check
-    - name: Cargo Test
-      run: cargo test
+      - uses: hecrj/setup-rust-action@v2
+        with:
+          rust-version: stable
+      - uses: actions/checkout@master
+      - name: Cargo Check
+        run: cargo check
+      - name: Cargo Test
+        run: cargo test

@@ -8,6 +8,7 @@ pub enum SCIMError {
     InvalidJsonFormat,
     MissingRequiredField(String),
     InvalidFieldValue(String),
+    SchemaNotFound(String),
 }
 
 
@@ -19,6 +20,13 @@ impl Display for SCIMError {
             SCIMError::InvalidJsonFormat => write!(f, "Invalid JSON format"),
             SCIMError::MissingRequiredField(field) => write!(f, "Missing required field: {}", field),
             SCIMError::InvalidFieldValue(field) => write!(f, "Invalid field value: {}", field),
+            SCIMError::SchemaNotFound(field) => write!(f, "Schema not found: {}", field),
         }
+    }
+}
+
+impl From<serde_json::Error> for SCIMError {
+    fn from(err: serde_json::Error) -> SCIMError {
+        SCIMError::DeserializationError(err)
     }
 }

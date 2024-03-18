@@ -38,8 +38,6 @@ pub struct Member {
 }
 
 
-
-
 /// Converts a JSON string into a `Group` struct.
 ///
 /// This method attempts to parse a JSON string to construct a `Group` object. It's useful for scenarios where
@@ -227,11 +225,11 @@ mod tests {
 
         // Check meta
         let meta = group.meta.unwrap();
-        assert_eq!(meta.resource_type, "Group");
-        assert_eq!(meta.created, "2010-01-23T04:56:22Z");
-        assert_eq!(meta.last_modified, "2011-05-13T04:42:34Z");
-        assert_eq!(meta.version, "W/\"3694e05e9dff592\"");
-        assert_eq!(meta.location, "https://example.com/v2/Groups/e9e30dba-f08f-4109-8486-d5c6a331660a");
+        assert_eq!(meta.resource_type, Some("Group".to_string()));
+        assert_eq!(meta.created, Some("2010-01-23T04:56:22Z".to_string()));
+        assert_eq!(meta.last_modified, Some("2011-05-13T04:42:34Z".to_string()));
+        assert_eq!(meta.version, Some("W/\"3694e05e9dff592\"".to_string()));
+        assert_eq!(meta.location, Some("https://example.com/v2/Groups/e9e30dba-f08f-4109-8486-d5c6a331660a".to_string()));
     }
 
     #[test]

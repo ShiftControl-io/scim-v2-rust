@@ -5,7 +5,9 @@ use crate::models::user::User;
 #[derive(Serialize, Deserialize)]
 pub struct SearchRequest {
     pub schemas: Vec<String>,
-    pub attributes: Vec<String>,
+    pub attributes: Option<Vec<String>>,
+    #[serde(rename = "excludedAttributes")]
+    excluded_attributes: Option<Vec<String>>,
     pub filter: String,
     #[serde(rename = "startIndex")]
     pub start_index: i64,
@@ -16,7 +18,8 @@ impl Default for SearchRequest {
     fn default() -> Self {
         SearchRequest {
             schemas: vec!["urn:ietf:params:scim:api:messages:2.0:SearchRequest".to_string()],
-            attributes: vec![],
+            attributes: None,
+            excluded_attributes: None,
             filter: "".to_string(),
             start_index: 1,
             count: 100,
