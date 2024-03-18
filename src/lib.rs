@@ -34,7 +34,7 @@
 //! ### Serialize the `User` instance to a JSON string, using the custom SCIMError for error handling.
 //!
 //! # Examples
-//! 
+//!
 //! ```rust
 //! use scim_v2::models::user::User;
 //!
@@ -81,6 +81,11 @@
 /// External crate imports
 extern crate serde;
 extern crate serde_json;
+
+// Include the schema files into the binary.
+const USER_SCHEMA: &'static str = include_str!("schemas/user.json");
+const GROUP_SCHEMA: &'static str = include_str!("schemas/group.json");
+const ENTERPRISE_USER_SCHEMA: &'static str = include_str!("schemas/enterprise_user.json");
 
 /// Declaring the models module which contains various submodules
 pub mod models {

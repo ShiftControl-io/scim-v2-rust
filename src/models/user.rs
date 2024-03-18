@@ -94,7 +94,6 @@ pub struct Name {
 }
 
 
-
 #[derive(Serialize, Deserialize, Debug)]
 #[derive(Default)]
 pub struct Email {
@@ -104,7 +103,6 @@ pub struct Email {
     pub type_: Option<String>,
     pub primary: Option<bool>,
 }
-
 
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -123,7 +121,6 @@ pub struct Address {
 }
 
 
-
 #[derive(Serialize, Deserialize, Debug)]
 #[derive(Default)]
 pub struct PhoneNumber {
@@ -133,7 +130,6 @@ pub struct PhoneNumber {
     pub type_: Option<String>,
     pub primary: Option<bool>,
 }
-
 
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -147,7 +143,6 @@ pub struct Im {
 }
 
 
-
 #[derive(Serialize, Deserialize, Debug)]
 #[derive(Default)]
 pub struct Photo {
@@ -157,7 +152,6 @@ pub struct Photo {
     pub type_: Option<String>,
     pub primary: Option<bool>,
 }
-
 
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -171,7 +165,6 @@ pub struct Group {
 }
 
 
-
 #[derive(Serialize, Deserialize, Debug)]
 #[derive(Default)]
 pub struct Entitlement {
@@ -181,7 +174,6 @@ pub struct Entitlement {
     pub type_: Option<String>,
     pub primary: Option<bool>,
 }
-
 
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -195,7 +187,6 @@ pub struct Role {
 }
 
 
-
 #[derive(Serialize, Deserialize, Debug)]
 #[derive(Default)]
 pub struct X509Certificate {
@@ -205,8 +196,6 @@ pub struct X509Certificate {
     pub type_: Option<String>,
     pub primary: Option<bool>,
 }
-
-
 
 
 /// Converts a JSON string into a `User` struct.
@@ -375,11 +364,11 @@ mod tests {
         assert_eq!(user.id, Some("2819c223-7f76-453a-919d-413861904646".to_string()));
         assert_eq!(user.user_name, "bjensen@example.com");
         let meta = user.meta.unwrap();
-        assert_eq!(meta.resource_type, "User");
-        assert_eq!(meta.created, "2010-01-23T04:56:22Z");
-        assert_eq!(meta.last_modified, "2011-05-13T04:42:34Z");
-        assert_eq!(meta.version, "W/\"3694e05e9dff590\"");
-        assert_eq!(meta.location, "https://example.com/v2/Users/2819c223-7f76-453a-919d-413861904646");
+        assert_eq!(meta.resource_type, Some("User".to_string()));
+        assert_eq!(meta.created, Some("2010-01-23T04:56:22Z".to_string()));
+        assert_eq!(meta.last_modified, Some("2011-05-13T04:42:34Z".to_string()));
+        assert_eq!(meta.version, Some("W/\"3694e05e9dff590\"".to_string()));
+        assert_eq!(meta.location, Some("https://example.com/v2/Users/2819c223-7f76-453a-919d-413861904646".to_string()));
     }
 
     #[test]
@@ -527,11 +516,11 @@ mod tests {
         assert_eq!(user.x509_certificates.as_ref().unwrap().len(), 1);
         assert_eq!(user.x509_certificates.as_ref().unwrap()[0].value, Some("MIIDQzCCAqygAwIBAgICEAAwDQYJKoZIhvcNAQEFBQAwTjELMAkGA1UEBhMCVVMxEzARBgNVBAgMCkNhbGlmb3JuaWExFDASBgNVBAoMC2V4YW1wbGUuY29tMRQwEgYDVQQDDAtleGFtcGxlLmNvbTAeFw0xMTEwMjIwNjI0MzFaFw0xMjEwMDQwNjI0MzFaMH8xCzAJBgNVBAYTAlVTMRMwEQYDVQQIDApDYWxpZm9ybmlhMRQwEgYDVQQKDAtleGFtcGxlLmNvbTEhMB8GA1UEAwwYTXMuIEJhcmJhcmEgSiBKZW5zZW4gSUlJMSIwIAYJKoZIhvcNAQkBFhNiamVuc2VuQGV4YW1wbGUuY29tMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA7Kr+Dcds/JQ5GwejJFcBIP682X3xpjis56AK02bc1FLgzdLI8auoR+cC9/Vrh5t66HkQIOdA4unHh0AaZ4xL5PhVbXIPMB5vAPKpzz5iPSi8xO8SL7I7SDhcBVJhqVqr3HgllEG6UClDdHO7nkLuwXq8HcISKkbT5WFTVfFZzidPl8HZ7DhXkZIRtJwBweq4bvm3hM1Os7UQH05ZS6cVDgweKNwdLLrT51ikSQG3DYrl+ft781UQRIqxgwqCfXEuDiinPh0kkvIi5jivVu1Z9QiwlYEdRbLJ4zJQBmDrSGTMYn4lRc2HgHO4DqB/bnMVorHB0CC6AV1QoFK4GPe1LwIDAQABo3sweTAJBgNVHRMEAjAAMCwGCWCGSAGG+EIBDQQfFh1PcGVuU1NMIEdlbmVyYXRlZCBDZXJ0aWZpY2F0ZTAdBgNVHQ4EFgQU8pD0U0vsZIsaA16lL8En8bx0F/gwHwYDVR0jBBgwFoAUdGeKitcaF7gnzsNwDx708kqaVt0wDQYJKoZIhvcNAQEFBQADgYEAA81SsFnOdYJtNg5Tcq+/ByEDrBgnusx0jloUhByPMEVkoMZ3J7j1ZgI8rAbOkNngX8+pKfTiDz1RC4+dx8oU6Za+4NJXUjlL5CvV6BEYb1+QAEJwitTVvxB/A67g42/vzgAtoRUeDov1+GFiBZ+GNF/cAYKcMtGcrs2i97ZkJMo=".to_string()), "x509_certificates[0].value did not match expected value");
         let meta = user.meta.unwrap();
-        assert_eq!(meta.resource_type, "User");
-        assert_eq!(meta.created, "2010-01-23T04:56:22Z");
-        assert_eq!(meta.last_modified, "2011-05-13T04:42:34Z");
-        assert_eq!(meta.version, "W/\"a330bc54f0671c9\"");
-        assert_eq!(meta.location, "https://example.com/v2/Users/2819c223-7f76-453a-919d-413861904646");
+        assert_eq!(meta.resource_type, Some("User".to_string()));
+        assert_eq!(meta.created, Some("2010-01-23T04:56:22Z".to_string()));
+        assert_eq!(meta.last_modified, Some("2011-05-13T04:42:34Z".to_string()));
+        assert_eq!(meta.version, Some("W/\"a330bc54f0671c9\"".to_string()));
+        assert_eq!(meta.location, Some("https://example.com/v2/Users/2819c223-7f76-453a-919d-413861904646".to_string()));
     }
 
     #[test]

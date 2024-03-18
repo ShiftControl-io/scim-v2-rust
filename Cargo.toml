@@ -20,7 +20,7 @@ automod = "1.0.14"
 indoc = "2.0.4"
 ref-cast = "1.0.22"
 rustversion = "1.0.14"
-pretty_assertions = "0.7.2"
+pretty_assertions = "1.4.0"
 
 [lib]
 doc-scrape-examples = false
