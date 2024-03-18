@@ -335,13 +335,16 @@ mod tests {
                     "name": "OAuth Bearer Token",
                     "description": "Authentication scheme using the OAuth Bearer Token Standard",
                     "specUri": "http://www.rfc-editor.org/info/rfc6750",
-                    "documentationUri": "http://example.com/help/oauth.html"
+                    "documentationUri": "http://example.com/help/oauth.html",
+                    "type": "oauthbearertoken",
+                    "primary": true
                 },
                 {
                     "name": "HTTP Basic",
                     "description": "Authentication scheme using the HTTP Basic Standard",
                     "specUri": "http://www.rfc-editor.org/info/rfc2617",
-                    "documentationUri": "http://example.com/help/httpBasic.html"
+                    "documentationUri": "http://example.com/help/httpBasic.html",
+                    "type": "httpbasic"
                 }
             ]
         }"#;
@@ -369,10 +372,14 @@ mod tests {
         assert_eq!(oauth_scheme.description, "Authentication scheme using the OAuth Bearer Token Standard");
         assert_eq!(oauth_scheme.spec_uri, "http://www.rfc-editor.org/info/rfc6750");
         assert_eq!(oauth_scheme.documentation_uri, "http://example.com/help/oauth.html");
+        assert_eq!(oauth_scheme.type_, "oauthbearertoken");
+        assert_eq!(oauth_scheme.primary, Some(true));
         let http_scheme = &config.authentication_schemes[1];
         assert_eq!(http_scheme.name, "HTTP Basic");
         assert_eq!(http_scheme.description, "Authentication scheme using the HTTP Basic Standard");
         assert_eq!(http_scheme.spec_uri, "http://www.rfc-editor.org/info/rfc2617");
         assert_eq!(http_scheme.documentation_uri, "http://example.com/help/httpBasic.html");
+        assert_eq!(http_scheme.type_, "httpbasic");
+
     }
 }
