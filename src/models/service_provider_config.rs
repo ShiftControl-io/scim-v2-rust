@@ -51,7 +51,7 @@ pub struct AuthenticationScheme {
     #[serde(rename = "specUri")]
     pub spec_uri: String,
     #[serde(rename = "documentationUri")]
-    pub documentation_uri: String,
+    pub documentation_uri: Option<String>,
     pub primary: Option<bool>,
 }
 
@@ -62,7 +62,7 @@ impl Default for AuthenticationScheme {
             type_: "".to_string(),
             description: "".to_string(),
             spec_uri: "".to_string(),
-            documentation_uri: "".to_string(),
+            documentation_uri: Some("".to_string()),
             primary: None,
         }
     }
