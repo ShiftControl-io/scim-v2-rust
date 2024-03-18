@@ -14,8 +14,8 @@ pub enum SCIMError {
 impl Display for SCIMError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            SCIMError::SerializationError(e) => write!(f, "Serialization error: {}", e.to_string()),
-            SCIMError::DeserializationError(e) => write!(f, "Deserialization error: {}", e.to_string()),
+            SCIMError::SerializationError(e) => write!(f, "Serialization error: {}", e),
+            SCIMError::DeserializationError(e) => write!(f, "Deserialization error: {}", e),
             SCIMError::InvalidJsonFormat => write!(f, "Invalid JSON format"),
             SCIMError::MissingRequiredField(field) => write!(f, "Missing required field: {}", field),
             SCIMError::InvalidFieldValue(field) => write!(f, "Invalid field value: {}", field),

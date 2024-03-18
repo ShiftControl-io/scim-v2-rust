@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::utils::error::SCIMError;
 
 #[derive(Serialize, Deserialize, Debug)]
+#[derive(Default)]
 pub struct EnterpriseUser {
     #[serde(rename = "employeeNumber")]
     pub employee_number: Option<String>,
@@ -14,18 +15,7 @@ pub struct EnterpriseUser {
     pub manager: Option<Manager>,
 }
 
-impl Default for EnterpriseUser {
-    fn default() -> Self {
-        EnterpriseUser {
-            employee_number: None,
-            cost_center: None,
-            organization: None,
-            division: None,
-            department: None,
-            manager: None,
-        }
-    }
-}
+
 
 /// Converts a JSON string into a `EnterpriseUser` struct.
 ///
