@@ -45,20 +45,25 @@ impl Default for ServiceProviderConfig {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct AuthenticationScheme {
     pub name: String,
+    #[serde(rename = "type")]
+    pub type_: String,
     pub description: String,
     #[serde(rename = "specUri")]
     pub spec_uri: String,
     #[serde(rename = "documentationUri")]
     pub documentation_uri: String,
+    pub primary: Option<bool>,
 }
 
 impl Default for AuthenticationScheme {
     fn default() -> Self {
         AuthenticationScheme {
             name: "".to_string(),
+            type_: "".to_string(),
             description: "".to_string(),
             spec_uri: "".to_string(),
             documentation_uri: "".to_string(),
+            primary: None,
         }
     }
 }
