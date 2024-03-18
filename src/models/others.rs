@@ -57,6 +57,7 @@ pub enum Resource {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ListResponse {
+    #[serde(rename = "itemsPerPage")]
     pub items_per_page: i64,
     #[serde(rename = "totalResults")]
     pub total_results: i64,
