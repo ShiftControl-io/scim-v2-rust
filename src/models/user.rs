@@ -78,6 +78,7 @@ impl Default for User {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[derive(Default)]
 pub struct Name {
     pub formatted: Option<String>,
     #[serde(rename = "familyName")]
@@ -92,20 +93,10 @@ pub struct Name {
     pub honorific_suffix: Option<String>,
 }
 
-impl Default for Name {
-    fn default() -> Self {
-        Name {
-            formatted: None,
-            family_name: None,
-            given_name: None,
-            middle_name: None,
-            honorific_prefix: None,
-            honorific_suffix: None,
-        }
-    }
-}
+
 
 #[derive(Serialize, Deserialize, Debug)]
+#[derive(Default)]
 pub struct Email {
     pub value: Option<String>,
     pub display: Option<String>,
@@ -114,18 +105,10 @@ pub struct Email {
     pub primary: Option<bool>,
 }
 
-impl Default for Email {
-    fn default() -> Self {
-        Email {
-            value: None,
-            display: None,
-            type_: None,
-            primary: None,
-        }
-    }
-}
+
 
 #[derive(Serialize, Deserialize, Debug)]
+#[derive(Default)]
 pub struct Address {
     pub formatted: Option<String>,
     #[serde(rename = "streetAddress")]
@@ -139,21 +122,10 @@ pub struct Address {
     pub type_: Option<String>,
 }
 
-impl Default for Address {
-    fn default() -> Self {
-        Address {
-            formatted: None,
-            street_address: None,
-            locality: None,
-            region: None,
-            postal_code: None,
-            country: None,
-            type_: None,
-        }
-    }
-}
+
 
 #[derive(Serialize, Deserialize, Debug)]
+#[derive(Default)]
 pub struct PhoneNumber {
     pub value: Option<String>,
     pub display: Option<String>,
@@ -162,18 +134,10 @@ pub struct PhoneNumber {
     pub primary: Option<bool>,
 }
 
-impl Default for PhoneNumber {
-    fn default() -> Self {
-        PhoneNumber {
-            value: None,
-            display: None,
-            type_: None,
-            primary: None,
-        }
-    }
-}
+
 
 #[derive(Serialize, Deserialize, Debug)]
+#[derive(Default)]
 pub struct Im {
     pub value: Option<String>,
     pub display: Option<String>,
@@ -182,18 +146,10 @@ pub struct Im {
     pub primary: Option<bool>,
 }
 
-impl Default for Im {
-    fn default() -> Self {
-        Im {
-            value: None,
-            display: None,
-            type_: None,
-            primary: None,
-        }
-    }
-}
+
 
 #[derive(Serialize, Deserialize, Debug)]
+#[derive(Default)]
 pub struct Photo {
     pub value: Option<String>,
     pub display: Option<String>,
@@ -202,18 +158,10 @@ pub struct Photo {
     pub primary: Option<bool>,
 }
 
-impl Default for Photo {
-    fn default() -> Self {
-        Photo {
-            value: None,
-            display: None,
-            type_: None,
-            primary: None,
-        }
-    }
-}
+
 
 #[derive(Serialize, Deserialize, Debug)]
+#[derive(Default)]
 pub struct Group {
     pub value: Option<String>,
     #[serde(rename = "$ref")]
@@ -222,18 +170,10 @@ pub struct Group {
     pub type_: Option<String>,
 }
 
-impl Default for Group {
-    fn default() -> Self {
-        Group {
-            value: None,
-            ref_: None,
-            display: None,
-            type_: None,
-        }
-    }
-}
+
 
 #[derive(Serialize, Deserialize, Debug)]
+#[derive(Default)]
 pub struct Entitlement {
     pub value: Option<String>,
     pub display: Option<String>,
@@ -242,18 +182,10 @@ pub struct Entitlement {
     pub primary: Option<bool>,
 }
 
-impl Default for Entitlement {
-    fn default() -> Self {
-        Entitlement {
-            value: None,
-            display: None,
-            type_: None,
-            primary: None,
-        }
-    }
-}
+
 
 #[derive(Serialize, Deserialize, Debug)]
+#[derive(Default)]
 pub struct Role {
     pub value: Option<String>,
     pub display: Option<String>,
@@ -262,18 +194,10 @@ pub struct Role {
     pub primary: Option<bool>,
 }
 
-impl Default for Role {
-    fn default() -> Self {
-        Role {
-            value: None,
-            display: None,
-            type_: None,
-            primary: None,
-        }
-    }
-}
+
 
 #[derive(Serialize, Deserialize, Debug)]
+#[derive(Default)]
 pub struct X509Certificate {
     pub value: Option<String>,
     pub display: Option<String>,
@@ -282,16 +206,7 @@ pub struct X509Certificate {
     pub primary: Option<bool>,
 }
 
-impl Default for X509Certificate {
-    fn default() -> Self {
-        X509Certificate {
-            value: None,
-            display: None,
-            type_: None,
-            primary: None,
-        }
-    }
-}
+
 
 
 /// Converts a JSON string into a `User` struct.

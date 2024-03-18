@@ -96,15 +96,12 @@ impl Default for Bulk {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[derive(Default)]
 pub struct Supported {
     pub supported: bool,
 }
 
-impl Default for Supported {
-    fn default() -> Self {
-        Supported { supported: false }
-    }
-}
+
 
 
 /// Converts a JSON string into a `ServiceProviderConfig` struct.

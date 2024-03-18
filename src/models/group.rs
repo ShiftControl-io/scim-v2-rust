@@ -27,6 +27,7 @@ impl Default for Group {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[derive(Default)]
 pub struct Member {
     pub value: Option<String>,
     #[serde(rename = "$ref")]
@@ -36,16 +37,7 @@ pub struct Member {
     pub display: Option<String>,
 }
 
-impl Default for Member {
-    fn default() -> Self {
-        Member {
-            value: None,
-            ref_: None,
-            type_: None,
-            display: None,
-        }
-    }
-}
+
 
 
 /// Converts a JSON string into a `Group` struct.
