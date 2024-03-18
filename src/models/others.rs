@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+
 use crate::models::user::User;
 
 #[derive(Serialize, Deserialize)]
@@ -10,6 +11,7 @@ pub struct SearchRequest {
     pub start_index: i64,
     pub count: i64,
 }
+
 impl Default for SearchRequest {
     fn default() -> Self {
         SearchRequest {
@@ -29,6 +31,7 @@ pub struct ListQuery {
     pub start_index: i64,
     pub count: Option<i64>,
 }
+
 impl Default for ListQuery {
     fn default() -> Self {
         ListQuery {

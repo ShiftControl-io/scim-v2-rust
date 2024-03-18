@@ -13,12 +13,6 @@ pub struct ResourceType {
     pub schema_extensions: Option<Vec<SchemaExtension>>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct SchemaExtension {
-    pub schema: String,
-    pub required: bool,
-}
-
 impl Default for ResourceType {
     fn default() -> Self {
         ResourceType {
@@ -31,6 +25,22 @@ impl Default for ResourceType {
         }
     }
 }
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct SchemaExtension {
+    pub schema: String,
+    pub required: bool,
+}
+
+impl Default for SchemaExtension {
+    fn default() -> Self {
+        SchemaExtension {
+            schema: "".to_string(),
+            required: false,
+        }
+    }
+}
+
 
 /// Converts a JSON string into a `ResourceType` struct.
 ///

@@ -1,6 +1,6 @@
 [package]
 name = "scim_v2"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 authors = ["Dan Gericke <dan@shiftcontrol.io>"]
 description = "A crate that provides utilities for working with the System for Cross-domain Identity Management (SCIM) version 2.0 protocol. (rfc7642, rfc7643, rfc7644)"
