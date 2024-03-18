@@ -16,7 +16,7 @@ pub struct ServiceProviderConfig {
     pub etag: Supported,
     #[serde(rename = "authenticationSchemes")]
     pub authentication_schemes: Vec<AuthenticationScheme>,
-    meta: Option<Meta>,
+    pub meta: Option<Meta>,
 }
 
 impl Default for ServiceProviderConfig {
