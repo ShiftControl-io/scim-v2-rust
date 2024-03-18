@@ -145,22 +145,6 @@ pub struct X509Certificate {
     pub type_: Option<String>,
     pub primary: Option<bool>,
 }
-#[derive(Serialize, Deserialize, Debug)]
-struct ListUsersQuery {
-    filter: String,
-    #[serde(rename = "startIndex")]
-    start_index: i64,
-    count: Option<i64>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ListUsersResult {
-    items_per_page: i64,
-    #[serde(rename = "totalResults")]
-    total_results: i64,
-    #[serde(rename = "startIndex")]
-    start_index: i64,
-}
 
 impl Default for User {
     fn default() -> Self {
