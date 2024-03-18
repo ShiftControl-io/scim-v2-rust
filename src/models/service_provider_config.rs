@@ -160,22 +160,22 @@ impl ServiceProviderConfig {
     /// }
     /// ```
     pub fn validate(&self) -> Result<(), SCIMError> {
-        if self.patch.supported == false {
+        if !self.patch.supported {
             return Err(SCIMError::MissingRequiredField("patch".to_string()));
         }
-        if self.bulk.supported == false {
+        if !self.bulk.supported {
             return Err(SCIMError::MissingRequiredField("bulk".to_string()));
         }
-        if self.filter.supported == false {
+        if !self.filter.supported {
             return Err(SCIMError::MissingRequiredField("filter".to_string()));
         }
-        if self.change_password.supported == false {
+        if !self.change_password.supported {
             return Err(SCIMError::MissingRequiredField("change_password".to_string()));
         }
-        if self.sort.supported == false {
+        if !self.sort.supported {
             return Err(SCIMError::MissingRequiredField("sort".to_string()));
         }
-        if self.etag.supported == false {
+        if !self.etag.supported {
             return Err(SCIMError::MissingRequiredField("etag".to_string()));
         }
         Ok(())
