@@ -4,6 +4,7 @@ use crate::{ENTERPRISE_USER_SCHEMA, GROUP_SCHEMA, USER_SCHEMA};
 use crate::utils::error::SCIMError;
 
 #[derive(Serialize, Deserialize, Debug)]
+#[derive(Default)]
 pub struct Meta {
     #[serde(rename = "resourceType")]
     pub resource_type: Option<String>,
@@ -13,6 +14,8 @@ pub struct Meta {
     pub version: Option<String>,
     pub location: Option<String>,
 }
+
+
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Schema {

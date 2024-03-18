@@ -45,20 +45,25 @@ impl Default for ServiceProviderConfig {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct AuthenticationScheme {
     pub name: String,
+    #[serde(rename = "type")]
+    pub type_: String,
     pub description: String,
     #[serde(rename = "specUri")]
     pub spec_uri: String,
     #[serde(rename = "documentationUri")]
     pub documentation_uri: String,
+    pub primary: Option<bool>,
 }
 
 impl Default for AuthenticationScheme {
     fn default() -> Self {
         AuthenticationScheme {
             name: "".to_string(),
+            type_: "".to_string(),
             description: "".to_string(),
             spec_uri: "".to_string(),
             documentation_uri: "".to_string(),
+            primary: None,
         }
     }
 }
@@ -330,13 +335,16 @@ mod tests {
                     "name": "OAuth Bearer Token",
                     "description": "Authentication scheme using the OAuth Bearer Token Standard",
                     "specUri": "http://www.rfc-editor.org/info/rfc6750",
-                    "documentationUri": "http://example.com/help/oauth.html"
+                    "documentationUri": "http://example.com/help/oauth.html",
+                    "type": "oauthbearertoken",
+                    "primary": true
                 },
                 {
                     "name": "HTTP Basic",
                     "description": "Authentication scheme using the HTTP Basic Standard",
                     "specUri": "http://www.rfc-editor.org/info/rfc2617",
-                    "documentationUri": "http://example.com/help/httpBasic.html"
+                    "documentationUri": "http://example.com/help/httpBasic.html",
+                    "type": "httpbasic"
                 }
             ]
         }"#;
@@ -364,10 +372,14 @@ mod tests {
         assert_eq!(oauth_scheme.description, "Authentication scheme using the OAuth Bearer Token Standard");
         assert_eq!(oauth_scheme.spec_uri, "http://www.rfc-editor.org/info/rfc6750");
         assert_eq!(oauth_scheme.documentation_uri, "http://example.com/help/oauth.html");
+        assert_eq!(oauth_scheme.type_, "oauthbearertoken");
+        assert_eq!(oauth_scheme.primary, Some(true));
         let http_scheme = &config.authentication_schemes[1];
         assert_eq!(http_scheme.name, "HTTP Basic");
         assert_eq!(http_scheme.description, "Authentication scheme using the HTTP Basic Standard");
         assert_eq!(http_scheme.spec_uri, "http://www.rfc-editor.org/info/rfc2617");
         assert_eq!(http_scheme.documentation_uri, "http://example.com/help/httpBasic.html");
+        assert_eq!(http_scheme.type_, "httpbasic");
+
     }
 }
