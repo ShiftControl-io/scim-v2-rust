@@ -16,7 +16,6 @@ pub struct EnterpriseUser {
 }
 
 
-
 /// Converts a JSON string into a `EnterpriseUser` struct.
 ///
 /// This method attempts to parse a JSON string to construct a `EnterpriseUser` object. It's useful for scenarios where

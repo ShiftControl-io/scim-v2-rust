@@ -17,37 +17,6 @@ pub struct ServiceProviderConfig {
     pub authentication_schemes: Vec<AuthenticationScheme>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct AuthenticationScheme {
-    pub name: String,
-    pub description: String,
-    #[serde(rename = "specUri")]
-    pub spec_uri: String,
-    #[serde(rename = "documentationUri")]
-    pub documentation_uri: String,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct Filter {
-    pub supported: bool,
-    #[serde(rename = "maxResults")]
-    pub max_results: i64,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct Bulk {
-    pub supported: bool,
-    #[serde(rename = "maxOperations")]
-    pub max_operations: i64,
-    #[serde(rename = "maxPayloadSize")]
-    pub max_payload_size: i64,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct Supported {
-    pub supported: bool,
-}
-
 impl Default for ServiceProviderConfig {
     fn default() -> Self {
         ServiceProviderConfig {
@@ -69,6 +38,74 @@ impl Default for ServiceProviderConfig {
         }
     }
 }
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct AuthenticationScheme {
+    pub name: String,
+    pub description: String,
+    #[serde(rename = "specUri")]
+    pub spec_uri: String,
+    #[serde(rename = "documentationUri")]
+    pub documentation_uri: String,
+}
+
+impl Default for AuthenticationScheme {
+    fn default() -> Self {
+        AuthenticationScheme {
+            name: "".to_string(),
+            description: "".to_string(),
+            spec_uri: "".to_string(),
+            documentation_uri: "".to_string(),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Filter {
+    pub supported: bool,
+    #[serde(rename = "maxResults")]
+    pub max_results: i64,
+}
+
+impl Default for Filter {
+    fn default() -> Self {
+        Filter {
+            supported: false,
+            max_results: 100,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Bulk {
+    pub supported: bool,
+    #[serde(rename = "maxOperations")]
+    pub max_operations: i64,
+    #[serde(rename = "maxPayloadSize")]
+    pub max_payload_size: i64,
+}
+
+impl Default for Bulk {
+    fn default() -> Self {
+        Bulk {
+            supported: false,
+            max_operations: 1000,
+            max_payload_size: 1048576,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Supported {
+    pub supported: bool,
+}
+
+impl Default for Supported {
+    fn default() -> Self {
+        Supported { supported: false }
+    }
+}
+
 
 /// Converts a JSON string into a `ServiceProviderConfig` struct.
 ///

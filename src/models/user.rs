@@ -45,112 +45,11 @@ pub struct User {
     pub enterprise_user: Option<EnterpriseUser>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct Name {
-    pub formatted: Option<String>,
-    #[serde(rename = "familyName")]
-    pub family_name: Option<String>,
-    #[serde(rename = "givenName")]
-    pub given_name: Option<String>,
-    #[serde(rename = "middleName")]
-    pub middle_name: Option<String>,
-    #[serde(rename = "honorificPrefix")]
-    pub honorific_prefix: Option<String>,
-    #[serde(rename = "honorificSuffix")]
-    pub honorific_suffix: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct Email {
-    pub value: Option<String>,
-    pub display: Option<String>,
-    #[serde(rename = "type")]
-    pub type_: Option<String>,
-    pub primary: Option<bool>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct Address {
-    pub formatted: Option<String>,
-    #[serde(rename = "streetAddress")]
-    pub street_address: Option<String>,
-    pub locality: Option<String>,
-    pub region: Option<String>,
-    #[serde(rename = "postalCode")]
-    pub postal_code: Option<String>,
-    pub country: Option<String>,
-    #[serde(rename = "type")]
-    pub type_: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct PhoneNumber {
-    pub value: Option<String>,
-    pub display: Option<String>,
-    #[serde(rename = "type")]
-    pub type_: Option<String>,
-    pub primary: Option<bool>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct Im {
-    pub value: Option<String>,
-    pub display: Option<String>,
-    #[serde(rename = "type")]
-    pub type_: Option<String>,
-    pub primary: Option<bool>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct Photo {
-    pub value: Option<String>,
-    pub display: Option<String>,
-    #[serde(rename = "type")]
-    pub type_: Option<String>,
-    pub primary: Option<bool>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct Group {
-    pub value: Option<String>,
-    #[serde(rename = "$ref")]
-    pub ref_: Option<String>,
-    pub display: Option<String>,
-    pub type_: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct Entitlement {
-    pub value: Option<String>,
-    pub display: Option<String>,
-    #[serde(rename = "type")]
-    pub type_: Option<String>,
-    pub primary: Option<bool>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct Role {
-    pub value: Option<String>,
-    pub display: Option<String>,
-    #[serde(rename = "type")]
-    pub type_: Option<String>,
-    pub primary: Option<bool>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct X509Certificate {
-    pub value: Option<String>,
-    pub display: Option<String>,
-    #[serde(rename = "type")]
-    pub type_: Option<String>,
-    pub primary: Option<bool>,
-}
-
 impl Default for User {
     fn default() -> Self {
         User {
             schemas: vec!["urn:ietf:params:scim:schemas:core:2.0:User".to_string()],
-            user_name: "bjensen@example.com".to_string(),
+            user_name: "".to_string(),
             id: None,
             name: None,
             display_name: None,
@@ -177,6 +76,223 @@ impl Default for User {
         }
     }
 }
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Name {
+    pub formatted: Option<String>,
+    #[serde(rename = "familyName")]
+    pub family_name: Option<String>,
+    #[serde(rename = "givenName")]
+    pub given_name: Option<String>,
+    #[serde(rename = "middleName")]
+    pub middle_name: Option<String>,
+    #[serde(rename = "honorificPrefix")]
+    pub honorific_prefix: Option<String>,
+    #[serde(rename = "honorificSuffix")]
+    pub honorific_suffix: Option<String>,
+}
+
+impl Default for Name {
+    fn default() -> Self {
+        Name {
+            formatted: None,
+            family_name: None,
+            given_name: None,
+            middle_name: None,
+            honorific_prefix: None,
+            honorific_suffix: None,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Email {
+    pub value: Option<String>,
+    pub display: Option<String>,
+    #[serde(rename = "type")]
+    pub type_: Option<String>,
+    pub primary: Option<bool>,
+}
+
+impl Default for Email {
+    fn default() -> Self {
+        Email {
+            value: None,
+            display: None,
+            type_: None,
+            primary: None,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Address {
+    pub formatted: Option<String>,
+    #[serde(rename = "streetAddress")]
+    pub street_address: Option<String>,
+    pub locality: Option<String>,
+    pub region: Option<String>,
+    #[serde(rename = "postalCode")]
+    pub postal_code: Option<String>,
+    pub country: Option<String>,
+    #[serde(rename = "type")]
+    pub type_: Option<String>,
+}
+
+impl Default for Address {
+    fn default() -> Self {
+        Address {
+            formatted: None,
+            street_address: None,
+            locality: None,
+            region: None,
+            postal_code: None,
+            country: None,
+            type_: None,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct PhoneNumber {
+    pub value: Option<String>,
+    pub display: Option<String>,
+    #[serde(rename = "type")]
+    pub type_: Option<String>,
+    pub primary: Option<bool>,
+}
+
+impl Default for PhoneNumber {
+    fn default() -> Self {
+        PhoneNumber {
+            value: None,
+            display: None,
+            type_: None,
+            primary: None,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Im {
+    pub value: Option<String>,
+    pub display: Option<String>,
+    #[serde(rename = "type")]
+    pub type_: Option<String>,
+    pub primary: Option<bool>,
+}
+
+impl Default for Im {
+    fn default() -> Self {
+        Im {
+            value: None,
+            display: None,
+            type_: None,
+            primary: None,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Photo {
+    pub value: Option<String>,
+    pub display: Option<String>,
+    #[serde(rename = "type")]
+    pub type_: Option<String>,
+    pub primary: Option<bool>,
+}
+
+impl Default for Photo {
+    fn default() -> Self {
+        Photo {
+            value: None,
+            display: None,
+            type_: None,
+            primary: None,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Group {
+    pub value: Option<String>,
+    #[serde(rename = "$ref")]
+    pub ref_: Option<String>,
+    pub display: Option<String>,
+    pub type_: Option<String>,
+}
+
+impl Default for Group {
+    fn default() -> Self {
+        Group {
+            value: None,
+            ref_: None,
+            display: None,
+            type_: None,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Entitlement {
+    pub value: Option<String>,
+    pub display: Option<String>,
+    #[serde(rename = "type")]
+    pub type_: Option<String>,
+    pub primary: Option<bool>,
+}
+
+impl Default for Entitlement {
+    fn default() -> Self {
+        Entitlement {
+            value: None,
+            display: None,
+            type_: None,
+            primary: None,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Role {
+    pub value: Option<String>,
+    pub display: Option<String>,
+    #[serde(rename = "type")]
+    pub type_: Option<String>,
+    pub primary: Option<bool>,
+}
+
+impl Default for Role {
+    fn default() -> Self {
+        Role {
+            value: None,
+            display: None,
+            type_: None,
+            primary: None,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct X509Certificate {
+    pub value: Option<String>,
+    pub display: Option<String>,
+    #[serde(rename = "type")]
+    pub type_: Option<String>,
+    pub primary: Option<bool>,
+}
+
+impl Default for X509Certificate {
+    fn default() -> Self {
+        X509Certificate {
+            value: None,
+            display: None,
+            type_: None,
+            primary: None,
+        }
+    }
+}
+
 
 /// Converts a JSON string into a `User` struct.
 ///
