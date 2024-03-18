@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::models::user::User;
+use crate::models::scim_schema::Schema;
+use crate::models::group::Group;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SearchRequest {
@@ -46,6 +48,14 @@ impl Default for ListQuery {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(untagged)]
+pub enum Resource {
+    User(Box<User>),
+    Schema(Box<Schema>),
+    Group(Box<Group>),
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 pub struct ListResponse {
     pub items_per_page: i64,
     #[serde(rename = "totalResults")]
@@ -54,7 +64,7 @@ pub struct ListResponse {
     pub start_index: i64,
     pub schemas: Vec<String>,
     #[serde(rename = "Resources")]
-    pub resources: Vec<User>,
+    pub resources: Vec<Resource>,
 }
 
 impl Default for ListResponse {

@@ -68,6 +68,37 @@ pub struct SubAttributes {
     pub reference_types: Option<Vec<String>>,
 }
 
+/// Retrieves a list of `Schema` instances based on the provided schema names.
+///
+/// This function takes a vector of schema names as input and attempts to retrieve the corresponding `Schema` instances.
+/// It uses a predefined list of schema contents to match the input schema names.
+///
+/// # Parameters
+///
+/// * `schema_names` - A vector of string slices that represent the names of the schemas to retrieve.
+///
+/// # Returns
+///
+/// This function returns a `Result<Vec<Schema>, SCIMError>`. If the function succeeds, it returns `Ok(Vec<Schema>)`
+/// where `Vec<Schema>` is a vector of the retrieved `Schema` instances. If the function fails, it returns `Err(SCIMError)`
+/// where `SCIMError` is the error that occurred.
+///
+/// # Errors
+///
+/// This function will return an error if any of the provided schema names do not match any of the predefined schema contents.
+/// The error will be of type `SCIMError::SchemaNotFound` and will contain the name of the schema that could not be found.
+///
+/// # Examples
+///
+/// ```rust
+/// use scim_v2::models::scim_schema::get_schemas;
+///
+/// let schemas = get_schemas(vec!["user", "group"]);
+/// match schemas {
+///     Ok(schemas) => println!("Successfully retrieved schemas: {:?}", schemas),
+///     Err(e) => println!("Error retrieving schemas: {}", e),
+/// }
+/// ```
 pub fn get_schemas(schema_names: Vec<&str>) -> Result<Vec<Schema>, SCIMError> {
     let mut schemas = Vec::new();
 
