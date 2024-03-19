@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 /// The `detail` field is an optional string that provides more detailed human-readable information.
 /// The `status` field is a required string that is the HTTP status code expressed as a JSON string.
 #[derive(Serialize, Deserialize, Debug)]
-struct ScimHttpError {
+pub struct ScimHttpError {
     pub schemas: Vec<String>,
     #[serde(rename = "scimType", skip_serializing_if = "Option::is_none")]
     pub scim_type: Option<String>,
