@@ -5,13 +5,16 @@ use crate::utils::error::SCIMError;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ResourceType {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     pub endpoint: String,
     pub schema: String,
-    #[serde(rename = "schemaExtensions")]
+    #[serde(rename = "schemaExtensions", skip_serializing_if = "Option::is_none")]
     pub schema_extensions: Option<Vec<SchemaExtension>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
 }
 

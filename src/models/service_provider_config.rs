@@ -5,7 +5,7 @@ use crate::models::scim_schema::Meta;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ServiceProviderConfig {
-    #[serde(rename = "documentationUri")]
+    #[serde(rename = "documentationUri", skip_serializing_if = "Option::is_none")]
     pub documentation_uri: Option<String>,
     pub patch: Supported,
     pub bulk: Bulk,
@@ -16,6 +16,7 @@ pub struct ServiceProviderConfig {
     pub etag: Supported,
     #[serde(rename = "authenticationSchemes")]
     pub authentication_schemes: Vec<AuthenticationScheme>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
 }
 
@@ -50,8 +51,9 @@ pub struct AuthenticationScheme {
     pub description: String,
     #[serde(rename = "specUri")]
     pub spec_uri: String,
-    #[serde(rename = "documentationUri")]
-    pub documentation_uri: String,
+    #[serde(rename = "documentationUri", skip_serializing_if = "Option::is_none")]
+    pub documentation_uri: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub primary: Option<bool>,
 }
 
@@ -62,7 +64,7 @@ impl Default for AuthenticationScheme {
             type_: "".to_string(),
             description: "".to_string(),
             spec_uri: "".to_string(),
-            documentation_uri: "".to_string(),
+            documentation_uri: Some("".to_string()),
             primary: None,
         }
     }
@@ -371,14 +373,14 @@ mod tests {
         assert_eq!(oauth_scheme.name, "OAuth Bearer Token");
         assert_eq!(oauth_scheme.description, "Authentication scheme using the OAuth Bearer Token Standard");
         assert_eq!(oauth_scheme.spec_uri, "http://www.rfc-editor.org/info/rfc6750");
-        assert_eq!(oauth_scheme.documentation_uri, "http://example.com/help/oauth.html");
+        assert_eq!(oauth_scheme.documentation_uri, Some("http://example.com/help/oauth.html".to_string()));
         assert_eq!(oauth_scheme.type_, "oauthbearertoken");
         assert_eq!(oauth_scheme.primary, Some(true));
         let http_scheme = &config.authentication_schemes[1];
         assert_eq!(http_scheme.name, "HTTP Basic");
         assert_eq!(http_scheme.description, "Authentication scheme using the HTTP Basic Standard");
         assert_eq!(http_scheme.spec_uri, "http://www.rfc-editor.org/info/rfc2617");
-        assert_eq!(http_scheme.documentation_uri, "http://example.com/help/httpBasic.html");
+        assert_eq!(http_scheme.documentation_uri, Some("http://example.com/help/httpBasic.html".to_string()));
         assert_eq!(http_scheme.type_, "httpbasic");
 
     }

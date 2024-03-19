@@ -7,8 +7,9 @@ use crate::models::group::Group;
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SearchRequest {
     pub schemas: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub attributes: Option<Vec<String>>,
-    #[serde(rename = "excludedAttributes")]
+    #[serde(rename = "excludedAttributes", skip_serializing_if = "Option::is_none")]
     excluded_attributes: Option<Vec<String>>,
     pub filter: String,
     #[serde(rename = "startIndex")]

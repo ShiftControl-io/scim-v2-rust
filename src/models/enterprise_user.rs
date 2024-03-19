@@ -5,13 +5,17 @@ use crate::utils::error::SCIMError;
 #[derive(Serialize, Deserialize, Debug)]
 #[derive(Default)]
 pub struct EnterpriseUser {
-    #[serde(rename = "employeeNumber")]
+    #[serde(rename = "employeeNumber", skip_serializing_if = "Option::is_none")]
     pub employee_number: Option<String>,
-    #[serde(rename = "costCenter")]
+    #[serde(rename = "costCenter", skip_serializing_if = "Option::is_none")]
     pub cost_center: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub organization: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub division: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub department: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub manager: Option<Manager>,
 }
 

@@ -10,7 +10,9 @@ pub struct Group {
     pub id: String,
     #[serde(rename = "displayName")]
     pub display_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub members: Option<Vec<Member>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
 }
 
@@ -29,11 +31,13 @@ impl Default for Group {
 #[derive(Serialize, Deserialize, Debug)]
 #[derive(Default)]
 pub struct Member {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
-    #[serde(rename = "$ref")]
+    #[serde(rename = "$ref", skip_serializing_if = "Option::is_none")]
     pub ref_: Option<String>,
-    #[serde(rename = "type")]
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
     pub type_: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub display: Option<String>,
 }
 
