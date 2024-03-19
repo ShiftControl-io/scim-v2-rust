@@ -132,25 +132,126 @@ pub fn get_schemas(schema_names: Vec<&str>) -> Result<Vec<Schema>, SCIMError> {
     Ok(schemas)
 }
 
-/// Converts a JSON string into a `User` struct.
+/// Converts a JSON string into a `Schema` struct.
 ///
-/// This method attempts to parse a JSON string to construct a `User` object. It's useful for scenarios where
+/// This method attempts to parse a JSON string to construct a `Schema` object. It's useful for scenarios where
 /// you receive a JSON representation of a user from an external source (e.g., a web request) and you need to
 /// work with this data in a strongly-typed manner within your application.
 ///
 /// # Errors
 ///
-/// Returns `SCIMError::DeserializationError` if the provided JSON string cannot be parsed into a `User` object.
+/// Returns `SCIMError::DeserializationError` if the provided JSON string cannot be parsed into a `Schema` object.
 ///
 /// # Examples
 ///
 /// ```rust
-/// use scim_v2::models::user::User;
+/// use scim_v2::models::scim_schema::Schema;
 ///
-/// let user_json = r#"{"schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"], "userName": "jdoe@example.com"}"#;
-/// match User::try_from(user_json) {
-///     Ok(user) => println!("Successfully converted JSON to User: {:?}", user),
-///     Err(e) => println!("Error converting from JSON to User: {}", e),
+/// let schema_json = r#"{
+///   "id": "urn:ietf:params:scim:schemas:core:2.0:ResourceType",
+///   "name": "ResourceType",
+///   "description": "Specifies the schema that describes a SCIM resource type",
+///   "attributes": [
+///     {
+///       "name": "id",
+///       "type": "string",
+///       "multiValued": false,
+///       "description": "The resource type's server unique id. May be the same as the 'name' attribute.",
+///       "required": false,
+///       "caseExact": false,
+///       "mutability": "readOnly",
+///       "returned": "default",
+///       "uniqueness": "none"
+///     },
+///     {
+///       "name": "name",
+///       "type": "string",
+///       "multiValued": false,
+///       "description": "The resource type name.  When applicable, service providers MUST specify the name, e.g., 'User'.",
+///       "required": true,
+///       "caseExact": false,
+///       "mutability": "readOnly",
+///       "returned": "default",
+///       "uniqueness": "none"
+///     },
+///     {
+///       "name": "description",
+///       "type": "string",
+///       "multiValued": false,
+///       "description": "The resource type's human-readable description.  When applicable, service providers MUST specify the description.",
+///       "required": false,
+///       "caseExact": false,
+///       "mutability": "readOnly",
+///       "returned": "default",
+///       "uniqueness": "none"
+///     },
+///     {
+///       "name": "endpoint",
+///       "type": "reference",
+///       "referenceTypes": [
+///         "uri"
+///       ],
+///       "multiValued": false,
+///       "description": "The resource type's HTTP-addressable endpoint relative to the Base URL, e.g., '/Users'.",
+///       "required": true,
+///       "caseExact": false,
+///       "mutability": "readOnly",
+///       "returned": "default",
+///       "uniqueness": "none"
+///     },
+///     {
+///       "name": "schema",
+///       "type": "reference",
+///       "referenceTypes": [
+///         "uri"
+///       ],
+///       "multiValued": false,
+///       "description": "The resource type's primary/base schema URI.",
+///       "required": true,
+///       "caseExact": true,
+///       "mutability": "readOnly",
+///       "returned": "default",
+///       "uniqueness": "none"
+///     },
+///     {
+///       "name": "schemaExtensions",
+///       "type": "complex",
+///       "multiValued": false,
+///       "description": "A list of URIs of the resource type's schema extensions.",
+///       "required": true,
+///       "mutability": "readOnly",
+///       "returned": "default",
+///       "subAttributes": [
+///         {
+///           "name": "schema",
+///           "type": "reference",
+///           "referenceTypes": [
+///             "uri"
+///           ],
+///           "multiValued": false,
+///           "description": "The URI of a schema extension.",
+///           "required": true,
+///           "caseExact": true,
+///           "mutability": "readOnly",
+///           "returned": "default",
+///           "uniqueness": "none"
+///         },
+///         {
+///           "name": "required",
+///           "type": "boolean",
+///           "multiValued": false,
+///           "description": "A Boolean value that specifies whether or not the schema extension is required for the resource type.  If true, a resource of this type MUST include this schema extension and also include any attributes declared as required in this schema extension. If false, a resource of this type MAY omit this schema extension.",
+///           "required": true,
+///           "mutability": "readOnly",
+///           "returned": "default"
+///         }
+///       ]
+///     }
+///   ]
+/// }"#;
+/// match Schema::try_from(schema_json) {
+///     Ok(schema) => println!("Successfully converted JSON to Schema: {:?}", schema),
+///     Err(e) => println!("Error converting from JSON to Schema: {}", e),
 /// }
 /// ```
 impl TryFrom<&str> for Schema {
