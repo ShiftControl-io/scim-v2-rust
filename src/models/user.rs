@@ -10,38 +10,53 @@ use crate::utils::error::SCIMError;
 pub struct User {
     // urn:ietf:params:scim:schemas:core:2.0:User
     pub schemas: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
     #[serde(rename = "userName")]
     pub user_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<Name>,
-    #[serde(rename = "displayName")]
+    #[serde(rename = "displayName", skip_serializing_if = "Option::is_none")]
     pub display_name: Option<String>,
-    #[serde(rename = "nickName")]
+    #[serde(rename = "nickName", skip_serializing_if = "Option::is_none")]
     pub nick_name: Option<String>,
-    #[serde(rename = "profileUrl")]
+    #[serde(rename = "profileUrl", skip_serializing_if = "Option::is_none")]
     pub profile_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
-    #[serde(rename = "userType")]
+    #[serde(rename = "userType", skip_serializing_if = "Option::is_none")]
     pub user_type: Option<String>,
-    #[serde(rename = "preferredLanguage")]
+    #[serde(rename = "preferredLanguage", skip_serializing_if = "Option::is_none")]
     pub preferred_language: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub locale: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub timezone: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub active: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub password: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub emails: Option<Vec<Email>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub addresses: Option<Vec<Address>>,
-    #[serde(rename = "phoneNumbers")]
+    #[serde(rename = "phoneNumbers", skip_serializing_if = "Option::is_none")]
     pub phone_numbers: Option<Vec<PhoneNumber>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub ims: Option<Vec<Im>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub photos: Option<Vec<Photo>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub groups: Option<Vec<Group>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub entitlements: Option<Vec<Entitlement>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub roles: Option<Vec<Role>>,
-    #[serde(rename = "x509Certificates")]
+    #[serde(rename = "x509Certificates", skip_serializing_if = "Option::is_none")]
     pub x509_certificates: Option<Vec<X509Certificate>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
-    #[serde(rename = "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User")]
+    #[serde(rename = "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User", skip_serializing_if = "Option::is_none")]
     pub enterprise_user: Option<EnterpriseUser>,
 }
 
@@ -81,15 +96,15 @@ impl Default for User {
 #[derive(Default)]
 pub struct Name {
     pub formatted: Option<String>,
-    #[serde(rename = "familyName")]
+    #[serde(rename = "familyName", skip_serializing_if = "Option::is_none")]
     pub family_name: Option<String>,
-    #[serde(rename = "givenName")]
+    #[serde(rename = "givenName", skip_serializing_if = "Option::is_none")]
     pub given_name: Option<String>,
-    #[serde(rename = "middleName")]
+    #[serde(rename = "middleName", skip_serializing_if = "Option::is_none")]
     pub middle_name: Option<String>,
-    #[serde(rename = "honorificPrefix")]
+    #[serde(rename = "honorificPrefix", skip_serializing_if = "Option::is_none")]
     pub honorific_prefix: Option<String>,
-    #[serde(rename = "honorificSuffix")]
+    #[serde(rename = "honorificSuffix", skip_serializing_if = "Option::is_none")]
     pub honorific_suffix: Option<String>,
 }
 
@@ -97,10 +112,13 @@ pub struct Name {
 #[derive(Serialize, Deserialize, Debug)]
 #[derive(Default)]
 pub struct Email {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub display: Option<String>,
-    #[serde(rename = "type")]
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
     pub type_: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub primary: Option<bool>,
 }
 
@@ -108,15 +126,19 @@ pub struct Email {
 #[derive(Serialize, Deserialize, Debug)]
 #[derive(Default)]
 pub struct Address {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub formatted: Option<String>,
-    #[serde(rename = "streetAddress")]
+    #[serde(rename = "streetAddress", skip_serializing_if = "Option::is_none")]
     pub street_address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub locality: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub region: Option<String>,
-    #[serde(rename = "postalCode")]
+    #[serde(rename = "postalCode", skip_serializing_if = "Option::is_none")]
     pub postal_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub country: Option<String>,
-    #[serde(rename = "type")]
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
     pub type_: Option<String>,
 }
 
@@ -124,10 +146,13 @@ pub struct Address {
 #[derive(Serialize, Deserialize, Debug)]
 #[derive(Default)]
 pub struct PhoneNumber {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub display: Option<String>,
-    #[serde(rename = "type")]
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
     pub type_: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub primary: Option<bool>,
 }
 
@@ -135,10 +160,13 @@ pub struct PhoneNumber {
 #[derive(Serialize, Deserialize, Debug)]
 #[derive(Default)]
 pub struct Im {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub display: Option<String>,
-    #[serde(rename = "type")]
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
     pub type_: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub primary: Option<bool>,
 }
 
@@ -146,10 +174,13 @@ pub struct Im {
 #[derive(Serialize, Deserialize, Debug)]
 #[derive(Default)]
 pub struct Photo {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub display: Option<String>,
-    #[serde(rename = "type")]
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
     pub type_: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub primary: Option<bool>,
 }
 
@@ -157,10 +188,13 @@ pub struct Photo {
 #[derive(Serialize, Deserialize, Debug)]
 #[derive(Default)]
 pub struct Group {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
-    #[serde(rename = "$ref")]
+    #[serde(rename = "$ref", skip_serializing_if = "Option::is_none")]
     pub ref_: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub display: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub type_: Option<String>,
 }
 
@@ -168,10 +202,13 @@ pub struct Group {
 #[derive(Serialize, Deserialize, Debug)]
 #[derive(Default)]
 pub struct Entitlement {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub display: Option<String>,
-    #[serde(rename = "type")]
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
     pub type_: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub primary: Option<bool>,
 }
 
@@ -179,10 +216,13 @@ pub struct Entitlement {
 #[derive(Serialize, Deserialize, Debug)]
 #[derive(Default)]
 pub struct Role {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub display: Option<String>,
-    #[serde(rename = "type")]
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
     pub type_: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub primary: Option<bool>,
 }
 
@@ -190,10 +230,13 @@ pub struct Role {
 #[derive(Serialize, Deserialize, Debug)]
 #[derive(Default)]
 pub struct X509Certificate {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub display: Option<String>,
-    #[serde(rename = "type")]
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
     pub type_: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub primary: Option<bool>,
 }
 

@@ -5,7 +5,7 @@ use crate::models::scim_schema::Meta;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ServiceProviderConfig {
-    #[serde(rename = "documentationUri")]
+    #[serde(rename = "documentationUri", skip_serializing_if = "Option::is_none")]
     pub documentation_uri: Option<String>,
     pub patch: Supported,
     pub bulk: Bulk,
@@ -16,6 +16,7 @@ pub struct ServiceProviderConfig {
     pub etag: Supported,
     #[serde(rename = "authenticationSchemes")]
     pub authentication_schemes: Vec<AuthenticationScheme>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
 }
 
@@ -50,8 +51,9 @@ pub struct AuthenticationScheme {
     pub description: String,
     #[serde(rename = "specUri")]
     pub spec_uri: String,
-    #[serde(rename = "documentationUri")]
+    #[serde(rename = "documentationUri", skip_serializing_if = "Option::is_none")]
     pub documentation_uri: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub primary: Option<bool>,
 }
 
