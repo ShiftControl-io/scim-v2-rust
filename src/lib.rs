@@ -96,6 +96,7 @@ pub mod models {
     pub mod enterprise_user;
     pub mod scim_schema;
     pub mod others;
+    pub mod errors;
 }
 
 /// Declaring the utils module which contains the error submodule
