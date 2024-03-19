@@ -10,6 +10,8 @@ pub enum SCIMError {
     InvalidFieldValue(String),
     SchemaNotFound(String),
     ResourceTypeNotFound(String),
+    RequestError(String),
+    OtherError(String),
 }
 
 
@@ -23,6 +25,8 @@ impl Display for SCIMError {
             SCIMError::InvalidFieldValue(field) => write!(f, "Invalid field value: {}", field),
             SCIMError::SchemaNotFound(field) => write!(f, "Schema not found: {}", field),
             SCIMError::ResourceTypeNotFound(field) => write!(f, "Resource type not found: {}", field),
+            SCIMError::RequestError(e) => write!(f, "Request error: {}", e),
+            SCIMError::OtherError(e) => write!(f, "Other Error: {}", e),
         }
     }
 }
