@@ -19,7 +19,6 @@ pub struct Meta {
 }
 
 
-
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Schema {
     pub id: String,

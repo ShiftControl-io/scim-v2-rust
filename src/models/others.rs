@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use crate::models::user::User;
-use crate::models::scim_schema::Schema;
 use crate::models::group::Group;
+use crate::models::resource_types::ResourceType;
+use crate::models::scim_schema::Schema;
+use crate::models::user::User;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SearchRequest {
@@ -54,6 +55,7 @@ pub enum Resource {
     User(Box<User>),
     Schema(Box<Schema>),
     Group(Box<Group>),
+    ResourceType(Box<ResourceType>),
 }
 
 #[derive(Serialize, Deserialize, Debug)]

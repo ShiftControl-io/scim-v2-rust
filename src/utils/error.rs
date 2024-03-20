@@ -3,26 +3,31 @@ use std::fmt::{Display, Formatter};
 
 #[derive(Debug)]
 pub enum SCIMError {
-    SerializationError(serde_json::Error),
+    ConflictError(String),
     DeserializationError(serde_json::Error),
+    InvalidFieldValue(String),
     InvalidJsonFormat,
     MissingRequiredField(String),
-    InvalidFieldValue(String),
-    SchemaNotFound(String),
+    OtherError(String),
+    RequestError(String),
     ResourceTypeNotFound(String),
+    SchemaNotFound(String),
+    SerializationError(serde_json::Error),
 }
-
 
 impl Display for SCIMError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            SCIMError::SerializationError(e) => write!(f, "Serialization error: {}", e),
+            SCIMError::ConflictError(msg) => write!(f, "Conflict error: {}", msg),
             SCIMError::DeserializationError(e) => write!(f, "Deserialization error: {}", e),
+            SCIMError::InvalidFieldValue(msg) => write!(f, "Invalid field value: {}", msg),
             SCIMError::InvalidJsonFormat => write!(f, "Invalid JSON format"),
-            SCIMError::MissingRequiredField(field) => write!(f, "Missing required field: {}", field),
-            SCIMError::InvalidFieldValue(field) => write!(f, "Invalid field value: {}", field),
-            SCIMError::SchemaNotFound(field) => write!(f, "Schema not found: {}", field),
-            SCIMError::ResourceTypeNotFound(field) => write!(f, "Resource type not found: {}", field),
+            SCIMError::MissingRequiredField(msg) => write!(f, "Missing required field: {}", msg),
+            SCIMError::OtherError(msg) => write!(f, "Other Error: {}", msg),
+            SCIMError::RequestError(msg) => write!(f, "Request error: {}", msg),
+            SCIMError::ResourceTypeNotFound(msg) => write!(f, "Resource type not found: {}", msg),
+            SCIMError::SchemaNotFound(msg) => write!(f, "Schema not found: {}", msg),
+            SCIMError::SerializationError(e) => write!(f, "Serialization error: {}", e),
         }
     }
 }
