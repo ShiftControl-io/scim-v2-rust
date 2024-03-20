@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
-use crate::utils::error::SCIMError;
 use crate::models::scim_schema::Meta;
+use crate::utils::error::SCIMError;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ServiceProviderConfig {
@@ -382,6 +382,5 @@ mod tests {
         assert_eq!(http_scheme.spec_uri, "http://www.rfc-editor.org/info/rfc2617");
         assert_eq!(http_scheme.documentation_uri, Some("http://example.com/help/httpBasic.html".to_string()));
         assert_eq!(http_scheme.type_, "httpbasic");
-
     }
 }
