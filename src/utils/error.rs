@@ -20,13 +20,13 @@ impl Display for SCIMError {
         match self {
             SCIMError::ConflictError(msg) => write!(f, "Conflict error: {}", msg),
             SCIMError::DeserializationError(e) => write!(f, "Deserialization error: {}", e),
-            SCIMError::InvalidFieldValue(field) => write!(f, "Invalid field value: {}", field),
+            SCIMError::InvalidFieldValue(msg) => write!(f, "Invalid field value: {}", msg),
             SCIMError::InvalidJsonFormat => write!(f, "Invalid JSON format"),
-            SCIMError::MissingRequiredField(field) => write!(f, "Missing required field: {}", field),
+            SCIMError::MissingRequiredField(msg) => write!(f, "Missing required field: {}", msg),
             SCIMError::OtherError(msg) => write!(f, "Other Error: {}", msg),
             SCIMError::RequestError(msg) => write!(f, "Request error: {}", msg),
-            SCIMError::ResourceTypeNotFound(field) => write!(f, "Resource type not found: {}", field),
-            SCIMError::SchemaNotFound(field) => write!(f, "Schema not found: {}", field),
+            SCIMError::ResourceTypeNotFound(msg) => write!(f, "Resource type not found: {}", msg),
+            SCIMError::SchemaNotFound(msg) => write!(f, "Schema not found: {}", msg),
             SCIMError::SerializationError(e) => write!(f, "Serialization error: {}", e),
         }
     }
