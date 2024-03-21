@@ -114,22 +114,16 @@ impl Default for PatchOp {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct PatchOperations {
     pub op: String,
-    pub value: PatchOpValue,
+    pub value: HashMap<String, Value>,
 }
 
 impl Default for PatchOperations {
     fn default() -> Self {
         PatchOperations {
             op: "".to_string(),
-            value: PatchOpValue::default(),
+            value: HashMap::new(),
         }
     }
-}
-
-#[derive(Default)]
-#[derive(Serialize, Deserialize, Debug)]
-pub struct PatchOpValue {
-    pub attributes: HashMap<String, Value>,
 }
 
 
