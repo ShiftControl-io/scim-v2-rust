@@ -1,4 +1,7 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::models::group::Group;
 use crate::models::resource_types::ResourceType;
@@ -90,3 +93,44 @@ impl Default for ListResponse {
         }
     }
 }
+
+
+#[derive(Serialize, Deserialize, Debug)]
+struct PatchOp {
+    pub schemas: Vec<String>,
+    #[serde(rename = "Operations")]
+    pub operations: Vec<PatchOperations>,
+}
+
+impl Default for PatchOp {
+    fn default() -> Self {
+        PatchOp {
+            schemas: vec!["urn:ietf:params:scim:api:messages:2.0:PatchOp".to_string()],
+            operations: vec![PatchOperations::default()],
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct PatchOperations {
+    pub op: String,
+    pub value: PatchOpValue,
+}
+
+impl Default for PatchOperations {
+    fn default() -> Self {
+        PatchOperations {
+            op: "".to_string(),
+            value: PatchOpValue::default(),
+        }
+    }
+}
+
+#[derive(Default)]
+#[derive(Serialize, Deserialize, Debug)]
+struct PatchOpValue {
+    pub attributes: HashMap<String, Value>,
+}
+
+
+
