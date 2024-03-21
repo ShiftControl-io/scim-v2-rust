@@ -1,13 +1,13 @@
 [package]
 name = "scim_v2"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 authors = ["Dan Gericke <dan@shiftcontrol.io>"]
 description = "A crate that provides utilities for working with the System for Cross-domain Identity Management (SCIM) version 2.0 protocol. (rfc7642, rfc7643, rfc7644)"
 documentation = "https://docs.rs/scim_v2"
 license = "MIT"
 repository = "https://github.com/ShiftControl-io/scim_v2"
-rust-version = "1.56"
+rust-version = "1.65"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
@@ -22,12 +22,8 @@ rustversion = "1.0.14"
 pretty_assertions = "1.4.0"
 
 [lib]
-doc-scrape-examples = false
+doc-scrape-examples = true
 
 [package.metadata.docs.rs]
-features = ["preserve_order", "raw_value", "unbounded_depth"]
 targets = ["x86_64-unknown-linux-gnu"]
 rustdoc-args = ["--cfg", "docsrs", "--generate-link-to-definition"]
-
-[package.metadata.playground]
-features = ["raw_value"]

@@ -1,0 +1,24 @@
+name: Publish scim_v2 crate to crates.io
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*.*.*"
+jobs:
+  publish:
+    name: Publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: hecrj/setup-rust-action@v2
+        with:
+            rust-version: stable
+            profile: minimal
+
+      - run: cargo publish --token ${CRATES_TOKEN}
+        env:
+          CRATES_TOKEN: ${{ secrets.CRATES_TOKEN }}
