@@ -3,6 +3,7 @@ use std::fmt::{Display, Formatter};
 
 #[derive(Debug)]
 pub enum SCIMError {
+    // Todo: Add 400 bad request SCIM Detail Error Keyword Values mentioned here: https://datatracker.ietf.org/doc/html/rfc7644#section-3.12
     ConflictError(String),
     DeserializationError(serde_json::Error),
     InvalidFieldValue(String),
