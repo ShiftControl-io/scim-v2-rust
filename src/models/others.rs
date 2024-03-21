@@ -96,7 +96,7 @@ impl Default for ListResponse {
 
 
 #[derive(Serialize, Deserialize, Debug)]
-struct PatchOp {
+pub struct PatchOp {
     pub schemas: Vec<String>,
     #[serde(rename = "Operations")]
     pub operations: Vec<PatchOperations>,
@@ -112,7 +112,7 @@ impl Default for PatchOp {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct PatchOperations {
+pub struct PatchOperations {
     pub op: String,
     pub value: PatchOpValue,
 }
@@ -128,7 +128,7 @@ impl Default for PatchOperations {
 
 #[derive(Default)]
 #[derive(Serialize, Deserialize, Debug)]
-struct PatchOpValue {
+pub struct PatchOpValue {
     pub attributes: HashMap<String, Value>,
 }
 
