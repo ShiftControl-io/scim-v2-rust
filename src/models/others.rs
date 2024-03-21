@@ -45,7 +45,7 @@ impl Default for ListQuery {
     fn default() -> Self {
         ListQuery {
             filter: Some("".to_string()),
-            start_index: 1,
+            start_index: Some(1),
             count: Some(100),
         }
     }
