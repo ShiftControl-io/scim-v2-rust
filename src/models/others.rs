@@ -39,6 +39,10 @@ pub struct ListQuery {
     pub start_index: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub count: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attributes: Option<String>,
+    #[serde(rename = "excludedAttributes", skip_serializing_if = "Option::is_none")]
+    pub excluded_attributes: Option<String>,
 }
 
 impl Default for ListQuery {
@@ -47,6 +51,8 @@ impl Default for ListQuery {
             filter: Some("".to_string()),
             start_index: Some(1),
             count: Some(100),
+            attributes: Some("".to_string()),
+            excluded_attributes: Some("".to_string()),
         }
     }
 }
