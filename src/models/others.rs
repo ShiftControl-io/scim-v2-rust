@@ -1,4 +1,7 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::models::group::Group;
 use crate::models::resource_types::ResourceType;
@@ -33,18 +36,26 @@ impl Default for SearchRequest {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ListQuery {
-    pub filter: String,
-    #[serde(rename = "startIndex")]
-    pub start_index: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filter: Option<String>,
+    #[serde(rename = "startIndex", skip_serializing_if = "Option::is_none")]
+    pub start_index: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub count: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attributes: Option<String>,
+    #[serde(rename = "excludedAttributes", skip_serializing_if = "Option::is_none")]
+    pub excluded_attributes: Option<String>,
 }
 
 impl Default for ListQuery {
     fn default() -> Self {
         ListQuery {
-            filter: "".to_string(),
-            start_index: 1,
+            filter: Some("".to_string()),
+            start_index: Some(1),
             count: Some(100),
+            attributes: Some("".to_string()),
+            excluded_attributes: Some("".to_string()),
         }
     }
 }
@@ -82,3 +93,38 @@ impl Default for ListResponse {
         }
     }
 }
+
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct PatchOp {
+    pub schemas: Vec<String>,
+    #[serde(rename = "Operations")]
+    pub operations: Vec<PatchOperations>,
+}
+
+impl Default for PatchOp {
+    fn default() -> Self {
+        PatchOp {
+            schemas: vec!["urn:ietf:params:scim:api:messages:2.0:PatchOp".to_string()],
+            operations: vec![PatchOperations::default()],
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct PatchOperations {
+    pub op: String,
+    pub value: HashMap<String, Value>,
+}
+
+impl Default for PatchOperations {
+    fn default() -> Self {
+        PatchOperations {
+            op: "".to_string(),
+            value: HashMap::new(),
+        }
+    }
+}
+
+
+
