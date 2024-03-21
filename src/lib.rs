@@ -78,10 +78,6 @@
 //! For more examples and usage details, refer to the documentation of each function and struct.
 
 
-/// External crate imports
-extern crate serde;
-extern crate serde_json;
-
 // Include the schema files into the binary.
 const USER_SCHEMA: &str = include_str!("schemas/user.json");
 const GROUP_SCHEMA: &str = include_str!("schemas/group.json");
