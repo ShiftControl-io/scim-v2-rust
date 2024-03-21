@@ -35,8 +35,9 @@ impl Default for SearchRequest {
 pub struct ListQuery {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filter: Option<String>,
-    #[serde(rename = "startIndex")]
-    pub start_index: i64,
+    #[serde(rename = "startIndex", skip_serializing_if = "Option::is_none")]
+    pub start_index: Some(i64),
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub count: Option<i64>,
 }
 
