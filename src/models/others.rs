@@ -33,7 +33,8 @@ impl Default for SearchRequest {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ListQuery {
-    pub filter: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filter: Option<String>,
     #[serde(rename = "startIndex")]
     pub start_index: i64,
     pub count: Option<i64>,
@@ -42,7 +43,7 @@ pub struct ListQuery {
 impl Default for ListQuery {
     fn default() -> Self {
         ListQuery {
-            filter: "".to_string(),
+            filter: Some("".to_string()),
             start_index: 1,
             count: Some(100),
         }
