@@ -19,7 +19,7 @@ To use \`scim_v2\` in your project, add the following to your \`Cargo.toml\`:
 
 ```toml
 [dependencies]
-scim_v2 = "0.2.2"
+scim_v2 = "0.2.3"
 ```
 
 Then run \`cargo build\` to download and compile the \`scim_v2\` crate and all its dependencies.
