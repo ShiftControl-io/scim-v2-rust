@@ -6,7 +6,7 @@ authors = ["Dan Gericke <dan@shiftcontrol.io>"]
 description = "A crate that provides utilities for working with the System for Cross-domain Identity Management (SCIM) version 2.0 protocol. (rfc7642, rfc7643, rfc7644)"
 documentation = "https://docs.rs/scim_v2"
 license = "MIT"
-repository = "https://github.com/ShiftControl-io/scim_v2"
+repository = "https://github.com/ShiftControl-io/scim-v2-rust"
 rust-version = "1.65"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
