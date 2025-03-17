@@ -351,16 +351,16 @@ mod tests {
         }
         assert!(resource_type.is_ok());
         let resource_type = resource_type.unwrap();
-        std::assert_eq!(resource_type.id, Some("User".to_string()));
-        std::assert_eq!(resource_type.name, "User");
-        std::assert_eq!(resource_type.endpoint, "/Users");
-        std::assert_eq!(resource_type.description, Some("User Account".to_string()));
-        std::assert_eq!(resource_type.schema, "urn:ietf:params:scim:schemas:core:2.0:User");
+        assert_eq!(resource_type.id, Some("User".to_string()));
+        assert_eq!(resource_type.name, "User");
+        assert_eq!(resource_type.endpoint, "/Users");
+        assert_eq!(resource_type.description, Some("User Account".to_string()));
+        assert_eq!(resource_type.schema, "urn:ietf:params:scim:schemas:core:2.0:User");
         let schema_extensions = resource_type.schema_extensions.unwrap();
-        std::assert_eq!(schema_extensions.len(), 1);
+        assert_eq!(schema_extensions.len(), 1);
         let schema_extension = &schema_extensions[0];
-        std::assert_eq!(schema_extension.schema, "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User");
-        std::assert_eq!(schema_extension.required, true);
+        assert_eq!(schema_extension.schema, "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User");
+        assert_eq!(schema_extension.required, true);
     }
 
     #[test]
@@ -403,18 +403,18 @@ mod tests {
         let resource_type_names = vec!["user", "group", "enterprise_user"];
         let resource_types = get_resource_types(resource_type_names).unwrap();
 
-        std::assert_eq!(resource_types.len(), 2);
+        assert_eq!(resource_types.len(), 2);
 
         let user_resource_type = &resource_types[0];
-        std::assert_eq!(user_resource_type.name, "User");
-        std::assert_eq!(user_resource_type.endpoint, "/Users");
-        std::assert_eq!(user_resource_type.schema, "urn:ietf:params:scim:schemas:core:2.0:User");
+        assert_eq!(user_resource_type.name, "User");
+        assert_eq!(user_resource_type.endpoint, "/Users");
+        assert_eq!(user_resource_type.schema, "urn:ietf:params:scim:schemas:core:2.0:User");
         assert!(user_resource_type.schema_extensions.is_some());
 
         let group_resource_type = &resource_types[1];
-        std::assert_eq!(group_resource_type.name, "Group");
-        std::assert_eq!(group_resource_type.endpoint, "/Groups");
-        std::assert_eq!(group_resource_type.schema, "urn:ietf:params:scim:schemas:core:2.0:Group");
+        assert_eq!(group_resource_type.name, "Group");
+        assert_eq!(group_resource_type.endpoint, "/Groups");
+        assert_eq!(group_resource_type.schema, "urn:ietf:params:scim:schemas:core:2.0:Group");
         assert!(group_resource_type.schema_extensions.is_none());
     }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "scim_v2"
-version = "0.2.4"
+version = "0.2.5"
 edition = "2021"
 authors = ["Dan Gericke <dan@shiftcontrol.io>"]
 description = "A crate that provides utilities for working with the System for Cross-domain Identity Management (SCIM) version 2.0 protocol. (rfc7642, rfc7643, rfc7644)"
@@ -11,14 +11,14 @@ rust-version = "1.65"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-serde = { version = "1.0.218", features = ["derive"] }
-serde_json = "1.0.139"
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.140"
 
 [dev-dependencies]
-automod = "1.0.14"
-indoc = "2.0.5"
-ref-cast = "1.0.23"
-rustversion = "1.0.19"
+automod = "1.0.15"
+indoc = "2.0.6"
+ref-cast = "1.0.24"
+rustversion = "1.0.20"
 pretty_assertions = "1.4.1"
 
 [lib]
