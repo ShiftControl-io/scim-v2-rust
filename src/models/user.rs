@@ -306,7 +306,6 @@ impl User {
     /// # Note
     ///
     /// The actual validation requirements will depend on the specifics of your application and the SCIM (System for Cross-domain Identity Management) protocol you are implementing.
-
     pub fn validate(&self) -> Result<(), SCIMError> {
         // Pretty much every field is optional in the schema except for 2. We'll check for those here.
         if self.schemas.is_empty() {
@@ -716,14 +715,14 @@ mod tests {
         assert!(user.is_ok());
         let user = user.unwrap();
         let enterprise_user = user.enterprise_user.unwrap();
-        std::assert_eq!(enterprise_user.employee_number, Some("701984".to_string()));
-        std::assert_eq!(enterprise_user.cost_center, Some("4130".to_string()));
-        std::assert_eq!(enterprise_user.organization, Some("Universal Studios".to_string()));
-        std::assert_eq!(enterprise_user.division, Some("Theme Park".to_string()));
-        std::assert_eq!(enterprise_user.department, Some("Tour Operations".to_string()));
+        assert_eq!(enterprise_user.employee_number, Some("701984".to_string()));
+        assert_eq!(enterprise_user.cost_center, Some("4130".to_string()));
+        assert_eq!(enterprise_user.organization, Some("Universal Studios".to_string()));
+        assert_eq!(enterprise_user.division, Some("Theme Park".to_string()));
+        assert_eq!(enterprise_user.department, Some("Tour Operations".to_string()));
         let manager = enterprise_user.manager.unwrap();
-        std::assert_eq!(manager.value, Some("26118915-6090-4610-87e4-49d8ca9f808d".to_string()));
-        std::assert_eq!(manager.display_name, Some("John Smith".to_string()));
+        assert_eq!(manager.value, Some("26118915-6090-4610-87e4-49d8ca9f808d".to_string()));
+        assert_eq!(manager.display_name, Some("John Smith".to_string()));
     }
 
     #[test]
