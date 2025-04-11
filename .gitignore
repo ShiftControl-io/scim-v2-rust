@@ -46,3 +46,5 @@ Network Trash Folder
 Temporary Items
 .apdisk
 
+# the lockfile should never be checked into version control for crates
+Cargo.lock

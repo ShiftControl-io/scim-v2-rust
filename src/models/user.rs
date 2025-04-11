@@ -12,6 +12,8 @@ pub struct User {
     pub schemas: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
+    #[serde(rename = "externalId", skip_serializing_if = "Option::is_none")]
+    pub external_id: Option<String>,
     #[serde(rename = "userName")]
     pub user_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -56,7 +58,10 @@ pub struct User {
     pub x509_certificates: Option<Vec<X509Certificate>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
-    #[serde(rename = "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub enterprise_user: Option<EnterpriseUser>,
 }
 
@@ -66,6 +71,7 @@ impl Default for User {
             schemas: vec!["urn:ietf:params:scim:schemas:core:2.0:User".to_string()],
             user_name: "".to_string(),
             id: None,
+            external_id: None,
             name: None,
             display_name: None,
             nick_name: None,
@@ -92,8 +98,7 @@ impl Default for User {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-#[derive(Default)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 pub struct Name {
     pub formatted: Option<String>,
     #[serde(rename = "familyName", skip_serializing_if = "Option::is_none")]
@@ -108,9 +113,7 @@ pub struct Name {
     pub honorific_suffix: Option<String>,
 }
 
-
-#[derive(Serialize, Deserialize, Debug)]
-#[derive(Default)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 pub struct Email {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
@@ -122,9 +125,7 @@ pub struct Email {
     pub primary: Option<bool>,
 }
 
-
-#[derive(Serialize, Deserialize, Debug)]
-#[derive(Default)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 pub struct Address {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub formatted: Option<String>,
@@ -142,9 +143,7 @@ pub struct Address {
     pub type_: Option<String>,
 }
 
-
-#[derive(Serialize, Deserialize, Debug)]
-#[derive(Default)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 pub struct PhoneNumber {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
@@ -156,9 +155,7 @@ pub struct PhoneNumber {
     pub primary: Option<bool>,
 }
 
-
-#[derive(Serialize, Deserialize, Debug)]
-#[derive(Default)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 pub struct Im {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
@@ -170,9 +167,7 @@ pub struct Im {
     pub primary: Option<bool>,
 }
 
-
-#[derive(Serialize, Deserialize, Debug)]
-#[derive(Default)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 pub struct Photo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
@@ -184,9 +179,7 @@ pub struct Photo {
     pub primary: Option<bool>,
 }
 
-
-#[derive(Serialize, Deserialize, Debug)]
-#[derive(Default)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 pub struct Group {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
@@ -198,9 +191,7 @@ pub struct Group {
     pub type_: Option<String>,
 }
 
-
-#[derive(Serialize, Deserialize, Debug)]
-#[derive(Default)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 pub struct Entitlement {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
@@ -212,9 +203,7 @@ pub struct Entitlement {
     pub primary: Option<bool>,
 }
 
-
-#[derive(Serialize, Deserialize, Debug)]
-#[derive(Default)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 pub struct Role {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
@@ -226,9 +215,7 @@ pub struct Role {
     pub primary: Option<bool>,
 }
 
-
-#[derive(Serialize, Deserialize, Debug)]
-#[derive(Default)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 pub struct X509Certificate {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
@@ -239,7 +226,6 @@ pub struct X509Certificate {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub primary: Option<bool>,
 }
-
 
 /// Converts a JSON string into a `User` struct.
 ///
@@ -402,15 +388,24 @@ mod tests {
         }
         assert!(user.is_ok());
         let user = user.unwrap();
-        assert_eq!(user.schemas, vec!["urn:ietf:params:scim:schemas:core:2.0:User"]);
-        assert_eq!(user.id, Some("2819c223-7f76-453a-919d-413861904646".to_string()));
+        assert_eq!(
+            user.schemas,
+            vec!["urn:ietf:params:scim:schemas:core:2.0:User"]
+        );
+        assert_eq!(
+            user.id,
+            Some("2819c223-7f76-453a-919d-413861904646".to_string())
+        );
         assert_eq!(user.user_name, "bjensen@example.com");
         let meta = user.meta.unwrap();
         assert_eq!(meta.resource_type, Some("User".to_string()));
         assert_eq!(meta.created, Some("2010-01-23T04:56:22Z".to_string()));
         assert_eq!(meta.last_modified, Some("2011-05-13T04:42:34Z".to_string()));
         assert_eq!(meta.version, Some("W/\"3694e05e9dff590\"".to_string()));
-        assert_eq!(meta.location, Some("https://example.com/v2/Users/2819c223-7f76-453a-919d-413861904646".to_string()));
+        assert_eq!(
+            meta.location,
+            Some("https://example.com/v2/Users/2819c223-7f76-453a-919d-413861904646".to_string())
+        );
     }
 
     #[test]
@@ -537,24 +532,55 @@ mod tests {
 
         assert!(user.is_ok());
         let user = user.unwrap();
-        assert_eq!(user.schemas, vec!["urn:ietf:params:scim:schemas:core:2.0:User"]);
-        assert_eq!(user.id, Some("2819c223-7f76-453a-919d-413861904646".to_string()));
+        assert_eq!(
+            user.schemas,
+            vec!["urn:ietf:params:scim:schemas:core:2.0:User"]
+        );
+        assert_eq!(
+            user.id,
+            Some("2819c223-7f76-453a-919d-413861904646".to_string())
+        );
+        assert_eq!(user.external_id.as_deref(), Some("701984"));
         assert_eq!(user.user_name, "bjensen@example.com");
-        assert_eq!(user.name.as_ref().unwrap().formatted, Some("Ms. Barbara J Jensen, III".to_string()));
+        assert_eq!(
+            user.name.as_ref().unwrap().formatted,
+            Some("Ms. Barbara J Jensen, III".to_string())
+        );
         assert_eq!(user.display_name, Some("Babs Jensen".to_string()));
         assert_eq!(user.nick_name, Some("Babs".to_string()));
-        assert_eq!(user.profile_url, Some("https://login.example.com/bjensen".to_string()));
+        assert_eq!(
+            user.profile_url,
+            Some("https://login.example.com/bjensen".to_string())
+        );
         assert_eq!(user.emails.as_ref().unwrap().len(), 2);
-        assert_eq!(user.emails.as_ref().unwrap()[0].value, Some("bjensen@example.com".to_string()));
-        assert_eq!(user.emails.as_ref().unwrap()[0].type_, Some("work".to_string()));
+        assert_eq!(
+            user.emails.as_ref().unwrap()[0].value,
+            Some("bjensen@example.com".to_string())
+        );
+        assert_eq!(
+            user.emails.as_ref().unwrap()[0].type_,
+            Some("work".to_string())
+        );
         assert_eq!(user.addresses.as_ref().unwrap().len(), 2);
-        assert_eq!(user.addresses.as_ref().unwrap()[0].type_.as_ref().unwrap(), "work");
+        assert_eq!(
+            user.addresses.as_ref().unwrap()[0].type_.as_ref().unwrap(),
+            "work"
+        );
         assert_eq!(user.phone_numbers.as_ref().unwrap().len(), 2);
-        assert_eq!(user.phone_numbers.as_ref().unwrap()[0].value, Some("555-555-5555".to_string()));
+        assert_eq!(
+            user.phone_numbers.as_ref().unwrap()[0].value,
+            Some("555-555-5555".to_string())
+        );
         assert_eq!(user.ims.as_ref().unwrap().len(), 1);
-        assert_eq!(user.ims.as_ref().unwrap()[0].value, Some("someaimhandle".to_string()));
+        assert_eq!(
+            user.ims.as_ref().unwrap()[0].value,
+            Some("someaimhandle".to_string())
+        );
         assert_eq!(user.groups.as_ref().unwrap().len(), 3);
-        assert_eq!(user.groups.as_ref().unwrap()[0].value, Some("e9e30dba-f08f-4109-8486-d5c6a331660a".to_string()));
+        assert_eq!(
+            user.groups.as_ref().unwrap()[0].value,
+            Some("e9e30dba-f08f-4109-8486-d5c6a331660a".to_string())
+        );
         assert_eq!(user.x509_certificates.as_ref().unwrap().len(), 1);
         assert_eq!(user.x509_certificates.as_ref().unwrap()[0].value, Some("MIIDQzCCAqygAwIBAgICEAAwDQYJKoZIhvcNAQEFBQAwTjELMAkGA1UEBhMCVVMxEzARBgNVBAgMCkNhbGlmb3JuaWExFDASBgNVBAoMC2V4YW1wbGUuY29tMRQwEgYDVQQDDAtleGFtcGxlLmNvbTAeFw0xMTEwMjIwNjI0MzFaFw0xMjEwMDQwNjI0MzFaMH8xCzAJBgNVBAYTAlVTMRMwEQYDVQQIDApDYWxpZm9ybmlhMRQwEgYDVQQKDAtleGFtcGxlLmNvbTEhMB8GA1UEAwwYTXMuIEJhcmJhcmEgSiBKZW5zZW4gSUlJMSIwIAYJKoZIhvcNAQkBFhNiamVuc2VuQGV4YW1wbGUuY29tMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA7Kr+Dcds/JQ5GwejJFcBIP682X3xpjis56AK02bc1FLgzdLI8auoR+cC9/Vrh5t66HkQIOdA4unHh0AaZ4xL5PhVbXIPMB5vAPKpzz5iPSi8xO8SL7I7SDhcBVJhqVqr3HgllEG6UClDdHO7nkLuwXq8HcISKkbT5WFTVfFZzidPl8HZ7DhXkZIRtJwBweq4bvm3hM1Os7UQH05ZS6cVDgweKNwdLLrT51ikSQG3DYrl+ft781UQRIqxgwqCfXEuDiinPh0kkvIi5jivVu1Z9QiwlYEdRbLJ4zJQBmDrSGTMYn4lRc2HgHO4DqB/bnMVorHB0CC6AV1QoFK4GPe1LwIDAQABo3sweTAJBgNVHRMEAjAAMCwGCWCGSAGG+EIBDQQfFh1PcGVuU1NMIEdlbmVyYXRlZCBDZXJ0aWZpY2F0ZTAdBgNVHQ4EFgQU8pD0U0vsZIsaA16lL8En8bx0F/gwHwYDVR0jBBgwFoAUdGeKitcaF7gnzsNwDx708kqaVt0wDQYJKoZIhvcNAQEFBQADgYEAA81SsFnOdYJtNg5Tcq+/ByEDrBgnusx0jloUhByPMEVkoMZ3J7j1ZgI8rAbOkNngX8+pKfTiDz1RC4+dx8oU6Za+4NJXUjlL5CvV6BEYb1+QAEJwitTVvxB/A67g42/vzgAtoRUeDov1+GFiBZ+GNF/cAYKcMtGcrs2i97ZkJMo=".to_string()), "x509_certificates[0].value did not match expected value");
         let meta = user.meta.unwrap();
@@ -562,7 +588,10 @@ mod tests {
         assert_eq!(meta.created, Some("2010-01-23T04:56:22Z".to_string()));
         assert_eq!(meta.last_modified, Some("2011-05-13T04:42:34Z".to_string()));
         assert_eq!(meta.version, Some("W/\"a330bc54f0671c9\"".to_string()));
-        assert_eq!(meta.location, Some("https://example.com/v2/Users/2819c223-7f76-453a-919d-413861904646".to_string()));
+        assert_eq!(
+            meta.location,
+            Some("https://example.com/v2/Users/2819c223-7f76-453a-919d-413861904646".to_string())
+        );
     }
 
     #[test]
@@ -717,11 +746,20 @@ mod tests {
         let enterprise_user = user.enterprise_user.unwrap();
         assert_eq!(enterprise_user.employee_number, Some("701984".to_string()));
         assert_eq!(enterprise_user.cost_center, Some("4130".to_string()));
-        assert_eq!(enterprise_user.organization, Some("Universal Studios".to_string()));
+        assert_eq!(
+            enterprise_user.organization,
+            Some("Universal Studios".to_string())
+        );
         assert_eq!(enterprise_user.division, Some("Theme Park".to_string()));
-        assert_eq!(enterprise_user.department, Some("Tour Operations".to_string()));
+        assert_eq!(
+            enterprise_user.department,
+            Some("Tour Operations".to_string())
+        );
         let manager = enterprise_user.manager.unwrap();
-        assert_eq!(manager.value, Some("26118915-6090-4610-87e4-49d8ca9f808d".to_string()));
+        assert_eq!(
+            manager.value,
+            Some("26118915-6090-4610-87e4-49d8ca9f808d".to_string())
+        );
         assert_eq!(manager.display_name, Some("John Smith".to_string()));
     }
 
