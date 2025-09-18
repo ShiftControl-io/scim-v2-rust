@@ -94,37 +94,47 @@ impl Default for ListResponse {
     }
 }
 
-
 #[derive(Serialize, Deserialize, Debug)]
 pub struct PatchOp {
     pub schemas: Vec<String>,
     #[serde(rename = "Operations")]
-    pub operations: Vec<PatchOperations>,
+    pub operations: Vec<PatchOperation>,
 }
 
 impl Default for PatchOp {
     fn default() -> Self {
         PatchOp {
             schemas: vec!["urn:ietf:params:scim:api:messages:2.0:PatchOp".to_string()],
-            operations: vec![PatchOperations::default()],
+            operations: vec![PatchOperation::default()],
         }
     }
 }
 
+/// Enum for SCIM PATCH operation types (RFC 7644, section 3.5.2)
 #[derive(Serialize, Deserialize, Debug)]
-pub struct PatchOperations {
-    pub op: String,
-    pub value: HashMap<String, Value>,
+#[serde(rename_all = "lowercase")]
+pub enum PatchOpType {
+    Add,
+    Remove,
+    Replace,
 }
 
-impl Default for PatchOperations {
+/// Represents a single PATCH operation in SCIM
+#[derive(Serialize, Deserialize, Debug)]
+pub struct PatchOperation {
+    pub op: PatchOpType,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<Value>,
+}
+
+impl Default for PatchOperation {
     fn default() -> Self {
-        PatchOperations {
-            op: "".to_string(),
-            value: HashMap::new(),
+        PatchOperation {
+            op: PatchOpType::Add,
+            path: None,
+            value: None,
         }
     }
 }
-
-
-
