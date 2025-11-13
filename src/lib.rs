@@ -77,7 +77,6 @@
 //! ```
 //! For more examples and usage details, refer to the documentation of each function and struct.
 
-
 // Include the schema files into the binary.
 const USER_SCHEMA: &str = include_str!("schemas/user.json");
 const GROUP_SCHEMA: &str = include_str!("schemas/group.json");
@@ -85,21 +84,17 @@ const ENTERPRISE_USER_SCHEMA: &str = include_str!("schemas/enterprise_user.json"
 
 /// Declaring the models module which contains various submodules
 pub mod models {
-    pub mod user;
-    pub mod group;
-    pub mod resource_types;
-    pub mod service_provider_config;
     pub mod enterprise_user;
-    pub mod scim_schema;
-    pub mod others;
     pub mod errors;
+    pub mod group;
+    pub mod others;
+    pub mod resource_types;
+    pub mod scim_schema;
+    pub mod service_provider_config;
+    pub mod user;
 }
 
 /// Declaring the utils module which contains the error submodule
 pub mod utils {
     pub mod error;
 }
-
-
-
-

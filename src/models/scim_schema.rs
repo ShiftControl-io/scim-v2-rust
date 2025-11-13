@@ -1,10 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{ENTERPRISE_USER_SCHEMA, GROUP_SCHEMA, USER_SCHEMA};
 use crate::utils::error::SCIMError;
+use crate::{ENTERPRISE_USER_SCHEMA, GROUP_SCHEMA, USER_SCHEMA};
 
-#[derive(Serialize, Deserialize, Debug)]
-#[derive(Default)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 pub struct Meta {
     #[serde(rename = "resourceType", skip_serializing_if = "Option::is_none")]
     pub resource_type: Option<String>,
@@ -17,7 +16,6 @@ pub struct Meta {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub location: Option<String>,
 }
-
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Schema {
@@ -118,7 +116,10 @@ pub fn get_schemas(schema_names: Vec<&str>) -> Result<Vec<Schema>, SCIMError> {
         ("user", USER_SCHEMA),
         ("enterprise_user", ENTERPRISE_USER_SCHEMA),
         ("group", GROUP_SCHEMA),
-    ].iter().cloned().collect::<std::collections::HashMap<_, _>>();
+    ]
+    .iter()
+    .cloned()
+    .collect::<std::collections::HashMap<_, _>>();
 
     for schema_name in schema_names {
         if let Some(schema_content) = schema_contents.get(schema_name) {
@@ -453,8 +454,14 @@ mod tests {
         assert_eq!(schemas[0].name, "User");
         assert_eq!(schemas[0].description, "User Account");
         assert_eq!(schemas[0].attributes.len(), 21);
-        assert_eq!(schemas[0].meta.resource_type.as_ref(), Some(&"Schema".to_string()));
-        assert_eq!(schemas[0].meta.location.as_ref(), Some(&"/v2/Schemas/urn:ietf:params:scim:schemas:core:2.0:User".to_string()));
+        assert_eq!(
+            schemas[0].meta.resource_type.as_ref(),
+            Some(&"Schema".to_string())
+        );
+        assert_eq!(
+            schemas[0].meta.location.as_ref(),
+            Some(&"/v2/Schemas/urn:ietf:params:scim:schemas:core:2.0:User".to_string())
+        );
     }
 
     #[test]

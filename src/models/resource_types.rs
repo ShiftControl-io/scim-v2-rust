@@ -76,7 +76,9 @@ impl Default for SchemaExtension {
 ///     Err(e) => println!("Error getting resource types: {}", e),
 /// }
 /// ```
-pub fn get_resource_types(mut resource_type_names: Vec<&str>) -> Result<Vec<ResourceType>, SCIMError> {
+pub fn get_resource_types(
+    mut resource_type_names: Vec<&str>,
+) -> Result<Vec<ResourceType>, SCIMError> {
     let mut resource_types = Vec::new();
     let has_enterprise_user = resource_type_names.contains(&"enterprise_user");
     // Remove "enterprise_user" from the vector
@@ -94,12 +96,11 @@ pub fn get_resource_types(mut resource_type_names: Vec<&str>) -> Result<Vec<Reso
                     description: Some("User Account".to_string()),
                     schema: "urn:ietf:params:scim:schemas:core:2.0:User".to_string(),
                     schema_extensions: if has_enterprise_user {
-                        Some(vec![
-                            SchemaExtension {
-                                schema: "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User".to_string(),
-                                required: true,
-                            },
-                        ])
+                        Some(vec![SchemaExtension {
+                            schema: "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User"
+                                .to_string(),
+                            required: true,
+                        }])
                     } else {
                         None
                     },
@@ -131,12 +132,15 @@ pub fn get_resource_types(mut resource_type_names: Vec<&str>) -> Result<Vec<Reso
                 };
                 resource_types.push(group_resource_type);
             }
-            _ => return Err(SCIMError::ResourceTypeNotFound(resource_type_name.to_string())),
+            _ => {
+                return Err(SCIMError::ResourceTypeNotFound(
+                    resource_type_name.to_string(),
+                ))
+            }
         }
     }
     Ok(resource_types)
 }
-
 
 /// Converts a JSON string into a `ResourceType` struct.
 ///
@@ -344,7 +348,8 @@ mod tests {
                 }
             }"#;
 
-        let resource_type: Result<ResourceType, serde_json::Error> = serde_json::from_str(json_data);
+        let resource_type: Result<ResourceType, serde_json::Error> =
+            serde_json::from_str(json_data);
 
         if let Err(e) = &resource_type {
             eprintln!("Deserialization failed: {:?}", e);
@@ -355,11 +360,17 @@ mod tests {
         assert_eq!(resource_type.name, "User");
         assert_eq!(resource_type.endpoint, "/Users");
         assert_eq!(resource_type.description, Some("User Account".to_string()));
-        assert_eq!(resource_type.schema, "urn:ietf:params:scim:schemas:core:2.0:User");
+        assert_eq!(
+            resource_type.schema,
+            "urn:ietf:params:scim:schemas:core:2.0:User"
+        );
         let schema_extensions = resource_type.schema_extensions.unwrap();
         assert_eq!(schema_extensions.len(), 1);
         let schema_extension = &schema_extensions[0];
-        assert_eq!(schema_extension.schema, "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User");
+        assert_eq!(
+            schema_extension.schema,
+            "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User"
+        );
         assert_eq!(schema_extension.required, true);
     }
 
@@ -384,7 +395,8 @@ mod tests {
                 }
             }"#;
 
-        let resource_type: Result<ResourceType, serde_json::Error> = serde_json::from_str(json_data);
+        let resource_type: Result<ResourceType, serde_json::Error> =
+            serde_json::from_str(json_data);
 
         if let Err(e) = &resource_type {
             eprintln!("Deserialization failed: {:?}", e);
@@ -395,7 +407,10 @@ mod tests {
         assert_eq!(resource_type.name, "Group");
         assert_eq!(resource_type.endpoint, "/Groups");
         assert_eq!(resource_type.description, Some("Group".to_string()));
-        assert_eq!(resource_type.schema, "urn:ietf:params:scim:schemas:core:2.0:Group");
+        assert_eq!(
+            resource_type.schema,
+            "urn:ietf:params:scim:schemas:core:2.0:Group"
+        );
     }
 
     #[test]
@@ -408,13 +423,19 @@ mod tests {
         let user_resource_type = &resource_types[0];
         assert_eq!(user_resource_type.name, "User");
         assert_eq!(user_resource_type.endpoint, "/Users");
-        assert_eq!(user_resource_type.schema, "urn:ietf:params:scim:schemas:core:2.0:User");
+        assert_eq!(
+            user_resource_type.schema,
+            "urn:ietf:params:scim:schemas:core:2.0:User"
+        );
         assert!(user_resource_type.schema_extensions.is_some());
 
         let group_resource_type = &resource_types[1];
         assert_eq!(group_resource_type.name, "Group");
         assert_eq!(group_resource_type.endpoint, "/Groups");
-        assert_eq!(group_resource_type.schema, "urn:ietf:params:scim:schemas:core:2.0:Group");
+        assert_eq!(
+            group_resource_type.schema,
+            "urn:ietf:params:scim:schemas:core:2.0:Group"
+        );
         assert!(group_resource_type.schema_extensions.is_none());
     }
 }

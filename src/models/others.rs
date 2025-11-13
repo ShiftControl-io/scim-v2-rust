@@ -9,14 +9,14 @@ use crate::models::scim_schema::Schema;
 use crate::models::user::User;
 
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct SearchRequest {
     pub schemas: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attributes: Option<Vec<String>>,
-    #[serde(rename = "excludedAttributes", skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     excluded_attributes: Option<Vec<String>>,
     pub filter: String,
-    #[serde(rename = "startIndex")]
     pub start_index: i64,
     pub count: i64,
 }
@@ -35,16 +35,17 @@ impl Default for SearchRequest {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct ListQuery {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filter: Option<String>,
-    #[serde(rename = "startIndex", skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub start_index: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub count: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attributes: Option<String>,
-    #[serde(rename = "excludedAttributes", skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub excluded_attributes: Option<String>,
 }
 
@@ -70,12 +71,10 @@ pub enum Resource {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct ListResponse {
-    #[serde(rename = "itemsPerPage")]
     pub items_per_page: i64,
-    #[serde(rename = "totalResults")]
     pub total_results: i64,
-    #[serde(rename = "startIndex")]
     pub start_index: i64,
     pub schemas: Vec<String>,
     #[serde(rename = "Resources")]
@@ -93,7 +92,6 @@ impl Default for ListResponse {
         }
     }
 }
-
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct PatchOp {
@@ -125,6 +123,3 @@ impl Default for PatchOperations {
         }
     }
 }
-
-
-

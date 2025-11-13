@@ -105,12 +105,10 @@ impl Default for Bulk {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-#[derive(Default)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 pub struct Supported {
     pub supported: bool,
 }
-
 
 /// Converts a JSON string into a `ServiceProviderConfig` struct.
 ///
@@ -212,7 +210,9 @@ impl ServiceProviderConfig {
             return Err(SCIMError::MissingRequiredField("filter".to_string()));
         }
         if !self.change_password.supported {
-            return Err(SCIMError::MissingRequiredField("change_password".to_string()));
+            return Err(SCIMError::MissingRequiredField(
+                "change_password".to_string(),
+            ));
         }
         if !self.sort.supported {
             return Err(SCIMError::MissingRequiredField("sort".to_string()));
@@ -351,14 +351,18 @@ mod tests {
             ]
         }"#;
 
-        let config: Result<ServiceProviderConfig, serde_json::Error> = serde_json::from_str(json_data);
+        let config: Result<ServiceProviderConfig, serde_json::Error> =
+            serde_json::from_str(json_data);
 
         if let Err(e) = &config {
             eprintln!("Deserialization failed: {:?}", e);
         }
         assert!(config.is_ok());
         let config = config.unwrap();
-        assert_eq!(config.documentation_uri, Some("http://example.com/help/scim.html".to_string()));
+        assert_eq!(
+            config.documentation_uri,
+            Some("http://example.com/help/scim.html".to_string())
+        );
         assert_eq!(config.patch.supported, true);
         assert_eq!(config.bulk.supported, true);
         assert_eq!(config.bulk.max_operations, 1000);
@@ -371,16 +375,34 @@ mod tests {
         assert_eq!(config.authentication_schemes.len(), 2);
         let oauth_scheme = &config.authentication_schemes[0];
         assert_eq!(oauth_scheme.name, "OAuth Bearer Token");
-        assert_eq!(oauth_scheme.description, "Authentication scheme using the OAuth Bearer Token Standard");
-        assert_eq!(oauth_scheme.spec_uri, "http://www.rfc-editor.org/info/rfc6750");
-        assert_eq!(oauth_scheme.documentation_uri, Some("http://example.com/help/oauth.html".to_string()));
+        assert_eq!(
+            oauth_scheme.description,
+            "Authentication scheme using the OAuth Bearer Token Standard"
+        );
+        assert_eq!(
+            oauth_scheme.spec_uri,
+            "http://www.rfc-editor.org/info/rfc6750"
+        );
+        assert_eq!(
+            oauth_scheme.documentation_uri,
+            Some("http://example.com/help/oauth.html".to_string())
+        );
         assert_eq!(oauth_scheme.type_, "oauthbearertoken");
         assert_eq!(oauth_scheme.primary, Some(true));
         let http_scheme = &config.authentication_schemes[1];
         assert_eq!(http_scheme.name, "HTTP Basic");
-        assert_eq!(http_scheme.description, "Authentication scheme using the HTTP Basic Standard");
-        assert_eq!(http_scheme.spec_uri, "http://www.rfc-editor.org/info/rfc2617");
-        assert_eq!(http_scheme.documentation_uri, Some("http://example.com/help/httpBasic.html".to_string()));
+        assert_eq!(
+            http_scheme.description,
+            "Authentication scheme using the HTTP Basic Standard"
+        );
+        assert_eq!(
+            http_scheme.spec_uri,
+            "http://www.rfc-editor.org/info/rfc2617"
+        );
+        assert_eq!(
+            http_scheme.documentation_uri,
+            Some("http://example.com/help/httpBasic.html".to_string())
+        );
         assert_eq!(http_scheme.type_, "httpbasic");
     }
 }

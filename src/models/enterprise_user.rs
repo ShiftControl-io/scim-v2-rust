@@ -2,8 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::utils::error::SCIMError;
 
-#[derive(Serialize, Deserialize, Debug)]
-#[derive(Default)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 pub struct EnterpriseUser {
     #[serde(rename = "employeeNumber", skip_serializing_if = "Option::is_none")]
     pub employee_number: Option<String>,
@@ -18,7 +17,6 @@ pub struct EnterpriseUser {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub manager: Option<Manager>,
 }
-
 
 /// Converts a JSON string into a `EnterpriseUser` struct.
 ///
@@ -86,7 +84,9 @@ impl EnterpriseUser {
     /// ```
     pub fn validate(&self) -> Result<(), SCIMError> {
         if self.employee_number.is_none() {
-            return Err(SCIMError::MissingRequiredField("employee_number".to_string()));
+            return Err(SCIMError::MissingRequiredField(
+                "employee_number".to_string(),
+            ));
         }
         if self.cost_center.is_none() {
             return Err(SCIMError::MissingRequiredField("cost_center".to_string()));

@@ -43,7 +43,10 @@ mod tests {
     #[test]
     fn scim_http_error_default_creates_expected_error() {
         let error = ScimHttpError::default();
-        assert_eq!(error.schemas, vec!["urn:ietf:params:scim:api:messages:2.0:Error".to_string()]);
+        assert_eq!(
+            error.schemas,
+            vec!["urn:ietf:params:scim:api:messages:2.0:Error".to_string()]
+        );
         assert_eq!(error.scim_type, None);
         assert_eq!(error.detail, None);
         assert_eq!(error.status, "".to_string());
@@ -59,7 +62,10 @@ mod tests {
         });
 
         let error: ScimHttpError = serde_json::from_value(json).unwrap();
-        assert_eq!(error.schemas, vec!["urn:ietf:params:scim:api:messages:2.0:Error".to_string()]);
+        assert_eq!(
+            error.schemas,
+            vec!["urn:ietf:params:scim:api:messages:2.0:Error".to_string()]
+        );
         assert_eq!(error.scim_type, Some("invalidValue".to_string()));
         assert_eq!(error.detail, Some("Invalid email address".to_string()));
         assert_eq!(error.status, "400".to_string());
@@ -85,11 +91,14 @@ mod tests {
         };
 
         let json = serde_json::to_value(&error).unwrap();
-        assert_eq!(json, json!({
-            "schemas": ["urn:ietf:params:scim:api:messages:2.0:Error"],
-            "scimType": "invalidValue",
-            "detail": "Invalid email address",
-            "status": "400"
-        }));
+        assert_eq!(
+            json,
+            json!({
+                "schemas": ["urn:ietf:params:scim:api:messages:2.0:Error"],
+                "scimType": "invalidValue",
+                "detail": "Invalid email address",
+                "status": "400"
+            })
+        );
     }
 }
