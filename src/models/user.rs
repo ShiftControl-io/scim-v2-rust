@@ -13,6 +13,7 @@ pub struct User {
     pub schemas: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub external_id: Option<String>,
     pub user_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -185,11 +186,11 @@ pub struct Group {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
     #[serde(rename = "$ref", skip_serializing_if = "Option::is_none")]
-    pub ref_: Option<String>,
+    pub r#ref: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub display: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub type_: Option<String>,
+    pub r#type: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]
@@ -199,7 +200,7 @@ pub struct Entitlement {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub display: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub r#type_: Option<String>,
+    pub r#type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub primary: Option<bool>,
 }
@@ -211,7 +212,7 @@ pub struct Role {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub display: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub r#type_: Option<String>,
+    pub r#type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub primary: Option<bool>,
 }

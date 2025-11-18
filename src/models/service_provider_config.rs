@@ -46,8 +46,7 @@ impl Default for ServiceProviderConfig {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct AuthenticationScheme {
     pub name: String,
-    #[serde(rename = "type")]
-    pub type_: String,
+    pub r#type: String,
     pub description: String,
     #[serde(rename = "specUri")]
     pub spec_uri: String,
@@ -61,7 +60,7 @@ impl Default for AuthenticationScheme {
     fn default() -> Self {
         AuthenticationScheme {
             name: "".to_string(),
-            type_: "".to_string(),
+            r#type: "".to_string(),
             description: "".to_string(),
             spec_uri: "".to_string(),
             documentation_uri: Some("".to_string()),
@@ -387,7 +386,7 @@ mod tests {
             oauth_scheme.documentation_uri,
             Some("http://example.com/help/oauth.html".to_string())
         );
-        assert_eq!(oauth_scheme.type_, "oauthbearertoken");
+        assert_eq!(oauth_scheme.r#type, "oauthbearertoken");
         assert_eq!(oauth_scheme.primary, Some(true));
         let http_scheme = &config.authentication_schemes[1];
         assert_eq!(http_scheme.name, "HTTP Basic");
@@ -403,6 +402,6 @@ mod tests {
             http_scheme.documentation_uri,
             Some("http://example.com/help/httpBasic.html".to_string())
         );
-        assert_eq!(http_scheme.type_, "httpbasic");
+        assert_eq!(http_scheme.r#type, "httpbasic");
     }
 }

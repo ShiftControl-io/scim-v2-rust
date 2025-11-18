@@ -169,7 +169,7 @@ impl EnterpriseUser {
 pub struct Manager {
     pub value: Option<String>,
     #[serde(rename = "$ref")]
-    pub ref_: Option<String>,
+    pub r#ref: Option<String>,
     #[serde(rename = "displayName")]
     pub display_name: Option<String>,
 }

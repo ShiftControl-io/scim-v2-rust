@@ -10,6 +10,7 @@ pub struct Group {
     pub schemas: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub external_id: Option<String>,
     pub display_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -36,9 +37,9 @@ pub struct Member {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
     #[serde(rename = "$ref", skip_serializing_if = "Option::is_none")]
-    pub ref_: Option<String>,
+    pub r#ref: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub r#type_: Option<String>,
+    pub r#type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub display: Option<String>,
 }
@@ -93,7 +94,7 @@ impl Group {
     ///
     /// let group = Group {
     ///     schemas: vec!["urn:ietf:params:scim:schemas:core:2.0:Group".to_string()],
-    ///     id: "e9e30dba-f08f-4109-8486-d5c6a331660a".to_string(),
+    ///     id: Some("e9e30dba-f08f-4109-8486-d5c6a331660a".to_string()),
     ///     display_name: "Tour Guides".to_string(),
     ///     // other fields...
     ///     ..Default::default()
@@ -107,9 +108,6 @@ impl Group {
     pub fn validate(&self) -> Result<(), SCIMError> {
         if self.schemas.is_empty() {
             return Err(SCIMError::MissingRequiredField("schemas".to_string()));
-        }
-        if self.id.is_empty() {
-            return Err(SCIMError::MissingRequiredField("id".to_string()));
         }
         if self.display_name.is_empty() {
             return Err(SCIMError::MissingRequiredField("display_name".to_string()));
@@ -132,7 +130,7 @@ impl Group {
     ///
     /// let group = Group {
     ///     schemas: vec!["urn:ietf:params:scim:schemas:core:2.0:Group".to_string()],
-    ///     id: "e9e30dba-f08f-4109-8486-d5c6a331660a".to_string(),
+    ///     id: Some("e9e30dba-f08f-4109-8486-d5c6a331660a".to_string()),
     ///     display_name: "Tour Guides".to_string(),
     ///     // other fields...
     ///     ..Default::default()
@@ -221,7 +219,10 @@ mod tests {
             group.schemas,
             vec!["urn:ietf:params:scim:schemas:core:2.0:Group"]
         );
-        assert_eq!(group.id, "e9e30dba-f08f-4109-8486-d5c6a331660a");
+        assert_eq!(
+            group.id,
+            Some("e9e30dba-f08f-4109-8486-d5c6a331660a".into())
+        );
         assert_eq!(group.display_name, "Tour Guides");
 
         // Check members
@@ -281,7 +282,10 @@ mod tests {
             group.schemas,
             vec!["urn:ietf:params:scim:schemas:core:2.0:Group"]
         );
-        assert_eq!(group.id, "e9e30dba-f08f-4109-8486-d5c6a331660a");
+        assert_eq!(
+            group.id,
+            Some("e9e30dba-f08f-4109-8486-d5c6a331660a".into())
+        );
         assert_eq!(group.display_name, "Tour Guides");
     }
 
@@ -321,7 +325,10 @@ mod tests {
             group.schemas,
             vec!["urn:ietf:params:scim:schemas:core:2.0:Group"]
         );
-        assert_eq!(group.id, "e9e30dba-f08f-4109-8486-d5c6a331660a");
+        assert_eq!(
+            group.id,
+            Some("e9e30dba-f08f-4109-8486-d5c6a331660a".into())
+        );
         assert_eq!(group.display_name, "Tour Guides");
         assert!(group.members.is_none());
         assert!(group.meta.is_none());

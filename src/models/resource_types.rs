@@ -135,7 +135,7 @@ pub fn get_resource_types(
             _ => {
                 return Err(SCIMError::ResourceTypeNotFound(
                     resource_type_name.to_string(),
-                ))
+                ));
             }
         }
     }

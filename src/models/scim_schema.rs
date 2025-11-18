@@ -29,8 +29,7 @@ pub struct Schema {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Attributes {
     pub name: String,
-    #[serde(rename = "type")]
-    pub type_: String,
+    pub r#type: String,
     #[serde(rename = "multiValued")]
     pub multi_valued: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -56,8 +55,7 @@ pub struct Attributes {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SubAttributes {
     pub name: String,
-    #[serde(rename = "type")]
-    pub type_: String,
+    pub r#type: String,
     #[serde(rename = "multiValued")]
     pub multi_valued: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -283,7 +281,7 @@ impl Schema {
     ///     attributes: vec![
     ///         Attributes {
     ///             name: "userName".to_string(),
-    ///             type_: "string".to_string(),
+    ///             r#type: "string".to_string(),
     ///             multi_valued: false,
     ///             description: Some("Unique identifier for the User".to_string()),
     ///             required: Some(true),
