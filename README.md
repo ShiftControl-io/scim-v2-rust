@@ -19,10 +19,14 @@ To use \`scim_v2\` in your project, add the following to your \`Cargo.toml\`:
 
 ```toml
 [dependencies]
-scim_v2 = "0.2.3"
+scim_v2 = "0.3.1"
 ```
 
 Then run \`cargo build\` to download and compile the \`scim_v2\` crate and all its dependencies.
+
+## Upgrading from 0.2.x to 0.3.x
+
+We've introduced breaking changes in version 0.3.0. type_ and ref_ variables are now called r#type and r#ref respectively to avoid conflicts with Rust keywords. Please update your code accordingly when upgrading.
 
 ## Usage
 
