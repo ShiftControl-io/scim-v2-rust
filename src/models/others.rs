@@ -278,7 +278,9 @@ pub struct ListResponse<T> {
     pub total_results: i64,
     pub start_index: i64,
     pub schemas: Vec<String>,
-    #[serde(rename = "Resources")]
+    // RFC 7644 section 3.4.2: `Resources` is REQUIRED only if `totalResults` is
+    // non-zero, so a query returning no matches may omit it on the wire.
+    #[serde(rename = "Resources", default)]
     pub resources: Vec<Resource<T>>,
 }
 
