@@ -1,0 +1,13 @@
+{
+  "active": true,
+  "emails": null,
+  "id": "5107a4e4-0b11-4e77-8dcf-c8c6978d40ac",
+  "name": {
+    "familyName": "lastname",
+    "givenName": "firstname"
+  },
+  "schemas": [
+    "urn:ietf:params:scim:schemas:core:2.0:User"
+  ],
+  "userName": "testuser@example.io"
+}

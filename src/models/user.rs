@@ -1,18 +1,16 @@
-use std::convert::TryFrom;
-
-use serde::{Deserialize, Serialize};
-
 use crate::models::enterprise_user::EnterpriseUser;
 use crate::models::scim_schema::Meta;
-use crate::utils::error::SCIMError;
+use crate::utils::{error::SCIMError, serde::deserialize_optional_lenient_bool};
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
-pub struct User {
+pub struct User<T = String> {
     // urn:ietf:params:scim:schemas:core:2.0:User
     pub schemas: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub id: Option<String>,
+    pub id: Option<T>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub external_id: Option<String>,
     pub user_name: String,
@@ -65,10 +63,10 @@ pub struct User {
     pub enterprise_user: Option<EnterpriseUser>,
 }
 
-impl Default for User {
+impl<T> Default for User<T> {
     fn default() -> Self {
         User {
-            schemas: vec!["urn:ietf:params:scim:schemas:core:2.0:User".to_string()],
+            schemas: vec![crate::schema_urns::USER.to_string()],
             user_name: "".to_string(),
             id: None,
             external_id: None,
@@ -213,7 +211,10 @@ pub struct Role {
     pub display: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub r#type: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_lenient_bool"
+    )]
     pub primary: Option<bool>,
 }
 
@@ -229,36 +230,7 @@ pub struct X509Certificate {
     pub primary: Option<bool>,
 }
 
-/// Converts a JSON string into a `User` struct.
-///
-/// This method attempts to parse a JSON string to construct a `User` object. It's useful for scenarios where
-/// you receive a JSON representation of a user from an external source (e.g., a web request) and you need to
-/// work with this data in a strongly-typed manner within your application.
-///
-/// # Errors
-///
-/// Returns `SCIMError::DeserializationError` if the provided JSON string cannot be parsed into a `User` object.
-///
-/// # Examples
-///
-/// ```rust
-/// use scim_v2::models::user::User;
-///
-/// let user_json = r#"{"schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"], "userName": "jdoe@example.com"}"#;
-/// match User::try_from(user_json) {
-///     Ok(user) => println!("Successfully converted JSON to User: {:?}", user),
-///     Err(e) => println!("Error converting from JSON to User: {}", e),
-/// }
-/// ```
-impl TryFrom<&str> for User {
-    type Error = SCIMError;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        serde_json::from_str(value).map_err(SCIMError::DeserializationError)
-    }
-}
-
-impl User {
+impl<T> User<T> {
     /// Validates a user.
     ///
     /// This function checks if the user has a `name` and `user_name`. If either is missing, it returns an error.
@@ -279,7 +251,7 @@ impl User {
     /// ```rust
     /// use scim_v2::models::user::User;
     ///
-    /// let user = User {
+    /// let user: User<String> = User {
     ///     user_name: "jdoe@example.com".to_string(),
     ///     // other fields...
     ///     ..Default::default()
@@ -304,7 +276,12 @@ impl User {
         }
         Ok(())
     }
+}
 
+impl<T> User<T>
+where
+    T: Serialize,
+{
     /// Serializes the `User` instance to a JSON string, using the custom SCIMError for error handling.
     ///
     /// # Returns
@@ -321,6 +298,7 @@ impl User {
     /// let user = User {
     ///     schemas: vec!["urn:ietf:params:scim:schemas:core:2.0:User".to_string()],
     ///     user_name: "jdoe@example.com".to_string(),
+    ///     id: Some("123".to_string()),
     ///     // Initialize other fields as necessary...
     ///     ..Default::default()
     /// };
@@ -333,7 +311,12 @@ impl User {
     pub fn serialize(&self) -> Result<String, SCIMError> {
         serde_json::to_string(&self).map_err(SCIMError::SerializationError)
     }
+}
 
+impl<T> User<T>
+where
+    T: DeserializeOwned,
+{
     /// Deserializes a JSON string into a `User` instance, using the custom SCIMError for error handling.
     ///
     /// # Parameters
@@ -351,7 +334,7 @@ impl User {
     /// use scim_v2::models::user::User;
     ///
     /// let user_json = r#"{"schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"], "userName": "jdoe@example.com"}"#;
-    /// match User::deserialize(user_json) {
+    /// match User::<String>::deserialize(user_json) {
     ///     Ok(user) => println!("Deserialized User: {:?}", user),
     ///     Err(e) => println!("Deserialization error: {}", e),
     /// }
@@ -781,5 +764,13 @@ mod tests {
         assert!(user.is_ok());
         let user = user.unwrap();
         assert!(user.enterprise_user.is_none());
+    }
+
+    // Test data is from https://scimvalidator.microsoft.com/
+    #[test]
+    fn deserialize_entra_user() {
+        let user: Result<User, serde_json::Error> =
+            serde_json::from_str(include_str!("../test_data/entra_user_creation_test.json"));
+        user.expect("user should deserialize");
     }
 }

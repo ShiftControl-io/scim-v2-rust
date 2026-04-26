@@ -1,0 +1,41 @@
+{
+  "active": true,
+  "addresses": [
+    {
+      "country": "US",
+      "locality": "locality",
+      "postalCode": "80027",
+      "primary": true,
+      "region": "region",
+      "streetAddress": "street-address",
+      "type": "work"
+    }
+  ],
+  "displayName": "displayname",
+  "emails": [
+    {
+      "primary": true,
+      "type": "work",
+      "value": "testuser@example.io"
+    }
+  ],
+  "externalId": "66e2d689590450d073d2df3b",
+  "locale": "en-US",
+  "name": {
+    "familyName": "lastname",
+    "givenName": "firstname"
+  },
+  "phoneNumbers": [
+    {
+      "primary": true,
+      "type": "work",
+      "value": "tel:+1-555-555-5555"
+    }
+  ],
+  "preferredLanguage": "en-US",
+  "schemas": [
+    "urn:ietf:params:scim:schemas:core:2.0:User",
+    "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User"
+  ],
+  "userName": "testuser@example.io"
+}

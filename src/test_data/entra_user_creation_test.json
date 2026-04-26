@@ -1,0 +1,76 @@
+{
+  "active": true,
+  "addresses": [
+    {
+      "type": "work",
+      "formatted": "ANUMAAOJUYMA",
+      "streetAddress": "046 Wisoky Route",
+      "locality": "AQCGFHJMVSXU",
+      "region": "CXLKAWAESJPV",
+      "postalCode": "dk0 2uz",
+      "primary": true,
+      "country": "Gibraltar"
+    }
+  ],
+  "displayName": "QTZODTJXGFLR",
+  "emails": [
+    {
+      "type": "work",
+      "value": "bettie@parisian.com",
+      "primary": true
+    }
+  ],
+  "locale": "HNULHBRGUHWA",
+  "name": {
+    "givenName": "Aida",
+    "familyName": "Chandler",
+    "formatted": "Hyman",
+    "middleName": "Haylie",
+    "honorificPrefix": "Athena",
+    "honorificSuffix": "Brooks"
+  },
+  "nickName": "CRILRBTBOQOW",
+  "phoneNumbers": [
+    {
+      "type": "work",
+      "value": "0-351-9540",
+      "primary": true
+    },
+    {
+      "type": "mobile",
+      "value": "0-351-9540"
+    },
+    {
+      "type": "fax",
+      "value": "0-351-9540"
+    }
+  ],
+  "preferredLanguage": "lu",
+  "profileUrl": "ROQHEOEENWTS",
+  "roles": [
+    {
+      "primary": "True",
+      "display": "DJAPQUWELUHM",
+      "value": "DRIHDNWREZZV",
+      "type": "EHUDZVCXYJOO"
+    }
+  ],
+  "schemas": [
+    "urn:ietf:params:scim:schemas:core:2.0:User",
+    "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User"
+  ],
+  "timezone": "America/Goose_Bay",
+  "title": "OWOJJVOCUHKD",
+  "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User": {
+    "employeeNumber": "LLQMUPKSPYGA",
+    "department": "BYQJSWLGXQTB",
+    "costCenter": "UNPCDCIBUXTN",
+    "organization": "CHZYDKXGJHHJ",
+    "division": "OSLUHIBPTUGX",
+    "manager": {
+      "value": "BGKAWQXOZREF"
+    }
+  },
+  "userName": "isaias@bode.ca",
+  "userType": "QWQJIEJYZILC"
+}

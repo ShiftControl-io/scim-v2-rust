@@ -22,5 +22,16 @@ jobs:
         run: cargo check
       - name: Cargo Test
         run: cargo test
+      - name: Cargo Clippy
+        run: cargo clippy -- -D warnings
       - name: Cargo format
         run: cargo fmt --check
+      - name: Verify generated filter parser
+        run: |
+          cargo install lalrpop --version 0.23.1
+          lalrpop src/filter_parser.lalrpop
+          git diff --exit-code src/filter_parser.rs || {
+            echo "::error::src/filter_parser.rs does not match regenerated output from src/filter_parser.lalrpop"
+            echo "Run 'lalrpop src/filter_parser.lalrpop' and commit the result."
+            exit 1
+          }

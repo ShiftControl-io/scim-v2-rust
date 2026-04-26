@@ -1,0 +1,35 @@
+{
+  "active": true,
+  "addresses": [],
+  "displayName": "John Doe",
+  "emails": [
+    {
+      "primary": true,
+      "type": "work",
+      "value": "john.doe@example.io"
+    }
+  ],
+  "externalId": "664447f5c0c418f2d05e5318",
+  "id": "d500eedc-4dbc-494e-978a-56da891f179a",
+  "locale": "en-US",
+  "name": {
+    "familyName": "Doe",
+    "givenName": "John"
+  },
+  "phoneNumbers": [],
+  "photos": [
+    {
+      "value": "https://img.example.com/2a27d237-db8c-4f82-84fb-5824dfaedc87.png"
+    }
+  ],
+  "preferredLanguage": "en-US",
+  "schemas": [
+    "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User",
+    "urn:ietf:params:scim:schemas:core:2.0:User"
+  ],
+  "title": "Captain",
+  "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User": {
+    "department": "C-Suite"
+  },
+  "userName": "john.doe@example.com"
+}

@@ -21,6 +21,7 @@
 //!
 //! let user = User {
 //!     user_name: "jdoe@example.com".to_string(),
+//!     id: Some("123".to_string()),
 //!    // other fields...
 //!     ..Default::default()
 //! };
@@ -41,6 +42,7 @@
 //! let user = User {
 //!     schemas: vec!["urn:ietf:params:scim:schemas:core:2.0:User".to_string()],
 //!     user_name: "jdoe@example.com".to_string(),
+//!     id: Some("123".to_string()),
 //!     // Initialize other fields as necessary...
 //!     ..Default::default()
 //! };
@@ -57,9 +59,10 @@
 //!
 //! ```rust
 //! use scim_v2::models::user::User;
+//! use serde_json::from_str;
 //!
 //! let user_json = r#"{"schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"], "userName": "jdoe@example.com"}"#;
-//! match User::try_from(user_json) {
+//! match serde_json::from_str::<User<String>>(user_json) {
 //!     Ok(user) => println!("Successfully converted JSON to User: {:?}", user),
 //!     Err(e) => println!("Error converting from JSON to User: {}", e),
 //! }
@@ -70,7 +73,7 @@
 //! use scim_v2::models::user::User;
 //!
 //! let user_json = r#"{"schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"], "userName": "jdoe@example.com"}"#;
-//! match User::deserialize(user_json) {
+//! match User::<String>::deserialize(user_json) {
 //!     Ok(user) => println!("Deserialized User: {:?}", user),
 //!     Err(e) => println!("Deserialization error: {}", e),
 //! }
@@ -94,7 +97,14 @@ pub mod models {
     pub mod user;
 }
 
+#[rustfmt::skip]
+#[allow(clippy::all)]
+pub(crate) mod filter_parser;
+pub mod filter;
+pub mod schema_urns;
+
 /// Declaring the utils module which contains the error submodule
 pub mod utils {
     pub mod error;
+    pub(crate) mod serde;
 }

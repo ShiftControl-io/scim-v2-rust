@@ -1,0 +1,179 @@
+// SCIM filter expression parser (RFC 7644 §3.4.2.2)
+//
+// Operator precedence (lowest → highest):
+//   or  <  and  <  not  <  grouping / attr expression / value path
+
+
+use crate::filter::{
+    AttrExp, AttrPath, CompareOp, CompValue, Filter, FilterActionError,
+    PatchPath, PatchValuePath, ValFilter, ValuePath, parse_attr_path,
+};
+
+grammar;
+
+extern {
+    type Error = FilterActionError;
+}
+
+match {
+    // ---- Logical operators — include surrounding SP ----
+    // Bare "and"/"or" without adjacent whitespace fall through to AttrNameTok.
+    r"\s+(?i:and)\s+" => "and",
+    r"\s+(?i:or)\s+"  => "or",
+    // ---- "not" keyword — includes required trailing SP ----
+    r"(?i:not)\s+" => "not",
+    // ---- Comparison operators — include required surrounding SP ----
+    // Bare operators (no adjacent whitespace) fall through to AttrNameTok.
+    r"\s+(?i:eq)\s+"  => "eq",
+    r"\s+(?i:ne)\s+"  => "ne",
+    r"\s+(?i:co)\s+"  => "co",
+    r"\s+(?i:sw)\s+"  => "sw",
+    r"\s+(?i:ew)\s+"  => "ew",
+    r"\s+(?i:pr)"     => "pr",
+    r"\s+(?i:gt)\s+"  => "gt",
+    r"\s+(?i:lt)\s+"  => "lt",
+    r"\s+(?i:ge)\s+"  => "ge",
+    r"\s+(?i:le)\s+"  => "le",
+    // ---- JSON comparison values ----
+    "false",
+    "null",
+    "true",
+    // ---- Grouping / value-path brackets and sub-attr separator ----
+    "(",
+    ")",
+    "[",
+    "]",
+    ".",
+    // ---- JSON string literal (double-quoted, with escape sequences) ----
+    r#""([^"\\]|\\.)*""# => StringLit,
+    // ---- JSON number literal ----
+    r"-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?" => NumberLit,
+} else {
+    // ---- Tier 2: attribute tokens ----
+    // Placed in the else block so tier-1 keywords win on same-length ties,
+    // while a longer identifier like "andFoo" (len 6) still wins over "and" (len 3).
+    //
+    // The two patterns are non-overlapping:
+    //   AttrNameTok — plain ATTRNAME only (no colon, no dot)
+    //   AttrPathTok — name that contains at least one colon or dot (dotted or URN-prefixed)
+    // Longest-match ensures "value.extra" → AttrPathTok and "value" → AttrNameTok.
+    r"[a-zA-Z][a-zA-Z0-9_-]*"                  => AttrNameTok,
+    r"[a-zA-Z][a-zA-Z0-9_-]*[:.][a-zA-Z0-9_:.-]*" => AttrPathTok,
+}
+
+// ---------------------------------------------------------------------------
+// Top-level filter (unified rule with precedence-based disambiguation)
+// ---------------------------------------------------------------------------
+
+pub Filter: Filter = {
+    #[precedence(level="0")]
+    FilterAtom,
+    #[precedence(level="1")] #[assoc(side="left")]
+    <l:Filter> "and" <r:Filter> => Filter::And(Box::new(l), Box::new(r)),
+    #[precedence(level="2")] #[assoc(side="left")]
+    <l:Filter> "or" <r:Filter> => Filter::Or(Box::new(l), Box::new(r)),
+};
+
+// Atom-level filter: attribute expression, value path, not, or parenthesised group.
+// "not" token includes its required trailing SP, so no explicit SP in the rule.
+FilterAtom: Filter = {
+    <e:AttrExp>               => Filter::Attr(e),
+    <v:ValuePath>             => Filter::ValuePath(v),
+    "not" "(" <f:Filter> ")"  => Filter::Not(Box::new(f)),
+    "(" <f:Filter> ")"        => f,
+};
+
+// ---------------------------------------------------------------------------
+// Attribute expression and value path
+// ---------------------------------------------------------------------------
+
+// attrPath "[" valFilter "]"
+ValuePath: ValuePath = {
+    <a:AttrPath> "[" <vf:ValFilter> "]" => ValuePath {
+        attr: a,
+        filter: Box::new(vf),
+    },
+};
+
+// attrPath "pr"  |  attrPath compareOp compValue
+// ("pr" token includes required leading SP; compareOp tokens include surrounding SP)
+AttrExp: AttrExp = {
+    <a:AttrPath> "pr"                          => AttrExp::Present(a),
+    <a:AttrPath> <op:CompareOp> <v:CompValue>  => AttrExp::Comparison(a, op, v),
+};
+
+AttrPath: AttrPath = {
+    <s:AttrPathTok> =>? Ok(parse_attr_path(s)?),
+    <s:AttrNameTok> => AttrPath { uri: None, name: s.to_string(), sub_attr: None },
+};
+
+// ---------------------------------------------------------------------------
+// ValFilter — same as Filter but no nested ValuePath
+// (per RFC: "The expression within square brackets MUST be a valid filter
+//  expression based upon sub-attributes of the parent attribute.")
+// ---------------------------------------------------------------------------
+
+pub ValFilter: ValFilter = {
+    #[precedence(level="0")]
+    ValFilterAtom,
+    #[precedence(level="1")] #[assoc(side="left")]
+    <l:ValFilter> "and" <r:ValFilter> => ValFilter::And(Box::new(l), Box::new(r)),
+    #[precedence(level="2")] #[assoc(side="left")]
+    <l:ValFilter> "or" <r:ValFilter> => ValFilter::Or(Box::new(l), Box::new(r)),
+};
+
+ValFilterAtom: ValFilter = {
+    <e:AttrExp>                    => ValFilter::Attr(e),
+    "not" "(" <f:ValFilter> ")"    => ValFilter::Not(Box::new(f)),
+    "(" <f:ValFilter> ")"          => f,
+};
+
+// ---------------------------------------------------------------------------
+// Operators and values
+// ---------------------------------------------------------------------------
+
+CompareOp: CompareOp = {
+    "eq" => CompareOp::Eq,
+    "ne" => CompareOp::Ne,
+    "co" => CompareOp::Co,
+    "sw" => CompareOp::Sw,
+    "ew" => CompareOp::Ew,
+    "gt" => CompareOp::Gt,
+    "lt" => CompareOp::Lt,
+    "ge" => CompareOp::Ge,
+    "le" => CompareOp::Le,
+};
+
+CompValue: CompValue = {
+    "false"       => CompValue::False,
+    "null"        => CompValue::Null,
+    "true"        => CompValue::True,
+    <n:NumberLit> =>? Ok(serde_json::from_str::<serde_json::Number>(n).map(CompValue::Number).map_err(FilterActionError::from)?),
+    <s:StringLit> =>? Ok(serde_json::from_str::<String>(s).map(CompValue::Str).map_err(FilterActionError::from)?),
+};
+
+// ---------------------------------------------------------------------------
+// PATCH path (RFC 7644 §3.5.2)
+// PATH = attrPath / valuePath [subAttr]
+//
+// LR(1) disambiguation:
+//   After AttrPath: '[' → shift into valuePath; else → reduce as plain attrPath
+//   After AttrPath "[" ValFilter "]": '.' → shift into sub-attr; else → reduce
+// ---------------------------------------------------------------------------
+
+pub Path: PatchPath = {
+    // Plain attrPath (e.g. "userName", "name.familyName")
+    <a:AttrPath> => PatchPath::Attr(a),
+    // valuePath without trailing sub-attribute (e.g. emails[type eq "work"])
+    <a:AttrPath> "[" <vf:ValFilter> "]" => PatchPath::Value(PatchValuePath {
+        attr: a,
+        filter: vf,
+        sub_attr: None,
+    }),
+    // valuePath with trailing sub-attribute (e.g. emails[type eq "work"].value)
+    <a:AttrPath> "[" <vf:ValFilter> "]" "." <s:AttrNameTok> => PatchPath::Value(PatchValuePath {
+        attr: a,
+        filter: vf,
+        sub_attr: Some(s.to_string()),
+    }),
+};

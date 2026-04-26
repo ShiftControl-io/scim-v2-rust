@@ -1,79 +1,44 @@
 //Schema for group
-use serde::{Deserialize, Serialize};
-
-use crate::models::scim_schema::Meta;
-use crate::utils::error::SCIMError;
+use crate::{models::scim_schema::Meta, utils::error::SCIMError};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
-pub struct Group {
+pub struct Group<T = String> {
     pub schemas: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub id: Option<String>,
+    pub id: Option<T>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub external_id: Option<String>,
     pub display_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub members: Option<Vec<Member>>,
+    pub members: Option<Vec<Member<T>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
 }
 
-impl Default for Group {
-    fn default() -> Self {
-        Group {
-            schemas: vec!["urn:ietf:params:scim:schemas:core:2.0:Group".to_string()],
-            id: None,
-            external_id: None,
-            display_name: "default_display_name".to_string(),
-            members: None,
-            meta: None,
-        }
-    }
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub enum MemberType {
+    #[serde(rename = "User", alias = "USER", alias = "user")]
+    User,
+    #[serde(rename = "Group", alias = "GROUP", alias = "group")]
+    Group,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]
-pub struct Member {
+pub struct Member<T = String> {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub value: Option<String>,
+    pub value: Option<T>,
     #[serde(rename = "$ref", skip_serializing_if = "Option::is_none")]
     pub r#ref: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub r#type: Option<String>,
+    pub r#type: Option<MemberType>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub display: Option<String>,
 }
 
-/// Converts a JSON string into a `Group` struct.
-///
-/// This method attempts to parse a JSON string to construct a `Group` object. It's useful for scenarios where
-/// you receive a JSON representation of a user from an external source (e.g., a web request) and you need to
-/// work with this data in a strongly-typed manner within your application.
-///
-/// # Errors
-///
-/// Returns `SCIMError::DeserializationError` if the provided JSON string cannot be parsed into a `Group` object.
-///
-/// # Examples
-///
-/// ```rust
-/// use scim_v2::models::group::Group;
-///
-/// let group_json = r#"{"schemas": ["urn:ietf:params:scim:schemas:core:2.0:Group"], "id": "e9e30dba-f08f-4109-8486-d5c6a331660a", "displayName": "Tour Guides"}"#;
-/// match Group::try_from(group_json) {
-///     Ok(group) => println!("Successfully converted JSON to Group: {:?}", group),
-///     Err(e) => println!("Error converting from JSON to Group: {}", e),
-/// }
-/// ```
-impl TryFrom<&str> for Group {
-    type Error = SCIMError;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        serde_json::from_str(value).map_err(SCIMError::DeserializationError)
-    }
-}
-
-impl Group {
+impl<T> Group<T> {
     /// Validates a group.
     ///
     /// This function checks if the group has `schemas`, `id`, and `display_name`. If any of these fields are missing, it returns an error.
@@ -95,9 +60,10 @@ impl Group {
     /// let group = Group {
     ///     schemas: vec!["urn:ietf:params:scim:schemas:core:2.0:Group".to_string()],
     ///     id: Some("e9e30dba-f08f-4109-8486-d5c6a331660a".to_string()),
+    ///     external_id: None,
     ///     display_name: "Tour Guides".to_string(),
-    ///     // other fields...
-    ///     ..Default::default()
+    ///     meta: None,
+    ///     members: None
     /// };
     ///
     /// match group.validate() {
@@ -114,7 +80,12 @@ impl Group {
         }
         Ok(())
     }
+}
 
+impl<T> Group<T>
+where
+    T: Serialize,
+{
     /// Serializes the `Group` instance to a JSON string, using the custom SCIMError for error handling.
     ///
     /// # Returns
@@ -131,9 +102,10 @@ impl Group {
     /// let group = Group {
     ///     schemas: vec!["urn:ietf:params:scim:schemas:core:2.0:Group".to_string()],
     ///     id: Some("e9e30dba-f08f-4109-8486-d5c6a331660a".to_string()),
+    ///     external_id: None,
     ///     display_name: "Tour Guides".to_string(),
-    ///     // other fields...
-    ///     ..Default::default()
+    ///     meta: None,
+    ///     members: None
     /// };
     ///
     /// match group.serialize() {
@@ -144,7 +116,12 @@ impl Group {
     pub fn serialize(&self) -> Result<String, SCIMError> {
         serde_json::to_string(&self).map_err(SCIMError::SerializationError)
     }
+}
 
+impl<T> Group<T>
+where
+    T: DeserializeOwned,
+{
     /// Deserializes a JSON string into a `Group` instance, using the custom SCIMError for error handling.
     ///
     /// # Parameters
@@ -162,7 +139,7 @@ impl Group {
     /// use scim_v2::models::group::Group;
     ///
     /// let group_json = r#"{"schemas": ["urn:ietf:params:scim:schemas:core:2.0:Group"], "id": "e9e30dba-f08f-4109-8486-d5c6a331660a", "displayName": "Tour Guides"}"#;
-    /// match Group::deserialize(group_json) {
+    /// match Group::<uuid::Uuid>::deserialize(group_json) {
     ///     Ok(group) => println!("Deserialized Group: {:?}", group),
     ///     Err(e) => println!("Deserialization error: {}", e),
     /// }
