@@ -361,6 +361,18 @@ mod tests {
     const PATCH_OP_SCHEMA: &str = schema_urns::PATCH_OP;
 
     #[test]
+    fn test_list_response_without_resources() {
+        let schema = schema_urns::LIST_RESPONSE;
+        let body = format!(
+            r#"{{"schemas":["{schema}"],"totalResults":0,"startIndex":1,"itemsPerPage":0}}"#
+        );
+        let list: ListResponse<String> =
+            serde_json::from_str(&body).expect("Failed to deserialize empty list response");
+        assert_eq!(list.total_results, 0);
+        assert!(list.resources.is_empty());
+    }
+
+    #[test]
     fn test_patch_op_01_add_with_path() {
         let ops: PatchOp = serde_json::from_str(include_str!("../test_data/operations_01.json"))
             .expect("Failed to deserialize patch operations");
