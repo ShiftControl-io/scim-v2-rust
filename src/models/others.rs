@@ -278,7 +278,9 @@ pub struct ListResponse<T> {
     pub total_results: i64,
     pub start_index: i64,
     pub schemas: Vec<String>,
-    #[serde(rename = "Resources")]
+    // RFC 7644 section 3.4.2: `Resources` is REQUIRED only if `totalResults` is
+    // non-zero, so a query returning no matches may omit it on the wire.
+    #[serde(rename = "Resources", default)]
     pub resources: Vec<Resource<T>>,
 }
 
@@ -357,6 +359,18 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     const PATCH_OP_SCHEMA: &str = schema_urns::PATCH_OP;
+
+    #[test]
+    fn test_list_response_without_resources() {
+        let schema = schema_urns::LIST_RESPONSE;
+        let body = format!(
+            r#"{{"schemas":["{schema}"],"totalResults":0,"startIndex":1,"itemsPerPage":0}}"#
+        );
+        let list: ListResponse<String> =
+            serde_json::from_str(&body).expect("Failed to deserialize empty list response");
+        assert_eq!(list.total_results, 0);
+        assert!(list.resources.is_empty());
+    }
 
     #[test]
     fn test_patch_op_01_add_with_path() {
