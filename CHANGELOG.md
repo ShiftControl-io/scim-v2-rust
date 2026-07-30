@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 0.4.1
+
+### Fixed
+- `ListResponse.Resources` may now be omitted on the wire and deserializes to an empty list. Per RFC 7644 §3.4.2, `Resources` is REQUIRED only when `totalResults` is non-zero, so responses for empty result sets no longer fail to deserialize.
+
 ## 0.4
 
 ### Security
