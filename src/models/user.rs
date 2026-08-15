@@ -212,6 +212,7 @@ pub struct Role {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub r#type: Option<String>,
     #[serde(
+        default, // required as `deserialize_with` does not set default when field is missing
         skip_serializing_if = "Option::is_none",
         deserialize_with = "deserialize_optional_lenient_bool"
     )]
@@ -350,6 +351,27 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::*;
+
+    /// Minimal reproduction: the bug is isolated entirely to `Role`
+    /// deserialization, independent of the surrounding `User`/`ListResponse`
+    /// shape. GitHub Enterprise omits `primary` on `Role` objects rather
+    /// than sending a JSON boolean (e.g. `{"value": "enterprise_owner"}`
+    /// with no `primary` key at all), and `Role::primary`'s
+    /// `deserialize_with` attribute — without an accompanying
+    /// `#[serde(default)]` — turns an absent key into a hard `missing
+    /// field` error instead of defaulting to `None`.
+    #[test]
+    fn role_deserialization_with_omitted_primary_key() {
+        let payload = r#"{ "value": "custom_role" }"#;
+
+        let result = serde_json::from_str::<Role>(payload);
+
+        assert!(
+            result.is_ok(),
+            "failed to deserialize Role with missing `primary` field: {:?}",
+            result.err()
+        );
+    }
 
     #[test]
     fn user_deserialization_with_minimum_fields() {
@@ -772,5 +794,25 @@ mod tests {
         let user: Result<User, serde_json::Error> =
             serde_json::from_str(include_str!("../test_data/entra_user_creation_test.json"));
         user.expect("user should deserialize");
+    }
+
+    /// End-to-end regression for the omitted `Role.primary` key, using a
+    /// sanitized real response from GitHub Enterprise's SCIM `/Users`
+    /// endpoint. The first resource carries a role with `primary` absent
+    /// (`{"value": "enterprise_owner"}`); the second carries an empty
+    /// `roles` array. Before the `#[serde(default)]` fix, the first
+    /// resource failed with a `missing field \`primary\`` error, taking the
+    /// whole `ListResponse` down with it.
+    #[test]
+    fn deserialize_github_enterprise_user_list() {
+        use crate::models::others::ListResponse;
+
+        let list: ListResponse<String> = serde_json::from_str(include_str!(
+            "../test_data/github_enterprise_user_list_test.json"
+        ))
+        .expect("GitHub Enterprise user list should deserialize");
+
+        assert_eq!(list.total_results, 2);
+        assert_eq!(list.resources.len(), 2);
     }
 }
