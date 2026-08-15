@@ -212,6 +212,7 @@ pub struct Role {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub r#type: Option<String>,
     #[serde(
+        default, // required as `deserialize_with` does not set default when field is missing
         skip_serializing_if = "Option::is_none",
         deserialize_with = "deserialize_optional_lenient_bool"
     )]
@@ -350,6 +351,27 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::*;
+
+    /// Minimal reproduction: the bug is isolated entirely to `Role`
+    /// deserialization, independent of the surrounding `User`/`ListResponse`
+    /// shape. GitHub Enterprise omits `primary` on `Role` objects rather
+    /// than sending a JSON boolean (e.g. `{"value": "enterprise_owner"}`
+    /// with no `primary` key at all), and `Role::primary`'s
+    /// `deserialize_with` attribute — without an accompanying
+    /// `#[serde(default)]` — turns an absent key into a hard `missing
+    /// field` error instead of defaulting to `None`.
+    #[test]
+    fn role_deserialization_with_omitted_primary_key() {
+        let payload = r#"{ "value": "custom_role" }"#;
+
+        let result = serde_json::from_str::<Role>(payload);
+
+        assert!(
+            result.is_ok(),
+            "failed to deserialize Role with missing `primary` field: {:?}",
+            result.err()
+        );
+    }
 
     #[test]
     fn user_deserialization_with_minimum_fields() {
