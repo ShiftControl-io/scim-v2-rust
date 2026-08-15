@@ -15,7 +15,20 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - name: Get version
         id: get_version
-        run: echo "crate_version=$(grep '^version = ' Cargo.toml | cut -d'\"' -f2)" >> $GITHUB_ENV
+        run: |
+          set -euo pipefail
+          # Derive the version from the tag that triggered this run. Reading it
+          # back out of Cargo.toml used a delimiter that YAML passed through as
+          # a literal backslash-quote, so `cut` rejected it, `crate_version`
+          # came out empty, and every release since 0.3.1 was published under
+          # the tag "v" with assets named scim_v2_v.tar.gz.
+          crate_version="${GITHUB_REF_NAME#v}"
+          manifest_version="$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)"
+          if [ -z "$crate_version" ] || [ "$crate_version" != "$manifest_version" ]; then
+            echo "::error::Tag '${GITHUB_REF_NAME}' does not match Cargo.toml version '${manifest_version}'"
+            exit 1
+          fi
+          echo "crate_version=$crate_version" >> "$GITHUB_ENV"
       - name: Create tarball
         run: git archive --format=tar.gz --output=scim_v2_v${{ env.crate_version }}.tar.gz HEAD
       - name: Create zip
