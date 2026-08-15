@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 0.4.2
+
+### Fixed
+- `Role.primary` may again be omitted on the wire and deserializes to `None`. The lenient bool deserializer added in 0.4 suppressed serde's implicit `Option` default, so a `Role` without a `primary` key (as sent by GitHub Enterprise, e.g. `{"value": "enterprise_owner"}`) failed with a `missing field` error. Pairing `deserialize_with` with `#[serde(default)]` restores the 0.3 behaviour while keeping the stringified-bool leniency Entra requires.
+
 ## 0.4.1
 
 ### Fixed

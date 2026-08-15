@@ -1,0 +1,118 @@
+{
+  "schemas": ["urn:ietf:params:scim:api:messages:2.0:ListResponse"],
+  "totalResults": 2,
+  "itemsPerPage": 2,
+  "startIndex": 1,
+  "Resources": [
+    {
+      "emails": [
+        {
+          "value": "john.smith@website.com",
+          "type": "work",
+          "primary": true
+        }
+      ],
+      "roles": [
+        {
+          "value": "enterprise_owner"
+        }
+      ],
+      "active": true,
+      "displayName": "john smith",
+      "externalId": "deadbeef-3618-4976-bcbb-deadbeef1234",
+      "name": {
+        "familyName": "smith",
+        "givenName": "john"
+      },
+      "userName": "john.smith@website.com",
+      "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+      "id": "deadbeef-f0ae-11f0-8592-deadbeef1234",
+      "meta": {
+        "resourceType": "User",
+        "created": "2026-01-13T10:33:16.000-08:00",
+        "lastModified": "2026-01-13T10:43:27.000-08:00",
+        "location": "https://my.scim.server.com/scim/v2/enterprises/my-enterprise/Users/deadbeef-f0ae-11f0-8592-deadbeef1234"
+      },
+      "groups": [
+        {
+          "value": "deadbeef-f0ae-11f0-9133-deadbeef1234",
+          "$ref": "https://my.scim.server.com/scim/v2/enterprises/my-enterprise/Groups/deadbeef-f0ae-11f0-9133-deadbeef1234",
+          "display": "Group 1"
+        },
+        {
+          "value": "deadbeef-f0b3-11f0-9e21-deadbeef1234",
+          "$ref": "https://my.scim.server.com/scim/v2/enterprises/my-enterprise/Groups/deadbeef-f0b3-11f0-9e21-deadbeef1234",
+          "display": "Group 2"
+        },
+        {
+          "value": "deadbeef-4fdb-11f1-8fb3-deadbeef1234",
+          "$ref": "https://my.scim.server.com/scim/v2/enterprises/my-enterprise/Groups/deadbeef-4fdb-11f1-8fb3-deadbeef1234",
+          "display": "Group 3"
+        },
+        {
+          "value": "deadbeef-6460-11f1-94d6-deadbeef1234",
+          "$ref": "https://my.scim.server.com/scim/v2/enterprises/my-enterprise/Groups/deadbeef-6460-11f1-94d6-deadbeef1234",
+          "display": "Group 4"
+        },
+        {
+          "value": "deadbeef-6464-11f1-9979-deadbeef1234",
+          "$ref": "https://my.scim.server.com/scim/v2/enterprises/my-enterprise/Groups/deadbeef-6464-11f1-9979-deadbeef1234",
+          "display": "Group 5"
+        },
+        {
+          "value": "deadbeef-6464-11f1-9543-deadbeef1234",
+          "$ref": "https://my.scim.server.com/scim/v2/enterprises/my-enterprise/Groups/deadbeef-6464-11f1-9543-deadbeef1234",
+          "display": "Group 6"
+        },
+        {
+          "value": "deadbeef-6464-11f1-885f-deadbeef1234",
+          "$ref": "https://my.scim.server.com/scim/v2/enterprises/my-enterprise/Groups/deadbeef-6464-11f1-885f-deadbeef1234",
+          "display": "Group 7"
+        },
+        {
+          "value": "deadbeef-6464-11f1-9db2-deadbeef1234",
+          "$ref": "https://my.scim.server.com/scim/v2/enterprises/my-enterprise/Groups/deadbeef-6464-11f1-9db2-deadbeef1234",
+          "display": "Group 8"
+        },
+        {
+          "value": "deadbeef-6464-11f1-8917-deadbeef1234",
+          "$ref": "https://my.scim.server.com/scim/v2/enterprises/my-enterprise/Groups/deadbeef-6464-11f1-8917-deadbeef1234",
+          "display": "Group 9"
+        }
+      ]
+    },
+    {
+      "emails": [
+        {
+          "value": "ace.ventura@website.com",
+          "type": "work",
+          "primary": true
+        }
+      ],
+      "roles": [],
+      "active": true,
+      "displayName": "ace ventura",
+      "externalId": "deadbeef-b7ec-4645-a3a7-deadbeef1234",
+      "name": {
+        "familyName": "ventura",
+        "givenName": "ace"
+      },
+      "userName": "ace.ventura@website.com",
+      "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+      "id": "deadbeef-3da3-11f1-923d-deadbeef1234",
+      "meta": {
+        "resourceType": "User",
+        "created": "2026-04-21T09:56:44.000-07:00",
+        "lastModified": "2026-04-21T09:56:44.000-07:00",
+        "location": "https://my.scim.server.com/scim/v2/enterprises/my-enterprise/Users/deadbeef-3da3-11f1-923d-deadbeef1234"
+      },
+      "groups": [
+        {
+          "value": "deadbeef-f0b3-11f0-9e21-deadbeef1234",
+          "$ref": "https://my.scim.server.com/scim/v2/enterprises/my-enterprise/Groups/deadbeef-f0b3-11f0-9e21-deadbeef1234",
+          "display": "Group 2"
+        }
+      ]
+    }
+  ]
+}
