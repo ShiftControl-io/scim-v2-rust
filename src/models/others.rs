@@ -274,9 +274,15 @@ where
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase", bound(deserialize = "T: DeserializeOwned"))]
 pub struct ListResponse<T> {
-    pub items_per_page: i64,
+    // RFC 7644 section 3.4.2: REQUIRED when partial results are returned due to
+    // pagination.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub items_per_page: Option<i64>,
     pub total_results: i64,
-    pub start_index: i64,
+    // RFC 7644 section 3.4.2: REQUIRED when partial results are returned due to
+    // pagination.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_index: Option<i64>,
     pub schemas: Vec<String>,
     // RFC 7644 section 3.4.2: `Resources` is REQUIRED only if `totalResults` is
     // non-zero, so a query returning no matches may omit it on the wire.
@@ -370,6 +376,79 @@ mod tests {
             serde_json::from_str(&body).expect("Failed to deserialize empty list response");
         assert_eq!(list.total_results, 0);
         assert!(list.resources.is_empty());
+    }
+
+    #[test]
+    fn test_list_response_without_pagination_fields() {
+        // RFC 7644 §3.4.2: `startIndex` and `itemsPerPage` are REQUIRED only
+        // when partial results are returned due to pagination. A full,
+        // unpaginated response may omit them, and some providers do; that
+        // must deserialize rather than fail with a `missing field` error.
+        let schema = schema_urns::LIST_RESPONSE;
+        let body = format!(r#"{{"schemas":["{schema}"],"totalResults":0}}"#);
+        let list: ListResponse<String> = serde_json::from_str(&body)
+            .expect("ListResponse without startIndex/itemsPerPage must deserialize");
+        assert_eq!(list.total_results, 0);
+        assert_eq!(list.start_index, None);
+        assert_eq!(list.items_per_page, None);
+        assert!(list.resources.is_empty());
+    }
+
+    #[test]
+    fn test_list_response_preserves_zero_pagination_fields() {
+        // A wire value of 0 must survive as `Some(0)`, distinct from an
+        // omitted field (`None`) — the reason these are `Option<i64>` rather
+        // than `#[serde(default)]` to an inert 0.
+        let schema = schema_urns::LIST_RESPONSE;
+        let body = format!(
+            r#"{{"schemas":["{schema}"],"totalResults":0,"startIndex":1,"itemsPerPage":0}}"#
+        );
+        let list: ListResponse<String> =
+            serde_json::from_str(&body).expect("Failed to deserialize list response");
+        assert_eq!(list.start_index, Some(1));
+        assert_eq!(list.items_per_page, Some(0));
+    }
+
+    #[test]
+    fn test_list_response_omits_none_pagination_fields_on_serialize() {
+        // `None` must be omitted from the wire, not emitted as `null` —
+        // `"itemsPerPage": null` is not valid SCIM.
+        let list: ListResponse<String> = ListResponse {
+            items_per_page: None,
+            total_results: 0,
+            start_index: None,
+            schemas: vec![schema_urns::LIST_RESPONSE.to_string()],
+            resources: vec![],
+        };
+        let json = serde_json::to_string(&list).expect("serialize ListResponse");
+        assert!(
+            !json.contains("itemsPerPage"),
+            "omitted itemsPerPage must not appear on the wire: {json}"
+        );
+        assert!(
+            !json.contains("startIndex"),
+            "omitted startIndex must not appear on the wire: {json}"
+        );
+        assert!(
+            !json.contains("null"),
+            "no field should serialize as null: {json}"
+        );
+    }
+
+    #[test]
+    fn test_list_response_pagination_fields_round_trip() {
+        let list: ListResponse<String> = ListResponse {
+            items_per_page: Some(20),
+            total_results: 137,
+            start_index: Some(41),
+            schemas: vec![schema_urns::LIST_RESPONSE.to_string()],
+            resources: vec![],
+        };
+        let json = serde_json::to_string(&list).expect("serialize ListResponse");
+        let back: ListResponse<String> = serde_json::from_str(&json).expect("round-trip");
+        assert_eq!(back.items_per_page, Some(20));
+        assert_eq!(back.start_index, Some(41));
+        assert_eq!(back.total_results, 137);
     }
 
     #[test]
