@@ -791,8 +791,9 @@ mod tests {
     // Test data is from https://scimvalidator.microsoft.com/
     #[test]
     fn deserialize_entra_user() {
-        let user: Result<User, serde_json::Error> =
-            serde_json::from_str(include_str!("../test_data/entra_user_creation_test.json"));
+        let user: Result<User, serde_json::Error> = serde_json::from_str(include_str!(
+            "../test_data/provider_samples/entra_user_creation_test.json"
+        ));
         user.expect("user should deserialize");
     }
 
@@ -808,11 +809,115 @@ mod tests {
         use crate::models::others::ListResponse;
 
         let list: ListResponse<String> = serde_json::from_str(include_str!(
-            "../test_data/github_enterprise_user_list_test.json"
+            "../test_data/provider_samples/github_enterprise_user_list_test.json"
         ))
         .expect("GitHub Enterprise user list should deserialize");
 
         assert_eq!(list.total_results, 2);
         assert_eq!(list.resources.len(), 2);
+    }
+
+    /// Verbatim `User` payloads from RFC 7644. Each is parsed into `User`
+    /// and then round-tripped (serialize, re-parse as `serde_json::Value`)
+    /// to confirm no modelled field is dropped on the way back out.
+    mod rfc7644_samples {
+        use super::*;
+        use pretty_assertions::assert_eq;
+
+        fn assert_user_round_trips(raw: &str) {
+            let user: User =
+                serde_json::from_str(raw).expect("RFC 7644 sample must deserialize into User");
+            let reserialized: serde_json::Value =
+                serde_json::from_str(&serde_json::to_string(&user).expect("serialize User"))
+                    .unwrap();
+            let original: serde_json::Value = serde_json::from_str(raw).unwrap();
+            assert_eq!(
+                reserialized, original,
+                "round-tripped User JSON must equal the original RFC payload"
+            );
+        }
+
+        /// RFC 7644 §3.3 — unnumbered example, "a client sends a POST request
+        /// containing a `User` to the `/Users` endpoint". User creation request
+        /// (POST /Users body).
+        #[test]
+        fn rfc7644_s3_3_user_create_request() {
+            let raw = include_str!("../test_data/rfc7644/s3.3_user_create_request.json");
+            assert_user_round_trips(raw);
+            let user: User = serde_json::from_str(raw).unwrap();
+            assert_eq!(user.user_name, "bjensen");
+            assert_eq!(user.external_id.as_deref(), Some("bjensen"));
+            assert_eq!(
+                user.name.as_ref().unwrap().family_name.as_deref(),
+                Some("Jensen")
+            );
+        }
+
+        /// RFC 7644 §3.3 — unnumbered example, the 201 Created body ("the server
+        /// signals a successful creation ... and returns a representation of the
+        /// resource created"). Adds server-assigned `id` and `meta`.
+        #[test]
+        fn rfc7644_s3_3_user_create_response() {
+            let raw = include_str!("../test_data/rfc7644/s3.3_user_create_response.json");
+            assert_user_round_trips(raw);
+            let user: User = serde_json::from_str(raw).unwrap();
+            assert_eq!(
+                user.id.as_deref(),
+                Some("2819c223-7f76-453a-919d-413861904646")
+            );
+            let meta = user.meta.as_ref().unwrap();
+            assert_eq!(meta.resource_type.as_deref(), Some("User"));
+            assert_eq!(meta.version.as_deref(), Some("W/\"e180ee84f0671b1\""));
+        }
+
+        /// RFC 7644 §3.4.1 — unnumbered example, "The example below retrieves a
+        /// single User via the `/Users` endpoint". GET /Users/{id} retrieval
+        /// response (multi-valued `emails` and `phoneNumbers`).
+        #[test]
+        fn rfc7644_s3_4_1_user_retrieval_response() {
+            let raw = include_str!("../test_data/rfc7644/s3.4.1_user_retrieval_response.json");
+            assert_user_round_trips(raw);
+            let user: User = serde_json::from_str(raw).unwrap();
+            assert_eq!(
+                user.emails.as_ref().unwrap()[0].value.as_deref(),
+                Some("bjensen@example.com")
+            );
+            assert_eq!(
+                user.phone_numbers.as_ref().unwrap()[0].r#type.as_deref(),
+                Some("work")
+            );
+        }
+
+        /// RFC 7644 §3.5.1 — unnumbered example following "a successful PUT
+        /// operation returns a 200 OK response code and the entire resource
+        /// within the response body ... For example". PUT /Users/{id} request
+        /// replacing a user, including an empty `roles` array.
+        #[test]
+        fn rfc7644_s3_5_1_user_put_request() {
+            let raw = include_str!("../test_data/rfc7644/s3.5.1_user_put_request.json");
+            assert_user_round_trips(raw);
+            let user: User = serde_json::from_str(raw).unwrap();
+            assert_eq!(user.roles.as_ref().map(Vec::len), Some(0));
+            assert_eq!(
+                user.name.as_ref().unwrap().middle_name.as_deref(),
+                Some("Jane")
+            );
+            assert_eq!(user.emails.as_ref().unwrap().len(), 2);
+        }
+
+        /// RFC 7644 §3.5.1 — unnumbered example, "The service responds with the
+        /// entire updated User". PUT /Users/{id} response (drops `roles`, adds
+        /// `meta`).
+        #[test]
+        fn rfc7644_s3_5_1_user_put_response() {
+            let raw = include_str!("../test_data/rfc7644/s3.5.1_user_put_response.json");
+            assert_user_round_trips(raw);
+            let user: User = serde_json::from_str(raw).unwrap();
+            assert!(user.roles.is_none());
+            assert_eq!(
+                user.meta.as_ref().unwrap().last_modified.as_deref(),
+                Some("2011-08-08T08:00:12Z")
+            );
+        }
     }
 }

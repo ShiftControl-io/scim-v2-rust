@@ -1,0 +1,13 @@
+{
+  "totalResults": 100,
+  "itemsPerPage": 10,
+  "startIndex": 1,
+  "schemas": ["urn:ietf:params:scim:api:messages:2.0:ListResponse"],
+  "Resources": [
+    {
+      "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+      "id": "2819c223-7f76-453a-919d-413861904646",
+      "userName": "bjensen"
+    }
+  ]
+}

@@ -81,6 +81,29 @@ mod tests {
         assert!(error.is_err());
     }
 
+    /// RFC 7644 §3.6 — unnumbered example, the 404 body from "Client's attempt
+    /// to retrieve the previously deleted User". The error body returned for a
+    /// DELETE of a resource that does not exist. Verbatim from the RFC;
+    /// exercises an `Error` payload that carries `detail` and `status` but no
+    /// `scimType`.
+    #[test]
+    fn rfc7644_s3_6_error_response_round_trips() {
+        let raw = include_str!("../test_data/rfc7644/s3.6_error_response.json");
+        let err: ScimHttpError =
+            serde_json::from_str(raw).expect("RFC 7644 §3.6 error body must deserialize");
+        assert_eq!(err.status, "404");
+        assert_eq!(
+            err.detail.as_deref(),
+            Some("Resource 2819c223-7f76-453a-919d-413861904646 not found")
+        );
+        assert_eq!(err.scim_type, None);
+
+        let reserialized: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&err).unwrap()).unwrap();
+        let original: serde_json::Value = serde_json::from_str(raw).unwrap();
+        assert_eq!(reserialized, original);
+    }
+
     #[test]
     fn scim_http_error_serialize_to_json() {
         let error = ScimHttpError {

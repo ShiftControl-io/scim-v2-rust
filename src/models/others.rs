@@ -454,9 +454,139 @@ mod tests {
     }
 
     #[test]
-    fn test_patch_op_01_add_with_path() {
-        let ops: PatchOp = serde_json::from_str(include_str!("../test_data/operations_01.json"))
-            .expect("Failed to deserialize patch operations");
+    fn test_list_response_serializes_and_round_trips_zero_pagination_fields() {
+        // The serialize-side guarantee behind `Option<i64>`: `Some(0)` is a
+        // real SCIM value (a zero-result page) and MUST reach the wire — only
+        // `None` may be dropped. Guards against a `skip_serializing_if`
+        // predicate that also swallows `Some(0)`.
+        let list: ListResponse<String> = ListResponse {
+            items_per_page: Some(0),
+            total_results: 0,
+            start_index: Some(0),
+            schemas: vec![schema_urns::LIST_RESPONSE.to_string()],
+            resources: vec![],
+        };
+        let json = serde_json::to_string(&list).expect("serialize ListResponse");
+        assert!(
+            json.contains(r#""itemsPerPage":0"#),
+            "Some(0) itemsPerPage must be emitted, not skipped: {json}"
+        );
+        assert!(
+            json.contains(r#""startIndex":0"#),
+            "Some(0) startIndex must be emitted, not skipped: {json}"
+        );
+
+        let back: ListResponse<String> = serde_json::from_str(&json).expect("round-trip");
+        assert_eq!(back.items_per_page, Some(0));
+        assert_eq!(back.start_index, Some(0));
+    }
+
+    // ---- RFC 7644 sample payloads (verbatim, except as noted) ----
+
+    /// RFC 7644 §3.4.2 — the (unnumbered) response to `GET
+    /// /Users?attributes=userName`, introduced by "The following is an example
+    /// response to the query above". A query response with no pagination fields.
+    ///
+    /// The RFC prints the embedded resources abbreviated to `id` + `userName`
+    /// with no `schemas`; a `schemas` array is added to each here because this
+    /// crate's [`Resource`] deserializer requires a resource-type
+    /// discriminator (see the module docs) and will not guess. The
+    /// `ListResponse` envelope — `totalResults` present, `startIndex` and
+    /// `itemsPerPage` absent — is untouched and is the point of the test.
+    #[test]
+    fn rfc7644_s3_4_2_list_response() {
+        let raw = include_str!("../test_data/rfc7644/s3.4.2_list_response.json");
+        let list: ListResponse<String> =
+            serde_json::from_str(raw).expect("RFC 7644 §3.4.2 list response must deserialize");
+        assert_eq!(list.total_results, 2);
+        assert_eq!(list.start_index, None);
+        assert_eq!(list.items_per_page, None);
+        assert_eq!(list.resources.len(), 2);
+        assert!(matches!(list.resources[0], Resource::User(_)));
+
+        let reserialized: Value =
+            serde_json::from_str(&serde_json::to_string(&list).unwrap()).unwrap();
+        let original: Value = serde_json::from_str(raw).unwrap();
+        assert_eq!(reserialized, original);
+    }
+
+    /// RFC 7644 §3.4.2.4, Figure 3 ("ListResponse Format for Returning Multiple
+    /// Resources") — the pagination example. The RFC prints its single resource
+    /// abbreviated to `{...}`; that placeholder is replaced here with one
+    /// concrete User (see `test_data/README.md`). `totalResults` (100)
+    /// intentionally exceeds the page size (10).
+    #[test]
+    fn rfc7644_s3_4_2_4_fig3_pagination_response() {
+        let raw = include_str!("../test_data/rfc7644/s3.4.2.4_fig3_pagination_response.json");
+        let list: ListResponse<String> =
+            serde_json::from_str(raw).expect("RFC 7644 Figure 3 must deserialize");
+        assert_eq!(list.total_results, 100);
+        assert_eq!(list.items_per_page, Some(10));
+        assert_eq!(list.start_index, Some(1));
+        assert_eq!(list.resources.len(), 1);
+        assert!(matches!(list.resources[0], Resource::User(_)));
+
+        let reserialized: Value =
+            serde_json::from_str(&serde_json::to_string(&list).unwrap()).unwrap();
+        let original: Value = serde_json::from_str(raw).unwrap();
+        assert_eq!(reserialized, original);
+    }
+
+    /// RFC 7644 §3.4.3, Figure 5 ("Example POST Query Response") — POST
+    /// `/.search` response with pagination fields present. The RFC truncates the
+    /// resource list with a trailing
+    /// `...`; that placeholder is dropped here and a `schemas` array is added
+    /// to each resource (see [`rfc7644_s3_4_2_list_response`]). The second
+    /// resource is a Group, so this also covers a heterogeneous list.
+    #[test]
+    fn rfc7644_s3_4_3_fig5_post_query_response() {
+        let raw = include_str!("../test_data/rfc7644/s3.4.3_fig5_post_query_response.json");
+        let list: ListResponse<String> =
+            serde_json::from_str(raw).expect("RFC 7644 Figure 5 must deserialize");
+        assert_eq!(list.total_results, 100);
+        assert_eq!(list.items_per_page, Some(10));
+        assert_eq!(list.start_index, Some(1));
+        assert!(matches!(list.resources[0], Resource::User(_)));
+        assert!(matches!(list.resources[1], Resource::Group(_)));
+
+        let reserialized: Value =
+            serde_json::from_str(&serde_json::to_string(&list).unwrap()).unwrap();
+        let original: Value = serde_json::from_str(raw).unwrap();
+        assert_eq!(reserialized, original);
+    }
+
+    /// RFC 7644 §3.4.3, Figure 4 ("Example POST Query Request") — POST
+    /// `/.search` request body. Verbatim.
+    #[test]
+    fn rfc7644_s3_4_3_fig4_search_request() {
+        let raw = include_str!("../test_data/rfc7644/s3.4.3_fig4_search_request.json");
+        let req: SearchRequest =
+            serde_json::from_str(raw).expect("RFC 7644 Figure 4 must deserialize");
+        assert_eq!(req.start_index, Some(1));
+        assert_eq!(req.count, Some(10));
+        assert_eq!(
+            req.attributes.as_deref(),
+            Some(&["displayName".to_string(), "userName".to_string()][..])
+        );
+        assert!(req.filter.is_some());
+
+        // The parsed filter must serialize back to the RFC's filter string.
+        let reserialized: Value =
+            serde_json::from_str(&serde_json::to_string(&req).unwrap()).unwrap();
+        let original: Value = serde_json::from_str(raw).unwrap();
+        assert_eq!(reserialized, original);
+    }
+
+    /// RFC 7644 §3.5.2.1 — unnumbered example, "how to add a member to a group"
+    /// (the block at rfc7644.txt lines 2033-2048; *not* Figure 6, which carries
+    /// a `... + additional operations if needed ...` placeholder). `add` a group
+    /// member via an explicit `members` path.
+    #[test]
+    fn rfc7644_s3_5_2_1_patch_add_member() {
+        let ops: PatchOp = serde_json::from_str(include_str!(
+            "../test_data/rfc7644/s3.5.2.1_add_member.json"
+        ))
+        .expect("Failed to deserialize patch operations");
         assert_eq!(ops.schemas, vec![PATCH_OP_SCHEMA]);
         assert_eq!(ops.operations.len(), 1);
         assert!(matches!(
@@ -468,10 +598,16 @@ mod tests {
         ));
     }
 
+    /// RFC 7644 §3.5.2.1 — unnumbered example, "how to add one or more
+    /// attributes to a User resource without using a `path` attribute". `add`
+    /// several user attributes at once with no `path` (the value is a partial
+    /// resource object).
     #[test]
-    fn test_patch_op_02_add_without_path() {
-        let ops: PatchOp = serde_json::from_str(include_str!("../test_data/operations_02.json"))
-            .expect("Failed to deserialize patch operations");
+    fn rfc7644_s3_5_2_1_patch_add_user_attributes() {
+        let ops: PatchOp = serde_json::from_str(include_str!(
+            "../test_data/rfc7644/s3.5.2.1_add_user_attributes.json"
+        ))
+        .expect("Failed to deserialize patch operations");
         assert_eq!(ops.schemas, vec![PATCH_OP_SCHEMA]);
         assert_eq!(ops.operations.len(), 1);
         assert!(matches!(
@@ -480,10 +616,15 @@ mod tests {
         ));
     }
 
+    /// RFC 7644 §3.5.2.2 — unnumbered example, "Remove a single member from a
+    /// group". `remove` a group member selected by a value filter
+    /// (`members[value eq "..."]`).
     #[test]
-    fn test_patch_op_03_remove_member_by_filter() {
-        let ops: PatchOp = serde_json::from_str(include_str!("../test_data/operations_03.json"))
-            .expect("Failed to deserialize patch operations");
+    fn rfc7644_s3_5_2_2_patch_remove_member_by_filter() {
+        let ops: PatchOp = serde_json::from_str(include_str!(
+            "../test_data/rfc7644/s3.5.2.2_remove_member_by_filter.json"
+        ))
+        .expect("Failed to deserialize patch operations");
         assert_eq!(ops.schemas, vec![PATCH_OP_SCHEMA]);
         assert_eq!(ops.operations.len(), 1);
         match &ops.operations[0] {
@@ -516,10 +657,14 @@ mod tests {
         }
     }
 
+    /// RFC 7644 §3.5.2.2 — unnumbered example, "Remove all members of a group".
+    /// `remove` the entire `members` attribute (bare path, no filter).
     #[test]
-    fn test_patch_op_04_remove_all_members() {
-        let ops: PatchOp = serde_json::from_str(include_str!("../test_data/operations_04.json"))
-            .expect("Failed to deserialize patch operations");
+    fn rfc7644_s3_5_2_2_patch_remove_all_members() {
+        let ops: PatchOp = serde_json::from_str(include_str!(
+            "../test_data/rfc7644/s3.5.2.2_remove_all_members.json"
+        ))
+        .expect("Failed to deserialize patch operations");
         assert_eq!(ops.schemas, vec![PATCH_OP_SCHEMA]);
         assert_eq!(ops.operations.len(), 1);
         assert!(matches!(
@@ -531,10 +676,15 @@ mod tests {
         ));
     }
 
+    /// RFC 7644 §3.5.2.2 — unnumbered example, "Removal of a value from a
+    /// complex multi-valued attribute". `remove` an entry selected by a compound
+    /// `and` filter (`emails[type eq "work" and value ew "example.com"]`).
     #[test]
-    fn test_patch_op_05_remove_emails_compound_filter() {
-        let ops: PatchOp = serde_json::from_str(include_str!("../test_data/operations_05.json"))
-            .expect("Failed to deserialize patch operations");
+    fn rfc7644_s3_5_2_2_patch_remove_complex_attribute() {
+        let ops: PatchOp = serde_json::from_str(include_str!(
+            "../test_data/rfc7644/s3.5.2.2_remove_complex_attribute.json"
+        ))
+        .expect("Failed to deserialize patch operations");
         assert_eq!(ops.schemas, vec![PATCH_OP_SCHEMA]);
         assert_eq!(ops.operations.len(), 1);
         match &ops.operations[0] {
@@ -581,10 +731,64 @@ mod tests {
         }
     }
 
+    /// RFC 7644 §3.5.2.2 — unnumbered example, "Example request to remove and
+    /// add a member". A two-op `PatchOp` that `remove`s one member by value
+    /// filter, then `add`s a different member. The RFC prints the remove path as
+    /// `members[value eq"..."]` with no space after `eq` and truncates both
+    /// UUIDs with `...`; the space is normalized here so the filter parses (see
+    /// `test_data/README.md`).
     #[test]
-    fn test_patch_op_06_remove_then_add_members() {
-        let ops: PatchOp = serde_json::from_str(include_str!("../test_data/operations_06.json"))
-            .expect("Failed to deserialize patch operations");
+    fn rfc7644_s3_5_2_2_patch_remove_by_filter_then_add_member() {
+        let ops: PatchOp = serde_json::from_str(include_str!(
+            "../test_data/rfc7644/s3.5.2.2_remove_by_filter_then_add_member.json"
+        ))
+        .expect("Failed to deserialize patch operations");
+        assert_eq!(ops.schemas, vec![PATCH_OP_SCHEMA]);
+        assert_eq!(ops.operations.len(), 2);
+        match &ops.operations[0] {
+            PatchOperation::Remove {
+                path:
+                    PatchPath::Value(PatchValuePath {
+                        attr:
+                            AttrPath {
+                                uri: None,
+                                name: attr_name,
+                                sub_attr: None,
+                            },
+                        filter:
+                            ValFilter::Attr(AttrExp::Comparison(
+                                AttrPath {
+                                    uri: None,
+                                    name: inner_name,
+                                    sub_attr: None,
+                                },
+                                CompareOp::Eq,
+                                CompValue::Str(_),
+                            )),
+                        sub_attr: None,
+                    }),
+                value: None,
+            } if attr_name == "members" && inner_name == "value" => {}
+            other => panic!("unexpected remove operation: {other:?}"),
+        }
+        assert!(matches!(
+            &ops.operations[1],
+            PatchOperation::Add(OperationTarget::WithPath {
+                path: PatchPath::Attr(AttrPath { uri: None, name, sub_attr: None }),
+                ..
+            }) if name == "members"
+        ));
+    }
+
+    /// RFC 7644 §3.5.2.2 — unnumbered example, "how to replace all of the
+    /// members of a group with a different members list". Modeled as a `remove`
+    /// of `members` followed by an `add` of `members` in one `PatchOp`.
+    #[test]
+    fn rfc7644_s3_5_2_2_patch_replace_all_members() {
+        let ops: PatchOp = serde_json::from_str(include_str!(
+            "../test_data/rfc7644/s3.5.2.2_replace_all_members.json"
+        ))
+        .expect("Failed to deserialize patch operations");
         assert_eq!(ops.schemas, vec![PATCH_OP_SCHEMA]);
         assert_eq!(ops.operations.len(), 2);
         assert!(matches!(
@@ -603,10 +807,15 @@ mod tests {
         ));
     }
 
+    /// RFC 7644 §3.5.2.3 — unnumbered example, "how to replace all of the
+    /// members of a group with a different members list in a single replace
+    /// operation". `replace` the entire `members` list in one operation.
     #[test]
-    fn test_patch_op_07_replace_members_list() {
-        let ops: PatchOp = serde_json::from_str(include_str!("../test_data/operations_07.json"))
-            .expect("Failed to deserialize patch operations");
+    fn rfc7644_s3_5_2_3_patch_replace_members_single_op() {
+        let ops: PatchOp = serde_json::from_str(include_str!(
+            "../test_data/rfc7644/s3.5.2.3_replace_members_single_op.json"
+        ))
+        .expect("Failed to deserialize patch operations");
         assert_eq!(ops.schemas, vec![PATCH_OP_SCHEMA]);
         assert_eq!(ops.operations.len(), 1);
         assert!(matches!(
@@ -618,10 +827,15 @@ mod tests {
         ));
     }
 
+    /// RFC 7644 §3.5.2.3 — unnumbered example, "how to change a User's entire
+    /// `work` address, using a `valuePath` filter". `replace` the entry selected
+    /// by `addresses[type eq "work"]` with a full complex value.
     #[test]
-    fn test_patch_op_08_replace_work_address() {
-        let ops: PatchOp = serde_json::from_str(include_str!("../test_data/operations_08.json"))
-            .expect("Failed to deserialize patch operations");
+    fn rfc7644_s3_5_2_3_patch_replace_work_address() {
+        let ops: PatchOp = serde_json::from_str(include_str!(
+            "../test_data/rfc7644/s3.5.2.3_replace_work_address.json"
+        ))
+        .expect("Failed to deserialize patch operations");
         assert_eq!(ops.schemas, vec![PATCH_OP_SCHEMA]);
         assert_eq!(ops.operations.len(), 1);
         match &ops.operations[0] {
@@ -652,10 +866,16 @@ mod tests {
         }
     }
 
+    /// RFC 7644 §3.5.2.3 — unnumbered example, "how to change a specific
+    /// sub-attribute `streetAddress` ... selected by a `valuePath` filter".
+    /// `replace` a single sub-attribute of a filtered entry
+    /// (`addresses[type eq "work"].streetAddress`).
     #[test]
-    fn test_patch_op_09_replace_street_address_via_filter() {
-        let ops: PatchOp = serde_json::from_str(include_str!("../test_data/operations_09.json"))
-            .expect("Failed to deserialize patch operations");
+    fn rfc7644_s3_5_2_3_patch_replace_street_address_via_filter() {
+        let ops: PatchOp = serde_json::from_str(include_str!(
+            "../test_data/rfc7644/s3.5.2.3_replace_street_address_via_filter.json"
+        ))
+        .expect("Failed to deserialize patch operations");
         assert_eq!(ops.schemas, vec![PATCH_OP_SCHEMA]);
         assert_eq!(ops.operations.len(), 1);
         match &ops.operations[0] {
@@ -692,10 +912,16 @@ mod tests {
         }
     }
 
+    /// RFC 7644 §3.5.2.3 — unnumbered example, "how to replace all values of one
+    /// or more specific attributes of a User resource". `replace` multiple
+    /// attributes at once with no `path` (the value is a partial resource
+    /// object).
     #[test]
-    fn test_patch_op_10_replace_without_path() {
-        let ops: PatchOp = serde_json::from_str(include_str!("../test_data/operations_10.json"))
-            .expect("Failed to deserialize patch operations");
+    fn rfc7644_s3_5_2_3_patch_replace_multiple_attributes() {
+        let ops: PatchOp = serde_json::from_str(include_str!(
+            "../test_data/rfc7644/s3.5.2.3_replace_multiple_attributes.json"
+        ))
+        .expect("Failed to deserialize patch operations");
         assert_eq!(ops.schemas, vec![PATCH_OP_SCHEMA]);
         assert_eq!(ops.operations.len(), 1);
         assert!(matches!(

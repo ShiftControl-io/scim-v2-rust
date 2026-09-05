@@ -1,0 +1,16 @@
+{
+  "schemas": ["urn:ietf:params:scim:api:messages:2.0:ListResponse"],
+  "totalResults": 2,
+  "Resources": [
+    {
+      "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+      "id": "2819c223-7f76-453a-919d-413861904646",
+      "userName": "bjensen"
+    },
+    {
+      "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+      "id": "c75ad752-64ae-4823-840d-ffa80929976c",
+      "userName": "jsmith"
+    }
+  ]
+}
