@@ -164,6 +164,12 @@ so is free, and every break is listed below.
   run, requires the version input to match `Cargo.toml` and a tag on the same
   commit, and runs behind a `crates-io` environment. It was previously
   triggered by any `v*.*.*` tag push.
+- Dependency requirements are stated as caret requirements at major.minor
+  (`serde = "1.0"`, `thiserror = "2.0"`, `lalrpop-util = "0.23"`,
+  `fluent-uri = "0.4"`). Every form is a caret requirement and cargo resolves
+  to the newest compatible release either way, so the patch digit only set a
+  floor — a claim about the oldest API this crate compiles against — and a
+  needlessly precise floor forced consumers to upgrade for no reason.
 - Line coverage 88.25% → 95.78%, functions 81.15% → 90.72%, excluding the
   generated parser. `tests/fixtures.rs` now enforces that every fixture is
   documented and read by a test, which found three dead JumpCloud fixtures

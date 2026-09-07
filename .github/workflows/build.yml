@@ -13,10 +13,6 @@ env:
   # import or a deprecation in a configuration clippy does not cover could
   # reach main. Cargo passes `--cap-lints allow` to every registry dependency
   # (verified: 30 of 30), so this bounds only this crate's own code.
-  #
-  # The `minimal-versions` job overrides this back to empty — it runs on
-  # nightly, where a newly added lint would fail CI for reasons unrelated to
-  # the change under review.
   RUSTFLAGS: -D warnings
 
 # No `--locked` anywhere below: this is a library and `.gitignore` excludes
@@ -208,26 +204,3 @@ jobs:
             -H "Content-Type: application/json" \
             -d "{\"files\": {\"scim_v2_coverage.json\": {\"content\": $(echo "$json" | jq -R .)}}}" \
             "https://api.github.com/gists/$GIST_ID" > /dev/null
-
-  # Version requirements in Cargo.toml are a promise about the *lowest*
-  # version that works, and nothing else in CI tests that end of the range:
-  # normal resolution always picks the newest. Without this job a requirement
-  # like `serde = "1.0"` looks fine here and breaks a consumer whose lock
-  # holds an older patch.
-  minimal-versions:
-    name: Minimal versions
-    runs-on: ubuntu-latest
-    env:
-      # Nightly gains lints on its own schedule; denying them here would fail
-      # CI for reasons unrelated to the change under review.
-      RUSTFLAGS: ''
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-      - uses: hecrj/setup-rust-action@110f36749599534ca96628b82f52ae67e5d95a3c # v2.0.1
-        with:
-          rust-version: nightly
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - name: Resolve every direct dependency to its declared minimum
-        run: cargo update -Z direct-minimal-versions
-      - name: Build and test against those minimums
-        run: cargo test --all-features

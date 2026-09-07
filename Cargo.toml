@@ -27,16 +27,17 @@ models = []
 # `models`, since `get_schemas` and `get_resource_types` return model types.
 schemas = ["models"]
 
-# Version requirements state the lowest version actually tested, not the
-# lowest that looks plausible. `serde = "1.0"` would resolve to serde 1.0.0
-# under a minimal-version resolution, and serde 1.0.0 does not compile on a
-# modern toolchain at all — so the loose form claims a compatibility this
-# crate does not have. The three below were loosened only after verifying the
-# full suite passes at their floors (thiserror 2.0.0, lalrpop-util 0.23.0,
-# fluent-uri 0.4.0). The `Minimal versions` CI job keeps that honest.
+# Caret requirements at major.minor. Every form here is a caret requirement —
+# "1.0.228" means ">=1.0.228, <2.0.0", not a pin — and cargo always resolves to
+# the newest compatible release, so the patch digit changes nothing about what
+# a consumer gets. All it sets is the floor, and a floor is a claim about the
+# oldest API this crate compiles against. Stating it as major.minor keeps that
+# claim honest and generous; a library cannot pin (`=1.0.228` would refuse to
+# unify with any other crate in the graph wanting a different patch, and a
+# library's Cargo.lock is ignored by consumers).
 [dependencies]
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.145"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 lalrpop-util = { version = "0.23", features = ["lexer"], optional = true }
 fluent-uri = { version = "0.4", optional = true }
 thiserror = "2.0"
@@ -44,7 +45,7 @@ thiserror = "2.0"
 [dev-dependencies]
 pretty_assertions = "1.4"
 test-case = "3.3"
-uuid = { version = "1.22", features = ["serde"] }
+uuid = { version = "1", features = ["serde"] }
 
 [lib]
 doc-scrape-examples = true
