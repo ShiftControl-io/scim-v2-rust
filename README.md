@@ -1,7 +1,7 @@
 # SCIM v2
 
 [![CI](https://github.com/ShiftControl-io/scim-v2-rust/actions/workflows/build.yml/badge.svg)](https://github.com/ShiftControl-io/scim-v2-rust/actions/workflows/build.yml)
-[![Test Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/shiftcontrol-dan/REPLACE_GIST_ID/raw/scim_v2_coverage.json)](#)
+[![Test Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/shiftcontrol-dan/f1163c7aabc6c706464e59a0e10c861e/raw/scim_v2_coverage.json)](#)
 [![crates.io](https://img.shields.io/crates/v/scim_v2.svg)](https://crates.io/crates/scim_v2)
 [![docs.rs](https://img.shields.io/docsrs/scim_v2)](https://docs.rs/scim_v2)
 [![MSRV](https://img.shields.io/badge/MSRV-1.85-blue)](https://blog.rust-lang.org/2025/02/20/Rust-1.85.0.html)
@@ -11,10 +11,6 @@ Models, parsers and validators for the System for Cross-domain Identity
 Management (SCIM) 2.0 protocol — [RFC 7642](https://www.rfc-editor.org/rfc/rfc7642),
 [RFC 7643](https://www.rfc-editor.org/rfc/rfc7643) and
 [RFC 7644](https://www.rfc-editor.org/rfc/rfc7644).
-
-**Contents** — [Scope](#scope) · [Installation](#installation) ·
-[Feature flags](#feature-flags) · [Usage](#usage) ·
-[For SCIM servers](#for-scim-servers) · [Contributing](#contributing)
 
 ## Scope
 
