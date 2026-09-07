@@ -8,6 +8,7 @@ use crate::models::resource_types::ResourceType;
 use crate::models::scim_schema::Schema;
 use crate::models::user::User;
 use crate::schema_urns;
+use crate::utils::error::SCIMError;
 
 /// Server-side variant of [`ListQuery`] that tolerates malformed filter
 /// expressions so the handler can produce an RFC 7644 §3.12 `invalidFilter`
@@ -276,13 +277,15 @@ where
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase", bound(deserialize = "T: DeserializeOwned"))]
 pub struct ListResponse<T> {
-    // RFC 7644 section 3.4.2: REQUIRED when partial results are returned due to
-    // pagination.
+    /// RFC 7644 §3.4.2: REQUIRED when partial results are returned due to
+    /// pagination; omitted otherwise. Not enforced by the type — see
+    /// [`ListResponse::validate`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub items_per_page: Option<i64>,
     pub total_results: i64,
-    // RFC 7644 section 3.4.2: REQUIRED when partial results are returned due to
-    // pagination.
+    /// RFC 7644 §3.4.2: REQUIRED when partial results are returned due to
+    /// pagination; omitted otherwise. Not enforced by the type — see
+    /// [`ListResponse::validate`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub start_index: Option<i64>,
     pub schemas: Vec<String>,
@@ -290,6 +293,66 @@ pub struct ListResponse<T> {
     // non-zero, so a query returning no matches may omit it on the wire.
     #[serde(rename = "Resources", default)]
     pub resources: Vec<Resource<T>>,
+}
+
+impl<T> ListResponse<T> {
+    /// Validates a `ListResponse` against RFC 7644 §3.4.2.
+    ///
+    /// Checks performed:
+    ///
+    /// * `schemas` is present.
+    /// * When the response carries a *partial* result set — fewer entries in
+    ///   `Resources` than `totalResults` — both `startIndex` and `itemsPerPage`
+    ///   are present. §3.4.2 makes them REQUIRED "when partial results are
+    ///   returned due to pagination".
+    ///
+    /// This last invariant cannot be encoded in the type: `startIndex` and
+    /// `itemsPerPage` are `Option<i64>` so that a wire `0` stays distinct from
+    /// an omitted field, which leaves a paginated-but-incomplete response
+    /// expressible. Call this before serializing a response assembled by hand.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - If the response is valid.
+    /// * `Err(SCIMError::MissingRequiredField)` - If `schemas` is empty, or a
+    ///   pagination field is absent from a partial result set.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use scim_v2::models::others::ListResponse;
+    ///
+    /// let list: ListResponse<String> = ListResponse {
+    ///     schemas: vec!["urn:ietf:params:scim:api:messages:2.0:ListResponse".to_string()],
+    ///     total_results: 0,
+    ///     items_per_page: None,
+    ///     start_index: None,
+    ///     resources: vec![],
+    /// };
+    ///
+    /// match list.validate() {
+    ///     Ok(_) => println!("ListResponse is valid."),
+    ///     Err(e) => println!("ListResponse is invalid: {}", e),
+    /// }
+    /// ```
+    pub fn validate(&self) -> Result<(), SCIMError> {
+        if self.schemas.is_empty() {
+            return Err(SCIMError::MissingRequiredField("schemas".to_string()));
+        }
+        // A short page — fewer `Resources` returned than the total that match —
+        // is "partial results ... returned due to pagination" per §3.4.2, which
+        // makes both pagination markers REQUIRED.
+        let is_partial = (self.resources.len() as i64) < self.total_results;
+        if is_partial {
+            if self.start_index.is_none() {
+                return Err(SCIMError::MissingRequiredField("startIndex".to_string()));
+            }
+            if self.items_per_page.is_none() {
+                return Err(SCIMError::MissingRequiredField("itemsPerPage".to_string()));
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -479,6 +542,77 @@ mod tests {
         let back: ListResponse<String> = serde_json::from_str(&json).expect("round-trip");
         assert_eq!(back.items_per_page, Some(0));
         assert_eq!(back.start_index, Some(0));
+    }
+
+    #[test]
+    fn validate_list_response_accepts_complete_unpaginated_response() {
+        // `Resources` count == `totalResults`: not a partial page, so the
+        // pagination markers are legitimately absent (RFC 7644 §3.4.2).
+        let list: ListResponse<String> = ListResponse {
+            schemas: vec![schema_urns::LIST_RESPONSE.to_string()],
+            total_results: 0,
+            items_per_page: None,
+            start_index: None,
+            resources: vec![],
+        };
+        assert!(list.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_list_response_accepts_partial_page_with_pagination_markers() {
+        let list: ListResponse<String> = ListResponse {
+            schemas: vec![schema_urns::LIST_RESPONSE.to_string()],
+            total_results: 100,
+            items_per_page: Some(10),
+            start_index: Some(1),
+            resources: vec![],
+        };
+        assert!(list.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_list_response_rejects_partial_page_missing_start_index() {
+        let list: ListResponse<String> = ListResponse {
+            schemas: vec![schema_urns::LIST_RESPONSE.to_string()],
+            total_results: 100,
+            items_per_page: Some(10),
+            start_index: None,
+            resources: vec![],
+        };
+        assert!(matches!(
+            list.validate(),
+            Err(SCIMError::MissingRequiredField(f)) if f == "startIndex"
+        ));
+    }
+
+    #[test]
+    fn validate_list_response_rejects_partial_page_missing_items_per_page() {
+        let list: ListResponse<String> = ListResponse {
+            schemas: vec![schema_urns::LIST_RESPONSE.to_string()],
+            total_results: 100,
+            items_per_page: None,
+            start_index: Some(1),
+            resources: vec![],
+        };
+        assert!(matches!(
+            list.validate(),
+            Err(SCIMError::MissingRequiredField(f)) if f == "itemsPerPage"
+        ));
+    }
+
+    #[test]
+    fn validate_list_response_rejects_empty_schemas() {
+        let list: ListResponse<String> = ListResponse {
+            schemas: vec![],
+            total_results: 0,
+            items_per_page: None,
+            start_index: None,
+            resources: vec![],
+        };
+        assert!(matches!(
+            list.validate(),
+            Err(SCIMError::MissingRequiredField(f)) if f == "schemas"
+        ));
     }
 
     // ---- RFC 7644 sample payloads (verbatim, except as noted) ----
