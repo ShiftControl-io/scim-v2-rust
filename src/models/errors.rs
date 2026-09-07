@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::schema_urns;
+
 /// Represents a SCIM HTTP Error.
 ///
 /// This struct is used to represent an error message that conforms to the SCIM protocol specification.
@@ -26,7 +28,7 @@ pub struct ScimHttpError {
 impl Default for ScimHttpError {
     fn default() -> Self {
         ScimHttpError {
-            schemas: vec!["urn:ietf:params:scim:api:messages:2.0:Error".to_string()],
+            schemas: vec![schema_urns::ERROR.to_string()],
             scim_type: None,
             detail: None,
             status: "".to_string(),
@@ -107,7 +109,7 @@ mod tests {
     #[test]
     fn scim_http_error_serialize_to_json() {
         let error = ScimHttpError {
-            schemas: vec!["urn:ietf:params:scim:api:messages:2.0:Error".to_string()],
+            schemas: vec![schema_urns::ERROR.to_string()],
             scim_type: Some("invalidValue".to_string()),
             detail: Some("Invalid email address".to_string()),
             status: "400".to_string(),

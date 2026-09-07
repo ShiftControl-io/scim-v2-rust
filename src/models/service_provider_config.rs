@@ -1,10 +1,17 @@
+use crate::utils::validation::{Validate, ValidationError};
 use serde::{Deserialize, Serialize};
 
 use crate::models::scim_schema::Meta;
+use crate::schema_urns;
 use crate::utils::error::SCIMError;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ServiceProviderConfig {
+    /// RFC 7643: the schema URN(s) this resource conforms to.
+    /// `#[serde(default)]` because RFC 7643 §§6-7 allow the discovery
+    /// resources to be served without it; a present value round-trips.
+    #[serde(default)]
+    pub schemas: Vec<String>,
     #[serde(rename = "documentationUri", skip_serializing_if = "Option::is_none")]
     pub documentation_uri: Option<String>,
     pub patch: Supported,
@@ -23,6 +30,7 @@ pub struct ServiceProviderConfig {
 impl Default for ServiceProviderConfig {
     fn default() -> Self {
         ServiceProviderConfig {
+            schemas: vec![schema_urns::SERVICE_PROVIDER_CONFIG.to_string()],
             documentation_uri: None,
             patch: Supported { supported: false },
             bulk: Bulk {
@@ -168,142 +176,24 @@ impl TryFrom<&str> for ServiceProviderConfig {
     }
 }
 
-impl ServiceProviderConfig {
-    /// Validates a service provider config.
+impl ServiceProviderConfig {}
+
+impl Validate for ServiceProviderConfig {
+    /// RFC 7643 §5 marks `authenticationSchemes` REQUIRED, so an empty list is
+    /// a conformance failure. `patch`, `bulk`, `filter`, `changePassword`,
+    /// `sort` and `etag` are REQUIRED too, but they are non-`Option` fields, so
+    /// `serde` already refuses a payload that omits them.
     ///
-    /// This function checks if the service provider config has `patch`, `bulk`, `filter`, `change_password`, `sort`, and `etag`. If any of these fields are missing, it returns an error.
-    ///
-    /// # Arguments
-    ///
-    /// * `config` - A reference to a ServiceProviderConfig instance.
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(())` - If the service provider config is valid.
-    /// * `Err(SCIMError::MissingRequiredField)` - If a required field is missing.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use scim_v2::models::service_provider_config::ServiceProviderConfig;
-    ///
-    /// let config = ServiceProviderConfig {
-    ///     // Initialize config fields here...
-    ///     // ...
-    ///     ..Default::default()
-    /// };
-    ///
-    /// match config.validate() {
-    ///     Ok(_) => println!("ServiceProviderConfig is valid."),
-    ///     Err(e) => println!("ServiceProviderConfig is invalid: {}", e),
-    /// }
-    /// ```
-    pub fn validate(&self) -> Result<(), SCIMError> {
-        if !self.patch.supported {
-            return Err(SCIMError::MissingRequiredField("patch".to_string()));
-        }
-        if !self.bulk.supported {
-            return Err(SCIMError::MissingRequiredField("bulk".to_string()));
-        }
-        if !self.filter.supported {
-            return Err(SCIMError::MissingRequiredField("filter".to_string()));
-        }
-        if !self.change_password.supported {
-            return Err(SCIMError::MissingRequiredField(
-                "change_password".to_string(),
-            ));
-        }
-        if !self.sort.supported {
-            return Err(SCIMError::MissingRequiredField("sort".to_string()));
-        }
-        if !self.etag.supported {
-            return Err(SCIMError::MissingRequiredField("etag".to_string()));
+    /// Before 1.0 this returned `MissingRequiredField` whenever any of those
+    /// six reported `supported: false`, which rejected valid configurations:
+    /// §5 makes the `supported` **field** required, not its value true. A
+    /// server that does not implement bulk correctly advertises
+    /// `"bulk": {"supported": false}`.
+    fn validate(&self) -> Result<(), ValidationError> {
+        if self.authentication_schemes.is_empty() {
+            return Err(ValidationError::missing_required("authenticationSchemes"));
         }
         Ok(())
-    }
-
-    /// Serializes the `ServiceProviderConfig` instance to a JSON string, using the custom SCIMError for error handling.
-    ///
-    /// # Returns
-    ///
-    /// This method returns a `Result<String, SCIMError>`, where `Ok(String)` contains
-    /// the JSON string representation of the `ServiceProviderConfig` instance, and `Err(SCIMError)` contains
-    /// the custom error encountered during serialization.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use scim_v2::models::service_provider_config::ServiceProviderConfig;
-    ///
-    /// let config = ServiceProviderConfig {
-    ///     // Initialize config fields here...
-    ///     // ...
-    ///     ..Default::default()
-    /// };
-    ///
-    /// match config.serialize() {
-    ///     Ok(json) => println!("Serialized ServiceProviderConfig: {}", json),
-    ///     Err(e) => println!("Serialization error: {}", e),
-    /// }
-    /// ```
-    pub fn serialize(&self) -> Result<String, SCIMError> {
-        serde_json::to_string(&self).map_err(SCIMError::SerializationError)
-    }
-
-    /// Deserializes a JSON string into a `ServiceProviderConfig` instance, using the custom SCIMError for error handling.
-    ///
-    /// # Parameters
-    ///
-    /// * `json` - A string slice that holds the JSON representation of a `ServiceProviderConfig`.
-    ///
-    /// # Returns
-    ///
-    /// This method returns a `Result<ServiceProviderConfig, SCIMError>`, where `Ok(ServiceProviderConfig)` is the deserialized `ServiceProviderConfig` instance,
-    /// and `Err(SCIMError)` is the custom error encountered during deserialization.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use scim_v2::models::service_provider_config::ServiceProviderConfig;
-    ///
-    /// let config_json = r#"{
-    ///             "schemas": ["urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"],
-    ///             "documentationUri": "http:///example.com/help/scim.html",
-    ///             "patch": { "supported": true },
-    ///             "bulk": {
-    ///                 "supported": true,
-    ///                 "maxOperations": 1000,
-    ///                 "maxPayloadSize": 1048576
-    ///             },
-    ///             "filter": {
-    ///                 "supported": true,
-    ///                 "maxResults": 200
-    ///             },
-    ///             "changePassword": { "supported": true },
-    ///             "sort": { "supported": true },
-    ///             "etag": { "supported": true },
-    ///             "authenticationSchemes": [
-    ///                 {
-    ///                     "name": "OAuth Bearer Token",
-    ///                     "description": "Authentication scheme using the OAuth Bearer Token Standard",
-    ///                     "specUri": "http:///www.rfc-editor.org/info/rfc6750",
-    ///                     "documentationUri": "http:///example.com/help/oauth.html"
-    ///                 },
-    ///                 {
-    ///                     "name": "HTTP Basic",
-    ///                     "description": "Authentication scheme using the HTTP Basic Standard",
-    ///                     "specUri": "http:///www.rfc-editor.org/info/rfc2617",
-    ///                     "documentationUri": "http:///example.com/help/httpBasic.html"
-    ///                 }
-    ///             ]
-    ///         }"#;
-    /// match ServiceProviderConfig::deserialize(config_json) {
-    ///     Ok(user) => println!("Deserialized User: {:?}", user),
-    ///     Err(e) => println!("Deserialization error: {}", e),
-    /// }
-    /// ```
-    pub fn deserialize(json: &str) -> Result<Self, SCIMError> {
-        serde_json::from_str(json).map_err(SCIMError::DeserializationError)
     }
 }
 

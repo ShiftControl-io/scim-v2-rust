@@ -1,84 +1,95 @@
 //! # SCIM v2
 //!
-//! `scim_v2` is a crate that provides utilities for working with the System for Cross-domain Identity Management (SCIM) version 2.0 protocol.
+//! Models, parsers and validators for the System for Cross-domain Identity
+//! Management (SCIM) 2.0 protocol — RFC 7642, RFC 7643 and RFC 7644.
 //!
-//! This crate provides the following functionalities:
-//! - Models for various SCIM resources such as `User`, `Group`, `ResourceType`, `ServiceProviderConfig`, and `EnterpriseUser`.
-//! - Functions for validating these resources.
-//! - Functions for serializing these resources to JSON.
-//! - Functions for deserializing these resources from JSON.
+//! The crate is deliberately narrow: it models the wire format, parses the two
+//! grammars the RFC defines, and checks the attributes the RFC marks REQUIRED.
+//! It performs no I/O, evaluates no filters against storage, and does not wrap
+//! `serde` — use `serde_json` directly for that.
 //!
-//! Note: Validation is light because the schema is specifically flexible. We only validate required fields, not field types (like email is actually an email)
+//! ## What is here
 //!
-//! ## Examples
+//! - **Resources** — [`User`](models::user::User), [`Group`](models::group::Group),
+//!   [`EnterpriseUser`](models::enterprise_user::EnterpriseUser),
+//!   [`Schema`](models::scim_schema::Schema),
+//!   [`ResourceType`](models::resource_types::ResourceType),
+//!   [`ServiceProviderConfig`](models::service_provider_config::ServiceProviderConfig).
+//! - **Protocol messages** — [`ListResponse`](models::others::ListResponse),
+//!   [`SearchRequest`](models::others::SearchRequest),
+//!   [`ListQuery`](models::others::ListQuery),
+//!   [`PatchOp`](models::others::PatchOp),
+//!   [`ScimHttpError`](models::errors::ScimHttpError).
+//! - **Filter and PATCH-path parsing** — [`filter`], implementing the
+//!   RFC 7644 §3.4.2.2 grammar and the §3.5.2 PATCH path rule.
+//! - **Validation** — the [`Validate`] trait, reporting failures by SCIM wire
+//!   path so a server can echo them in an RFC 7644 §3.12 response.
 //!
-//! Here are some examples of how you can use this crate:
+//! ## Feature flags
 //!
-//! ### Validating a User
+//! All three are enabled by default. Turn them off to shrink the build.
 //!
-//! ```rust
-//! use scim_v2::models::user::User;
+//! | Feature | Provides | Cost when off |
+//! |---------|----------|---------------|
+//! | `filter` | [`filter`] and its parser | drops `lalrpop-util` and `fluent-uri`, and the `regex-automata` subtree beneath them — 10 crates |
+//! | `models` | every resource and protocol message | |
+//! | `schemas` | the embedded RFC 7643 schema definitions and the [`get_schemas`](models::scim_schema::get_schemas) / [`get_resource_types`](models::resource_types::get_resource_types) lookups | ~48 KB of `include_str!` data |
 //!
-//! let user = User {
-//!     user_name: "jdoe@example.com".to_string(),
-//!     id: Some("123".to_string()),
-//!    // other fields...
-//!     ..Default::default()
-//! };
+//! `SearchRequest`, `ListQuery` and `PatchOp` need both `models` and `filter`,
+//! since each carries a parsed filter or PATCH path. A filter-only consumer
+//! wants:
 //!
-//! match user.validate() {
-//!     Ok(_) => println!("User is valid."),
-//!     Err(e) => println!("User is invalid: {}", e),
-//! }
+//! ```toml
+//! scim_v2 = { version = "1", default-features = false, features = ["filter"] }
 //! ```
 //!
-//! ### Serialize the `User` instance to a JSON string, using the custom SCIMError for error handling.
+//! ## Deserializing a resource
 //!
-//! # Examples
+//! Use `serde_json` directly. Every model is a plain `serde` type.
 //!
 //! ```rust
 //! use scim_v2::models::user::User;
 //!
-//! let user = User {
+//! let json = r#"{"schemas":["urn:ietf:params:scim:schemas:core:2.0:User"],"userName":"jdoe@example.com"}"#;
+//! let user: User<String> = serde_json::from_str(json)?;
+//! assert_eq!(user.user_name, "jdoe@example.com");
+//! # Ok::<(), serde_json::Error>(())
+//! ```
+//!
+//! ## Checking RFC-required attributes
+//!
+//! Nearly every SCIM attribute is optional, so the models make almost
+//! everything `Option`. [`Validate`] carries the handful of checks `serde`
+//! cannot express, and names the offending attribute by its **wire** path.
+//!
+//! ```rust
+//! use scim_v2::{Validate, models::user::User};
+//!
+//! let user = User::<String> {
 //!     schemas: vec!["urn:ietf:params:scim:schemas:core:2.0:User".to_string()],
-//!     user_name: "jdoe@example.com".to_string(),
-//!     id: Some("123".to_string()),
-//!     // Initialize other fields as necessary...
+//!     user_name: String::new(),
 //!     ..Default::default()
 //! };
 //!
-//! match user.serialize() {
-//!     Ok(json) => println!("Serialized User: {}", json),
-//!     Err(e) => println!("Serialization error: {}", e),
-//! }
+//! let err = user.validate().unwrap_err();
+//! assert_eq!(err.path(), "userName");
+//! assert_eq!(err.scim_type(), "invalidValue");
 //! ```
 //!
-//! ### Deserializing JSON to a User, using the custom SCIMError for error handling.
-//!
-//! # Examples
+//! ## Parsing a filter
 //!
 //! ```rust
-//! use scim_v2::models::user::User;
-//! use serde_json::from_str;
+//! # #[cfg(feature = "filter")] {
+//! use scim_v2::filter::Filter;
 //!
-//! let user_json = r#"{"schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"], "userName": "jdoe@example.com"}"#;
-//! match serde_json::from_str::<User<String>>(user_json) {
-//!     Ok(user) => println!("Successfully converted JSON to User: {:?}", user),
-//!     Err(e) => println!("Error converting from JSON to User: {}", e),
-//! }
+//! let filter: Filter = r#"userName eq "bjensen" and title pr"#.parse()?;
+//! println!("{filter}");
+//! # }
+//! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
-//! You can also use a built-in deserialize function if you'd prefer.
-//! ```
-//! use scim_v2::models::user::User;
-//!
-//! let user_json = r#"{"schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"], "userName": "jdoe@example.com"}"#;
-//! match User::<String>::deserialize(user_json) {
-//!     Ok(user) => println!("Deserialized User: {:?}", user),
-//!     Err(e) => println!("Deserialization error: {}", e),
-//! }
-//! ```
-//! For more examples and usage details, refer to the documentation of each function and struct.
+//! For the parsed shape, precedence rules and the `invalidFilter` error path,
+//! see the [`filter`] module docs.
 
 // Include the schema files into the binary.
 const USER_SCHEMA: &str = include_str!("schemas/user.json");
@@ -103,8 +114,11 @@ pub(crate) mod filter_parser;
 pub mod filter;
 pub mod schema_urns;
 
+pub use utils::validation::{Validate, ValidationError, ValidationErrorKind};
+
 /// Declaring the utils module which contains the error submodule
 pub mod utils {
     pub mod error;
     pub(crate) mod serde;
+    pub mod validation;
 }

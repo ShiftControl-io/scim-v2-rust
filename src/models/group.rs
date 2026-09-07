@@ -1,6 +1,7 @@
 //Schema for group
-use crate::{models::scim_schema::Meta, utils::error::SCIMError};
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use crate::models::scim_schema::Meta;
+use crate::utils::validation::{Validate, ValidationError};
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -38,114 +39,17 @@ pub struct Member<T = String> {
     pub display: Option<String>,
 }
 
-impl<T> Group<T> {
-    /// Validates a group.
-    ///
-    /// This function checks if the group has `schemas`, `id`, and `display_name`. If any of these fields are missing, it returns an error.
-    ///
-    /// # Arguments
-    ///
-    /// * `group` - A reference to a Group instance.
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(())` - If the group is valid.
-    /// * `Err(SCIMError::MissingRequiredField)` - If a required field is missing.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use scim_v2::models::group::Group;
-    ///
-    /// let group = Group {
-    ///     schemas: vec!["urn:ietf:params:scim:schemas:core:2.0:Group".to_string()],
-    ///     id: Some("e9e30dba-f08f-4109-8486-d5c6a331660a".to_string()),
-    ///     external_id: None,
-    ///     display_name: "Tour Guides".to_string(),
-    ///     meta: None,
-    ///     members: None
-    /// };
-    ///
-    /// match group.validate() {
-    ///     Ok(_) => println!("Group is valid."),
-    ///     Err(e) => println!("Group is invalid: {}", e),
-    /// }
-    /// ```
-    pub fn validate(&self) -> Result<(), SCIMError> {
+impl<T> Validate for Group<T> {
+    /// RFC 7643 §4.2 marks `displayName` REQUIRED; §3 marks `schemas` REQUIRED
+    /// on every resource.
+    fn validate(&self) -> Result<(), ValidationError> {
         if self.schemas.is_empty() {
-            return Err(SCIMError::MissingRequiredField("schemas".to_string()));
+            return Err(ValidationError::missing_required("schemas"));
         }
         if self.display_name.is_empty() {
-            return Err(SCIMError::MissingRequiredField("display_name".to_string()));
+            return Err(ValidationError::missing_required("displayName"));
         }
         Ok(())
-    }
-}
-
-impl<T> Group<T>
-where
-    T: Serialize,
-{
-    /// Serializes the `Group` instance to a JSON string, using the custom SCIMError for error handling.
-    ///
-    /// # Returns
-    ///
-    /// This method returns a `Result<String, SCIMError>`, where `Ok(String)` contains
-    /// the JSON string representation of the `Group` instance, and `Err(SCIMError)` contains
-    /// the custom error encountered during serialization.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use scim_v2::models::group::Group;
-    ///
-    /// let group = Group {
-    ///     schemas: vec!["urn:ietf:params:scim:schemas:core:2.0:Group".to_string()],
-    ///     id: Some("e9e30dba-f08f-4109-8486-d5c6a331660a".to_string()),
-    ///     external_id: None,
-    ///     display_name: "Tour Guides".to_string(),
-    ///     meta: None,
-    ///     members: None
-    /// };
-    ///
-    /// match group.serialize() {
-    ///     Ok(json) => println!("Serialized User: {}", json),
-    ///     Err(e) => println!("Serialization error: {}", e),
-    /// }
-    /// ```
-    pub fn serialize(&self) -> Result<String, SCIMError> {
-        serde_json::to_string(&self).map_err(SCIMError::SerializationError)
-    }
-}
-
-impl<T> Group<T>
-where
-    T: DeserializeOwned,
-{
-    /// Deserializes a JSON string into a `Group` instance, using the custom SCIMError for error handling.
-    ///
-    /// # Parameters
-    ///
-    /// * `json` - A string slice that holds the JSON representation of a `Group`.
-    ///
-    /// # Returns
-    ///
-    /// This method returns a `Result<Group, SCIMError>`, where `Ok(Group)` is the deserialized `Group` instance,
-    /// and `Err(SCIMError)` is the custom error encountered during deserialization.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use scim_v2::models::group::Group;
-    ///
-    /// let group_json = r#"{"schemas": ["urn:ietf:params:scim:schemas:core:2.0:Group"], "id": "e9e30dba-f08f-4109-8486-d5c6a331660a", "displayName": "Tour Guides"}"#;
-    /// match Group::<uuid::Uuid>::deserialize(group_json) {
-    ///     Ok(group) => println!("Deserialized Group: {:?}", group),
-    ///     Err(e) => println!("Deserialization error: {}", e),
-    /// }
-    /// ```
-    pub fn deserialize(json: &str) -> Result<Self, SCIMError> {
-        serde_json::from_str(json).map_err(SCIMError::DeserializationError)
     }
 }
 
