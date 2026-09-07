@@ -8,6 +8,7 @@ use crate::models::resource_types::ResourceType;
 use crate::models::scim_schema::Schema;
 use crate::models::user::User;
 use crate::schema_urns;
+use crate::utils::error::SCIMError;
 
 /// Server-side variant of [`ListQuery`] that tolerates malformed filter
 /// expressions so the handler can produce an RFC 7644 §3.12 `invalidFilter`
@@ -103,8 +104,10 @@ pub struct SearchRequest<F = Filter> {
     excluded_attributes: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filter: Option<F>,
-    pub start_index: i64,
-    pub count: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_index: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub count: Option<i64>,
 }
 
 impl<F> Default for SearchRequest<F> {
@@ -114,8 +117,8 @@ impl<F> Default for SearchRequest<F> {
             attributes: None,
             excluded_attributes: None,
             filter: None,
-            start_index: 1,
-            count: 100,
+            start_index: Some(1),
+            count: Some(100),
         }
     }
 }
@@ -274,14 +277,82 @@ where
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase", bound(deserialize = "T: DeserializeOwned"))]
 pub struct ListResponse<T> {
-    pub items_per_page: i64,
+    /// RFC 7644 §3.4.2: REQUIRED when partial results are returned due to
+    /// pagination; omitted otherwise. Not enforced by the type — see
+    /// [`ListResponse::validate`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub items_per_page: Option<i64>,
     pub total_results: i64,
-    pub start_index: i64,
+    /// RFC 7644 §3.4.2: REQUIRED when partial results are returned due to
+    /// pagination; omitted otherwise. Not enforced by the type — see
+    /// [`ListResponse::validate`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_index: Option<i64>,
     pub schemas: Vec<String>,
     // RFC 7644 section 3.4.2: `Resources` is REQUIRED only if `totalResults` is
     // non-zero, so a query returning no matches may omit it on the wire.
     #[serde(rename = "Resources", default)]
     pub resources: Vec<Resource<T>>,
+}
+
+impl<T> ListResponse<T> {
+    /// Validates a `ListResponse` against RFC 7644 §3.4.2.
+    ///
+    /// Checks performed:
+    ///
+    /// * `schemas` is present.
+    /// * When the response carries a *partial* result set — fewer entries in
+    ///   `Resources` than `totalResults` — both `startIndex` and `itemsPerPage`
+    ///   are present. §3.4.2 makes them REQUIRED "when partial results are
+    ///   returned due to pagination".
+    ///
+    /// This last invariant cannot be encoded in the type: `startIndex` and
+    /// `itemsPerPage` are `Option<i64>` so that a wire `0` stays distinct from
+    /// an omitted field, which leaves a paginated-but-incomplete response
+    /// expressible. Call this before serializing a response assembled by hand.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - If the response is valid.
+    /// * `Err(SCIMError::MissingRequiredField)` - If `schemas` is empty, or a
+    ///   pagination field is absent from a partial result set.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use scim_v2::models::others::ListResponse;
+    ///
+    /// let list: ListResponse<String> = ListResponse {
+    ///     schemas: vec!["urn:ietf:params:scim:api:messages:2.0:ListResponse".to_string()],
+    ///     total_results: 0,
+    ///     items_per_page: None,
+    ///     start_index: None,
+    ///     resources: vec![],
+    /// };
+    ///
+    /// match list.validate() {
+    ///     Ok(_) => println!("ListResponse is valid."),
+    ///     Err(e) => println!("ListResponse is invalid: {}", e),
+    /// }
+    /// ```
+    pub fn validate(&self) -> Result<(), SCIMError> {
+        if self.schemas.is_empty() {
+            return Err(SCIMError::MissingRequiredField("schemas".to_string()));
+        }
+        // A short page — fewer `Resources` returned than the total that match —
+        // is "partial results ... returned due to pagination" per §3.4.2, which
+        // makes both pagination markers REQUIRED.
+        let is_partial = (self.resources.len() as i64) < self.total_results;
+        if is_partial {
+            if self.start_index.is_none() {
+                return Err(SCIMError::MissingRequiredField("startIndex".to_string()));
+            }
+            if self.items_per_page.is_none() {
+                return Err(SCIMError::MissingRequiredField("itemsPerPage".to_string()));
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -373,9 +444,283 @@ mod tests {
     }
 
     #[test]
-    fn test_patch_op_01_add_with_path() {
-        let ops: PatchOp = serde_json::from_str(include_str!("../test_data/operations_01.json"))
-            .expect("Failed to deserialize patch operations");
+    fn test_list_response_without_pagination_fields() {
+        // RFC 7644 §3.4.2: `startIndex` and `itemsPerPage` are REQUIRED only
+        // when partial results are returned due to pagination. A full,
+        // unpaginated response may omit them, and some providers do; that
+        // must deserialize rather than fail with a `missing field` error.
+        let schema = schema_urns::LIST_RESPONSE;
+        let body = format!(r#"{{"schemas":["{schema}"],"totalResults":0}}"#);
+        let list: ListResponse<String> = serde_json::from_str(&body)
+            .expect("ListResponse without startIndex/itemsPerPage must deserialize");
+        assert_eq!(list.total_results, 0);
+        assert_eq!(list.start_index, None);
+        assert_eq!(list.items_per_page, None);
+        assert!(list.resources.is_empty());
+    }
+
+    #[test]
+    fn test_list_response_preserves_zero_pagination_fields() {
+        // A wire value of 0 must survive as `Some(0)`, distinct from an
+        // omitted field (`None`) — the reason these are `Option<i64>` rather
+        // than `#[serde(default)]` to an inert 0.
+        let schema = schema_urns::LIST_RESPONSE;
+        let body = format!(
+            r#"{{"schemas":["{schema}"],"totalResults":0,"startIndex":1,"itemsPerPage":0}}"#
+        );
+        let list: ListResponse<String> =
+            serde_json::from_str(&body).expect("Failed to deserialize list response");
+        assert_eq!(list.start_index, Some(1));
+        assert_eq!(list.items_per_page, Some(0));
+    }
+
+    #[test]
+    fn test_list_response_omits_none_pagination_fields_on_serialize() {
+        // `None` must be omitted from the wire, not emitted as `null` —
+        // `"itemsPerPage": null` is not valid SCIM.
+        let list: ListResponse<String> = ListResponse {
+            items_per_page: None,
+            total_results: 0,
+            start_index: None,
+            schemas: vec![schema_urns::LIST_RESPONSE.to_string()],
+            resources: vec![],
+        };
+        let json = serde_json::to_string(&list).expect("serialize ListResponse");
+        assert!(
+            !json.contains("itemsPerPage"),
+            "omitted itemsPerPage must not appear on the wire: {json}"
+        );
+        assert!(
+            !json.contains("startIndex"),
+            "omitted startIndex must not appear on the wire: {json}"
+        );
+        assert!(
+            !json.contains("null"),
+            "no field should serialize as null: {json}"
+        );
+    }
+
+    #[test]
+    fn test_list_response_pagination_fields_round_trip() {
+        let list: ListResponse<String> = ListResponse {
+            items_per_page: Some(20),
+            total_results: 137,
+            start_index: Some(41),
+            schemas: vec![schema_urns::LIST_RESPONSE.to_string()],
+            resources: vec![],
+        };
+        let json = serde_json::to_string(&list).expect("serialize ListResponse");
+        let back: ListResponse<String> = serde_json::from_str(&json).expect("round-trip");
+        assert_eq!(back.items_per_page, Some(20));
+        assert_eq!(back.start_index, Some(41));
+        assert_eq!(back.total_results, 137);
+    }
+
+    #[test]
+    fn test_list_response_serializes_and_round_trips_zero_pagination_fields() {
+        // The serialize-side guarantee behind `Option<i64>`: `Some(0)` is a
+        // real SCIM value (a zero-result page) and MUST reach the wire — only
+        // `None` may be dropped. Guards against a `skip_serializing_if`
+        // predicate that also swallows `Some(0)`.
+        let list: ListResponse<String> = ListResponse {
+            items_per_page: Some(0),
+            total_results: 0,
+            start_index: Some(0),
+            schemas: vec![schema_urns::LIST_RESPONSE.to_string()],
+            resources: vec![],
+        };
+        let json = serde_json::to_string(&list).expect("serialize ListResponse");
+        assert!(
+            json.contains(r#""itemsPerPage":0"#),
+            "Some(0) itemsPerPage must be emitted, not skipped: {json}"
+        );
+        assert!(
+            json.contains(r#""startIndex":0"#),
+            "Some(0) startIndex must be emitted, not skipped: {json}"
+        );
+
+        let back: ListResponse<String> = serde_json::from_str(&json).expect("round-trip");
+        assert_eq!(back.items_per_page, Some(0));
+        assert_eq!(back.start_index, Some(0));
+    }
+
+    #[test]
+    fn validate_list_response_accepts_complete_unpaginated_response() {
+        // `Resources` count == `totalResults`: not a partial page, so the
+        // pagination markers are legitimately absent (RFC 7644 §3.4.2).
+        let list: ListResponse<String> = ListResponse {
+            schemas: vec![schema_urns::LIST_RESPONSE.to_string()],
+            total_results: 0,
+            items_per_page: None,
+            start_index: None,
+            resources: vec![],
+        };
+        assert!(list.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_list_response_accepts_partial_page_with_pagination_markers() {
+        let list: ListResponse<String> = ListResponse {
+            schemas: vec![schema_urns::LIST_RESPONSE.to_string()],
+            total_results: 100,
+            items_per_page: Some(10),
+            start_index: Some(1),
+            resources: vec![],
+        };
+        assert!(list.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_list_response_rejects_partial_page_missing_start_index() {
+        let list: ListResponse<String> = ListResponse {
+            schemas: vec![schema_urns::LIST_RESPONSE.to_string()],
+            total_results: 100,
+            items_per_page: Some(10),
+            start_index: None,
+            resources: vec![],
+        };
+        assert!(matches!(
+            list.validate(),
+            Err(SCIMError::MissingRequiredField(f)) if f == "startIndex"
+        ));
+    }
+
+    #[test]
+    fn validate_list_response_rejects_partial_page_missing_items_per_page() {
+        let list: ListResponse<String> = ListResponse {
+            schemas: vec![schema_urns::LIST_RESPONSE.to_string()],
+            total_results: 100,
+            items_per_page: None,
+            start_index: Some(1),
+            resources: vec![],
+        };
+        assert!(matches!(
+            list.validate(),
+            Err(SCIMError::MissingRequiredField(f)) if f == "itemsPerPage"
+        ));
+    }
+
+    #[test]
+    fn validate_list_response_rejects_empty_schemas() {
+        let list: ListResponse<String> = ListResponse {
+            schemas: vec![],
+            total_results: 0,
+            items_per_page: None,
+            start_index: None,
+            resources: vec![],
+        };
+        assert!(matches!(
+            list.validate(),
+            Err(SCIMError::MissingRequiredField(f)) if f == "schemas"
+        ));
+    }
+
+    // ---- RFC 7644 sample payloads (verbatim, except as noted) ----
+
+    /// RFC 7644 §3.4.2 — the (unnumbered) response to `GET
+    /// /Users?attributes=userName`, introduced by "The following is an example
+    /// response to the query above". A query response with no pagination fields.
+    ///
+    /// The RFC prints the embedded resources abbreviated to `id` + `userName`
+    /// with no `schemas`; a `schemas` array is added to each here because this
+    /// crate's [`Resource`] deserializer requires a resource-type
+    /// discriminator (see the module docs) and will not guess. The
+    /// `ListResponse` envelope — `totalResults` present, `startIndex` and
+    /// `itemsPerPage` absent — is untouched and is the point of the test.
+    #[test]
+    fn rfc7644_s3_4_2_list_response() {
+        let raw = include_str!("../test_data/rfc7644/s3.4.2_list_response.json");
+        let list: ListResponse<String> =
+            serde_json::from_str(raw).expect("RFC 7644 §3.4.2 list response must deserialize");
+        assert_eq!(list.total_results, 2);
+        assert_eq!(list.start_index, None);
+        assert_eq!(list.items_per_page, None);
+        assert_eq!(list.resources.len(), 2);
+        assert!(matches!(list.resources[0], Resource::User(_)));
+
+        let reserialized: Value =
+            serde_json::from_str(&serde_json::to_string(&list).unwrap()).unwrap();
+        let original: Value = serde_json::from_str(raw).unwrap();
+        assert_eq!(reserialized, original);
+    }
+
+    /// RFC 7644 §3.4.2.4, Figure 3 ("ListResponse Format for Returning Multiple
+    /// Resources") — the pagination example. The RFC prints its single resource
+    /// abbreviated to `{...}`; that placeholder is replaced here with one
+    /// concrete User (see `test_data/README.md`). `totalResults` (100)
+    /// intentionally exceeds the page size (10).
+    #[test]
+    fn rfc7644_s3_4_2_4_fig3_pagination_response() {
+        let raw = include_str!("../test_data/rfc7644/s3.4.2.4_fig3_pagination_response.json");
+        let list: ListResponse<String> =
+            serde_json::from_str(raw).expect("RFC 7644 Figure 3 must deserialize");
+        assert_eq!(list.total_results, 100);
+        assert_eq!(list.items_per_page, Some(10));
+        assert_eq!(list.start_index, Some(1));
+        assert_eq!(list.resources.len(), 1);
+        assert!(matches!(list.resources[0], Resource::User(_)));
+
+        let reserialized: Value =
+            serde_json::from_str(&serde_json::to_string(&list).unwrap()).unwrap();
+        let original: Value = serde_json::from_str(raw).unwrap();
+        assert_eq!(reserialized, original);
+    }
+
+    /// RFC 7644 §3.4.3, Figure 5 ("Example POST Query Response") — POST
+    /// `/.search` response with pagination fields present. The RFC truncates the
+    /// resource list with a trailing
+    /// `...`; that placeholder is dropped here and a `schemas` array is added
+    /// to each resource (see [`rfc7644_s3_4_2_list_response`]). The second
+    /// resource is a Group, so this also covers a heterogeneous list.
+    #[test]
+    fn rfc7644_s3_4_3_fig5_post_query_response() {
+        let raw = include_str!("../test_data/rfc7644/s3.4.3_fig5_post_query_response.json");
+        let list: ListResponse<String> =
+            serde_json::from_str(raw).expect("RFC 7644 Figure 5 must deserialize");
+        assert_eq!(list.total_results, 100);
+        assert_eq!(list.items_per_page, Some(10));
+        assert_eq!(list.start_index, Some(1));
+        assert!(matches!(list.resources[0], Resource::User(_)));
+        assert!(matches!(list.resources[1], Resource::Group(_)));
+
+        let reserialized: Value =
+            serde_json::from_str(&serde_json::to_string(&list).unwrap()).unwrap();
+        let original: Value = serde_json::from_str(raw).unwrap();
+        assert_eq!(reserialized, original);
+    }
+
+    /// RFC 7644 §3.4.3, Figure 4 ("Example POST Query Request") — POST
+    /// `/.search` request body. Verbatim.
+    #[test]
+    fn rfc7644_s3_4_3_fig4_search_request() {
+        let raw = include_str!("../test_data/rfc7644/s3.4.3_fig4_search_request.json");
+        let req: SearchRequest =
+            serde_json::from_str(raw).expect("RFC 7644 Figure 4 must deserialize");
+        assert_eq!(req.start_index, Some(1));
+        assert_eq!(req.count, Some(10));
+        assert_eq!(
+            req.attributes.as_deref(),
+            Some(&["displayName".to_string(), "userName".to_string()][..])
+        );
+        assert!(req.filter.is_some());
+
+        // The parsed filter must serialize back to the RFC's filter string.
+        let reserialized: Value =
+            serde_json::from_str(&serde_json::to_string(&req).unwrap()).unwrap();
+        let original: Value = serde_json::from_str(raw).unwrap();
+        assert_eq!(reserialized, original);
+    }
+
+    /// RFC 7644 §3.5.2.1 — unnumbered example, "how to add a member to a group"
+    /// (the block at rfc7644.txt lines 2033-2048; *not* Figure 6, which carries
+    /// a `... + additional operations if needed ...` placeholder). `add` a group
+    /// member via an explicit `members` path.
+    #[test]
+    fn rfc7644_s3_5_2_1_patch_add_member() {
+        let ops: PatchOp = serde_json::from_str(include_str!(
+            "../test_data/rfc7644/s3.5.2.1_add_member.json"
+        ))
+        .expect("Failed to deserialize patch operations");
         assert_eq!(ops.schemas, vec![PATCH_OP_SCHEMA]);
         assert_eq!(ops.operations.len(), 1);
         assert!(matches!(
@@ -387,10 +732,16 @@ mod tests {
         ));
     }
 
+    /// RFC 7644 §3.5.2.1 — unnumbered example, "how to add one or more
+    /// attributes to a User resource without using a `path` attribute". `add`
+    /// several user attributes at once with no `path` (the value is a partial
+    /// resource object).
     #[test]
-    fn test_patch_op_02_add_without_path() {
-        let ops: PatchOp = serde_json::from_str(include_str!("../test_data/operations_02.json"))
-            .expect("Failed to deserialize patch operations");
+    fn rfc7644_s3_5_2_1_patch_add_user_attributes() {
+        let ops: PatchOp = serde_json::from_str(include_str!(
+            "../test_data/rfc7644/s3.5.2.1_add_user_attributes.json"
+        ))
+        .expect("Failed to deserialize patch operations");
         assert_eq!(ops.schemas, vec![PATCH_OP_SCHEMA]);
         assert_eq!(ops.operations.len(), 1);
         assert!(matches!(
@@ -399,10 +750,15 @@ mod tests {
         ));
     }
 
+    /// RFC 7644 §3.5.2.2 — unnumbered example, "Remove a single member from a
+    /// group". `remove` a group member selected by a value filter
+    /// (`members[value eq "..."]`).
     #[test]
-    fn test_patch_op_03_remove_member_by_filter() {
-        let ops: PatchOp = serde_json::from_str(include_str!("../test_data/operations_03.json"))
-            .expect("Failed to deserialize patch operations");
+    fn rfc7644_s3_5_2_2_patch_remove_member_by_filter() {
+        let ops: PatchOp = serde_json::from_str(include_str!(
+            "../test_data/rfc7644/s3.5.2.2_remove_member_by_filter.json"
+        ))
+        .expect("Failed to deserialize patch operations");
         assert_eq!(ops.schemas, vec![PATCH_OP_SCHEMA]);
         assert_eq!(ops.operations.len(), 1);
         match &ops.operations[0] {
@@ -435,10 +791,14 @@ mod tests {
         }
     }
 
+    /// RFC 7644 §3.5.2.2 — unnumbered example, "Remove all members of a group".
+    /// `remove` the entire `members` attribute (bare path, no filter).
     #[test]
-    fn test_patch_op_04_remove_all_members() {
-        let ops: PatchOp = serde_json::from_str(include_str!("../test_data/operations_04.json"))
-            .expect("Failed to deserialize patch operations");
+    fn rfc7644_s3_5_2_2_patch_remove_all_members() {
+        let ops: PatchOp = serde_json::from_str(include_str!(
+            "../test_data/rfc7644/s3.5.2.2_remove_all_members.json"
+        ))
+        .expect("Failed to deserialize patch operations");
         assert_eq!(ops.schemas, vec![PATCH_OP_SCHEMA]);
         assert_eq!(ops.operations.len(), 1);
         assert!(matches!(
@@ -450,10 +810,15 @@ mod tests {
         ));
     }
 
+    /// RFC 7644 §3.5.2.2 — unnumbered example, "Removal of a value from a
+    /// complex multi-valued attribute". `remove` an entry selected by a compound
+    /// `and` filter (`emails[type eq "work" and value ew "example.com"]`).
     #[test]
-    fn test_patch_op_05_remove_emails_compound_filter() {
-        let ops: PatchOp = serde_json::from_str(include_str!("../test_data/operations_05.json"))
-            .expect("Failed to deserialize patch operations");
+    fn rfc7644_s3_5_2_2_patch_remove_complex_attribute() {
+        let ops: PatchOp = serde_json::from_str(include_str!(
+            "../test_data/rfc7644/s3.5.2.2_remove_complex_attribute.json"
+        ))
+        .expect("Failed to deserialize patch operations");
         assert_eq!(ops.schemas, vec![PATCH_OP_SCHEMA]);
         assert_eq!(ops.operations.len(), 1);
         match &ops.operations[0] {
@@ -500,10 +865,64 @@ mod tests {
         }
     }
 
+    /// RFC 7644 §3.5.2.2 — unnumbered example, "Example request to remove and
+    /// add a member". A two-op `PatchOp` that `remove`s one member by value
+    /// filter, then `add`s a different member. The RFC prints the remove path as
+    /// `members[value eq"..."]` with no space after `eq` and truncates both
+    /// UUIDs with `...`; the space is normalized here so the filter parses (see
+    /// `test_data/README.md`).
     #[test]
-    fn test_patch_op_06_remove_then_add_members() {
-        let ops: PatchOp = serde_json::from_str(include_str!("../test_data/operations_06.json"))
-            .expect("Failed to deserialize patch operations");
+    fn rfc7644_s3_5_2_2_patch_remove_by_filter_then_add_member() {
+        let ops: PatchOp = serde_json::from_str(include_str!(
+            "../test_data/rfc7644/s3.5.2.2_remove_by_filter_then_add_member.json"
+        ))
+        .expect("Failed to deserialize patch operations");
+        assert_eq!(ops.schemas, vec![PATCH_OP_SCHEMA]);
+        assert_eq!(ops.operations.len(), 2);
+        match &ops.operations[0] {
+            PatchOperation::Remove {
+                path:
+                    PatchPath::Value(PatchValuePath {
+                        attr:
+                            AttrPath {
+                                uri: None,
+                                name: attr_name,
+                                sub_attr: None,
+                            },
+                        filter:
+                            ValFilter::Attr(AttrExp::Comparison(
+                                AttrPath {
+                                    uri: None,
+                                    name: inner_name,
+                                    sub_attr: None,
+                                },
+                                CompareOp::Eq,
+                                CompValue::Str(_),
+                            )),
+                        sub_attr: None,
+                    }),
+                value: None,
+            } if attr_name == "members" && inner_name == "value" => {}
+            other => panic!("unexpected remove operation: {other:?}"),
+        }
+        assert!(matches!(
+            &ops.operations[1],
+            PatchOperation::Add(OperationTarget::WithPath {
+                path: PatchPath::Attr(AttrPath { uri: None, name, sub_attr: None }),
+                ..
+            }) if name == "members"
+        ));
+    }
+
+    /// RFC 7644 §3.5.2.2 — unnumbered example, "how to replace all of the
+    /// members of a group with a different members list". Modeled as a `remove`
+    /// of `members` followed by an `add` of `members` in one `PatchOp`.
+    #[test]
+    fn rfc7644_s3_5_2_2_patch_replace_all_members() {
+        let ops: PatchOp = serde_json::from_str(include_str!(
+            "../test_data/rfc7644/s3.5.2.2_replace_all_members.json"
+        ))
+        .expect("Failed to deserialize patch operations");
         assert_eq!(ops.schemas, vec![PATCH_OP_SCHEMA]);
         assert_eq!(ops.operations.len(), 2);
         assert!(matches!(
@@ -522,10 +941,15 @@ mod tests {
         ));
     }
 
+    /// RFC 7644 §3.5.2.3 — unnumbered example, "how to replace all of the
+    /// members of a group with a different members list in a single replace
+    /// operation". `replace` the entire `members` list in one operation.
     #[test]
-    fn test_patch_op_07_replace_members_list() {
-        let ops: PatchOp = serde_json::from_str(include_str!("../test_data/operations_07.json"))
-            .expect("Failed to deserialize patch operations");
+    fn rfc7644_s3_5_2_3_patch_replace_members_single_op() {
+        let ops: PatchOp = serde_json::from_str(include_str!(
+            "../test_data/rfc7644/s3.5.2.3_replace_members_single_op.json"
+        ))
+        .expect("Failed to deserialize patch operations");
         assert_eq!(ops.schemas, vec![PATCH_OP_SCHEMA]);
         assert_eq!(ops.operations.len(), 1);
         assert!(matches!(
@@ -537,10 +961,15 @@ mod tests {
         ));
     }
 
+    /// RFC 7644 §3.5.2.3 — unnumbered example, "how to change a User's entire
+    /// `work` address, using a `valuePath` filter". `replace` the entry selected
+    /// by `addresses[type eq "work"]` with a full complex value.
     #[test]
-    fn test_patch_op_08_replace_work_address() {
-        let ops: PatchOp = serde_json::from_str(include_str!("../test_data/operations_08.json"))
-            .expect("Failed to deserialize patch operations");
+    fn rfc7644_s3_5_2_3_patch_replace_work_address() {
+        let ops: PatchOp = serde_json::from_str(include_str!(
+            "../test_data/rfc7644/s3.5.2.3_replace_work_address.json"
+        ))
+        .expect("Failed to deserialize patch operations");
         assert_eq!(ops.schemas, vec![PATCH_OP_SCHEMA]);
         assert_eq!(ops.operations.len(), 1);
         match &ops.operations[0] {
@@ -571,10 +1000,16 @@ mod tests {
         }
     }
 
+    /// RFC 7644 §3.5.2.3 — unnumbered example, "how to change a specific
+    /// sub-attribute `streetAddress` ... selected by a `valuePath` filter".
+    /// `replace` a single sub-attribute of a filtered entry
+    /// (`addresses[type eq "work"].streetAddress`).
     #[test]
-    fn test_patch_op_09_replace_street_address_via_filter() {
-        let ops: PatchOp = serde_json::from_str(include_str!("../test_data/operations_09.json"))
-            .expect("Failed to deserialize patch operations");
+    fn rfc7644_s3_5_2_3_patch_replace_street_address_via_filter() {
+        let ops: PatchOp = serde_json::from_str(include_str!(
+            "../test_data/rfc7644/s3.5.2.3_replace_street_address_via_filter.json"
+        ))
+        .expect("Failed to deserialize patch operations");
         assert_eq!(ops.schemas, vec![PATCH_OP_SCHEMA]);
         assert_eq!(ops.operations.len(), 1);
         match &ops.operations[0] {
@@ -611,10 +1046,16 @@ mod tests {
         }
     }
 
+    /// RFC 7644 §3.5.2.3 — unnumbered example, "how to replace all values of one
+    /// or more specific attributes of a User resource". `replace` multiple
+    /// attributes at once with no `path` (the value is a partial resource
+    /// object).
     #[test]
-    fn test_patch_op_10_replace_without_path() {
-        let ops: PatchOp = serde_json::from_str(include_str!("../test_data/operations_10.json"))
-            .expect("Failed to deserialize patch operations");
+    fn rfc7644_s3_5_2_3_patch_replace_multiple_attributes() {
+        let ops: PatchOp = serde_json::from_str(include_str!(
+            "../test_data/rfc7644/s3.5.2.3_replace_multiple_attributes.json"
+        ))
+        .expect("Failed to deserialize patch operations");
         assert_eq!(ops.schemas, vec![PATCH_OP_SCHEMA]);
         assert_eq!(ops.operations.len(), 1);
         assert!(matches!(
@@ -717,8 +1158,8 @@ mod tests {
         }"#;
         let req: TolerantSearchRequest =
             serde_json::from_str(json).expect("tolerant deserialization must succeed");
-        assert_eq!(req.start_index, 3);
-        assert_eq!(req.count, 25);
+        assert_eq!(req.start_index, Some(3));
+        assert_eq!(req.count, Some(25));
         assert!(matches!(req.filter, Some(MaybeFilter::Invalid(_))));
     }
 
@@ -781,6 +1222,117 @@ mod tests {
         let round: ListQuery = serde_json::from_str(&json).expect("round-trip");
         assert_eq!(round.count, Some(10));
         assert!(matches!(round.filter, Some(Filter::Attr(_))));
+    }
+
+    // ---- SearchRequest: every field except `schemas` is optional ----
+
+    #[test]
+    fn test_search_request_deserializes_with_only_schemas() {
+        // A payload carrying nothing but the mandatory `schemas` member must
+        // deserialize, leaving all of `attributes`, `excludedAttributes`,
+        // `filter`, `startIndex` and `count` unset (RFC 7644 §3.4.3 lists them
+        // all as optional).
+        let json = r#"{
+            "schemas": ["urn:ietf:params:scim:api:messages:2.0:SearchRequest"]
+        }"#;
+        let req: StrictSearchRequest =
+            serde_json::from_str(json).expect("minimal SearchRequest must deserialize");
+        assert_eq!(req.schemas, vec![schema_urns::SEARCH_REQUEST.to_string()]);
+        assert!(req.attributes.is_none());
+        assert!(req.excluded_attributes.is_none());
+        assert!(req.filter.is_none());
+        assert!(req.start_index.is_none());
+        assert!(req.count.is_none());
+    }
+
+    #[test]
+    fn test_search_request_tolerant_deserializes_with_only_schemas() {
+        let json = r#"{
+            "schemas": ["urn:ietf:params:scim:api:messages:2.0:SearchRequest"]
+        }"#;
+        let req: TolerantSearchRequest =
+            serde_json::from_str(json).expect("minimal tolerant SearchRequest must deserialize");
+        assert!(req.filter.is_none());
+        assert!(req.start_index.is_none());
+        assert!(req.count.is_none());
+    }
+
+    #[test]
+    fn test_search_request_omits_unset_optional_fields_when_serialized() {
+        // Mirror image of the deserialization case: a request with only
+        // `schemas` set must serialize to just that key, so servers are not
+        // sent `null`s or defaulted pagination values the caller never chose.
+        let req = SearchRequest::<Filter> {
+            schemas: vec![schema_urns::SEARCH_REQUEST.to_string()],
+            attributes: None,
+            excluded_attributes: None,
+            filter: None,
+            start_index: None,
+            count: None,
+        };
+        let json = serde_json::to_value(&req).expect("serialize SearchRequest");
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "schemas": ["urn:ietf:params:scim:api:messages:2.0:SearchRequest"]
+            })
+        );
+    }
+
+    #[test]
+    fn test_search_request_partial_pagination_fields() {
+        // `startIndex` and `count` are independently optional: supplying one
+        // must not force the other to be present.
+        let json = r#"{
+            "schemas": ["urn:ietf:params:scim:api:messages:2.0:SearchRequest"],
+            "count": 10
+        }"#;
+        let req: StrictSearchRequest =
+            serde_json::from_str(json).expect("SearchRequest with only `count` must deserialize");
+        assert!(req.start_index.is_none());
+        assert_eq!(req.count, Some(10));
+    }
+
+    #[test]
+    fn test_into_strict_search_request_with_only_schemas() {
+        // The tolerant -> strict conversion must pass through cleanly when no
+        // filter is present, regardless of the pagination fields being unset.
+        let json = r#"{
+            "schemas": ["urn:ietf:params:scim:api:messages:2.0:SearchRequest"]
+        }"#;
+        let tolerant: TolerantSearchRequest = serde_json::from_str(json).unwrap();
+        let strict = tolerant
+            .into_strict()
+            .expect("no filter must convert without error");
+        assert!(strict.filter.is_none());
+        assert!(strict.start_index.is_none());
+        assert!(strict.count.is_none());
+    }
+
+    #[test]
+    fn test_search_request_all_fields_round_trip() {
+        let json = r#"{
+            "schemas": ["urn:ietf:params:scim:api:messages:2.0:SearchRequest"],
+            "attributes": ["userName"],
+            "excludedAttributes": ["password"],
+            "filter": "userName eq \"alice\"",
+            "startIndex": 5,
+            "count": 20
+        }"#;
+        let req: StrictSearchRequest =
+            serde_json::from_str(json).expect("full SearchRequest must deserialize");
+        assert_eq!(req.attributes, Some(vec!["userName".to_string()]));
+        assert_eq!(req.excluded_attributes, Some(vec!["password".to_string()]));
+        assert!(matches!(req.filter, Some(Filter::Attr(_))));
+        assert_eq!(req.start_index, Some(5));
+        assert_eq!(req.count, Some(20));
+
+        let round: StrictSearchRequest = serde_json::from_str(
+            &serde_json::to_string(&req).expect("serialize full SearchRequest"),
+        )
+        .expect("round-trip");
+        assert_eq!(round.start_index, Some(5));
+        assert_eq!(round.count, Some(20));
     }
 
     // ---- Resource<T> URN-based dispatch (RFC 7643 §§3-4) ----
