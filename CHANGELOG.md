@@ -1,5 +1,45 @@
 # CHANGELOG
 
+## 0.5.0
+
+Releases the RFC 7644 conformance work from #47 and #48. A minor bump rather
+than a patch, because two field types changed and `^0.4` treats that as
+breaking.
+
+### Breaking Changes
+
+- `ListResponse.items_per_page` and `ListResponse.start_index` are now
+  `Option<i64>`, and so are `SearchRequest.start_index` and
+  `SearchRequest.count`. RFC 7644 §3.4.2 makes the two `ListResponse`
+  pagination markers REQUIRED only "when partial results are returned due to
+  pagination", and §3.4.3 marks both `SearchRequest` fields OPTIONAL — so the
+  crate could not deserialize the RFC's own unpaginated `ListResponse`
+  example, nor an RFC-legal `SearchRequest` that omitted them. `Option<i64>`
+  rather than `#[serde(default)]` to an inert `0`, so a server that really
+  sent `0` stays distinguishable from one that omitted the field. Migration is
+  mechanical: wrap reads in `Option`, or `.unwrap_or(1)` / `.unwrap_or(0)` at
+  the call site.
+
+### Added
+
+- `ListResponse::validate()`, matching the per-model convention. Checks that
+  `schemas` is present, and that a partial page — fewer entries in `Resources`
+  than `totalResults` — carries both pagination markers, which §3.4.2 requires
+  in exactly that case. The `skip_serializing_if` on those fields otherwise
+  makes a non-conformant response expressible.
+- A corpus of 22 RFC 7644 sample payloads and 5 sanitized provider responses
+  under `src/test_data/`, each documented with its RFC section in
+  `src/test_data/README.md`, plus round-trip tests over them.
+
+### Fixed
+
+- Unassigned `Option` fields are consistently omitted on serialize rather than
+  emitted as `null`: `Name.formatted`, and four fields on `EnterpriseUser`.
+  RFC 7643 §2.5 treats `null` and omitted as equivalent in state and permits
+  the compact form, and the rest of the crate already did this. A fully-unset
+  `Name` now serializes to `{}` rather than `{"formatted":null}`. Thanks to
+  @travipross for both #47 and #48.
+
 ## 0.4.2
 
 ### Fixed
