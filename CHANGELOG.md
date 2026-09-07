@@ -1,5 +1,163 @@
 # CHANGELOG
 
+## 1.0.0
+
+First stable release. The API is now covered by SemVer, and
+`cargo-semver-checks` runs on every PR to keep it that way.
+
+This release breaks compatibility deliberately, in the one place where doing
+so is free, and every break is listed below.
+
+### Breaking Changes
+
+- **Multi-valued attributes are `Vec<T>`, not `Option<Vec<T>>`** — all 18 of
+  them: `User`'s `emails`, `addresses`, `phoneNumbers`, `ims`, `photos`,
+  `groups`, `entitlements`, `roles` and `x509Certificates`; `Group.members`;
+  `ResourceType.schemaExtensions`; `Schema`'s `canonicalValues`,
+  `subAttributes` and `referenceTypes`; `SearchRequest`'s `attributes` and
+  `excludedAttributes`. RFC 7643 §2.5 makes an unassigned attribute, an
+  explicit `null`, and an empty array equivalent in state, so the old type
+  offered three representations of one thing and made every caller decide
+  whether `None` and `Some(vec![])` differed. Suggested by @travipross while
+  reviewing #48. All three wire forms now deserialize to an empty `Vec`,
+  including explicit `null` — which needs a `deserialize_with`, since
+  `#[serde(default)]` alone rejects `"roles": null`, a form providers do send.
+
+- **`ListResponse` is generic over the resource, not the ID type.** `GET
+  /Users` is now `ListResponse<User<String>>` and deserializes straight into
+  `Vec<User<String>>`; the heterogeneous form RFC 7644 §3.4.3 allows at the
+  root `/.search` endpoint is `ListResponse<Resource<String>>`. Previously the
+  parameter was the ID type and `Resources` was always a four-way enum a
+  caller had to match through even when the endpoint returned one kind. It
+  also boxed every variant to keep the enum small — `User<String>` is 992
+  bytes against the enum's 16 — so a 100-user page meant 100 separate
+  allocations where the typed form is one contiguous `Vec`.
+
+  Reusing an existing type parameter for a new purpose is the dangerous part:
+  `ListResponse<String>` used to compile and mean "ids are strings", and would
+  have kept compiling under the new meaning while failing at runtime on
+  deserialize. `R` is therefore bounded by the new `ScimResource` trait, which
+  has a private supertrait, so `ListResponse<String>` is a compile error
+  (E0277) rather than a runtime surprise. The sealing also fixes the
+  implementing set to this crate's resources, which is the intended scope.
+  Note that `cargo-semver-checks` has no lint for this class of change — the
+  seal is what catches it.
+
+- **The `serialize()` and `deserialize()` methods are gone** from `User`,
+  `Group`, `EnterpriseUser`, `Schema`, `ResourceType` and
+  `ServiceProviderConfig`. They wrapped `serde_json::to_string` / `from_str`
+  and only remapped the error type, while hiding `to_writer`, `from_slice` and
+  `from_value`; an inherent method named `deserialize` beside
+  `serde::Deserialize::deserialize` shadowed the trait method. Use
+  `serde_json` directly.
+
+- **`validate()` moved to the `Validate` trait** and returns `ValidationError`
+  instead of `SCIMError`. Add `use scim_v2::Validate;`. The error carries the
+  SCIM **wire** path (`userName`, not `user_name`) and the RFC 7644 §3.12
+  `scimType` keyword, and `ValidationError::to_http_error` builds the error
+  body a server should return.
+
+- **`Schema`, `ResourceType` and `ServiceProviderConfig` gained a `schemas`
+  field.** All three carry it on the wire per RFC 7643 §§5-7, but none
+  modelled it, so a present value was silently dropped and never
+  round-tripped. `#[serde(default)]` keeps absence legal, which §§6-7 allow.
+
+- **`Address` gained `value`, `display` and `primary`.** RFC 7643 §2.4 defines
+  all three as common sub-attributes of every multi-valued attribute, and
+  gives "the preferred mailing address" as its example of `primary`; §4.1.2's
+  listing for `addresses` simply omits them. JumpCloud sends
+  `addresses[].primary`, and it was being dropped.
+
+- **`MemberType` gained an `Other(String)` variant** and is
+  `#[non_exhaustive]`. RFC 7643 §2.2 defines `canonicalValues` as "a
+  collection of *suggested* canonical values that MAY be used", so a provider
+  may send a `members.type` outside {User, Group} — which previously failed
+  deserialization of the entire enclosing payload, losing a whole
+  `ListResponse` to one unrecognised member. Unknown labels now round-trip
+  verbatim, and matching is case-insensitive per the schema's
+  `caseExact: false`. Because the enum now has a non-unit variant, a numeric
+  cast like `MemberType as isize` no longer compiles.
+
+- **`SCIMError`, `FilterActionError`, `Resource` and `MemberType` are
+  `#[non_exhaustive]`.** After 1.0 an added variant is a breaking change, so
+  each public enum was given a deliberate answer. The enums that mirror RFC
+  7644's grammar — `Filter`, `AttrExp`, `ValFilter`, `CompareOp`, `CompValue`,
+  `PatchPath`, `PatchOperation`, `OperationTarget`, `MaybeFilter` — stay
+  exhaustive on purpose, because the RFC closes those sets and an exhaustive
+  `match` is worth having. The model *structs* are deliberately not
+  `#[non_exhaustive]`, since that would forbid `..Default::default()`
+  downstream; `User` was audited against the embedded RFC 7643 §4.1 schema and
+  carries every attribute.
+
+- **`SearchRequest::excluded_attributes` is now `pub`.** It never was, so no
+  caller could set it.
+
+### Added
+
+- **Feature flags `filter`, `models` and `schemas`, all on by default**, so an
+  existing consumer sees no change. Turning off `filter` drops eight crates —
+  `lalrpop-util`, `fluent-uri`, `regex-automata`, `regex-syntax`,
+  `aho-corasick`, `borrow-or-share`, `ref-cast`, `ref-cast-impl` — taking the
+  tree from 22 to 14 and removing a regex engine from the supply chain. For a
+  SCIM server that has its own resource model and wants only the grammar:
+  `default-features = false, features = ["filter"]`.
+- `ScimResource`, a sealed trait naming the resources that may appear in a
+  `ListResponse`, with `schema_urn()`.
+- `Validate`, `ValidationError` and `ValidationErrorKind`, re-exported at the
+  crate root.
+- `schema_urns::ERROR`, `SERVICE_PROVIDER_CONFIG`, `BULK_REQUEST` and
+  `BULK_RESPONSE`.
+
+### Fixed
+
+- `EnterpriseUser::validate` demanded `employeeNumber`, `costCenter`,
+  `organization`, `division`, `department` and `manager`, so it rejected every
+  conformant extension that left any of them unset. RFC 7643 §4.3 defines no
+  REQUIRED attribute, and all six are `required: false` in the schema this
+  crate embeds. The module had no tests at all, which is why nobody noticed.
+- `ServiceProviderConfig::validate` failed whenever `patch`, `bulk`, `filter`,
+  `changePassword`, `sort` or `etag` reported `supported: false`. §5 makes the
+  `supported` *field* required, not its value true: a server without bulk
+  support correctly advertises `"bulk": {"supported": false}`. It now checks
+  `authenticationSchemes`, which §5 does mark REQUIRED.
+- `primary` tolerated a stringified boolean only on `Role`, the one place
+  #45 had patched. A provider sending `"primary": "true"` on an email hit the
+  identical failure. All nine multi-valued types now share the lenient
+  deserializer.
+- `Bulk::default()` returned `maxOperations: 1000, maxPayloadSize: 1048576`
+  and `Filter::default()` returned `maxResults: 100`, while
+  `ServiceProviderConfig::default()` hand-built the same structs with zeros —
+  two different defaults for one type depending on the constructor. They now
+  delegate, and the limits are zero, since a positive limit beside
+  `supported: false` advertises a capacity the server lacks.
+- `SCIMError` implements `std::error::Error`. It had a hand-written `Display`
+  and no `Error` impl, so it could not be boxed as `dyn Error` or composed
+  with `anyhow`. It now derives `thiserror::Error`, like the filter errors
+  already did.
+
+### Documentation and tooling
+
+- README rewritten: badges, the feature table, and examples for the 1.0 API.
+  Its code blocks are compiled and run as doctests, so it cannot drift. Four
+  lines had shipped with escaped backticks, rendering as literal `` \` `` on
+  GitHub.
+- `CONTRIBUTING.md`, a PR template, and issue templates for bugs, RFC
+  conformance gaps and feature requests.
+- CI: clippy now runs `--all-targets --all-features` (it previously saw
+  neither test code nor gated items), plus new jobs for the six-configuration
+  feature matrix, the declared MSRV, `cargo doc -D warnings`,
+  `cargo-semver-checks` and `cargo-deny`, and coverage published as a badge.
+- A `Signed commits required` check that maps each of GitHub's
+  `verification.reason` codes to its specific fix, rather than reporting the
+  code alone.
+- Publishing to crates.io is manual (`workflow_dispatch`), defaults to a dry
+  run, requires the version input to match `Cargo.toml` and a tag on the same
+  commit, and runs behind a `crates-io` environment. It was previously
+  triggered by any `v*.*.*` tag push.
+- Line coverage 88.25% → 95.78%, functions 81.15% → 90.72%, excluding the
+  generated parser. `tests/fixtures.rs` now enforces that every fixture is
+  documented and read by a test, which found three dead JumpCloud fixtures
+  that now have round-trip tests.
 ## 0.5.0
 
 Releases the RFC 7644 conformance work from #47 and #48. A minor bump rather

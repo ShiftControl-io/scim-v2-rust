@@ -1,6 +1,6 @@
 [package]
 name = "scim_v2"
-version = "0.5.0"
+version = "1.0.0"
 edition = "2024"
 authors = ["Dan Gericke <dan@shiftcontrol.io>"]
 description = "A crate that provides utilities for working with the System for Cross-domain Identity Management (SCIM) version 2.0 protocol. (rfc7642, rfc7643, rfc7644)"
@@ -22,17 +22,24 @@ models = []
 # `models`, since `get_schemas` and `get_resource_types` return model types.
 schemas = ["models"]
 
+# Version requirements state the lowest version actually tested, not the
+# lowest that looks plausible. `serde = "1.0"` would resolve to serde 1.0.0
+# under a minimal-version resolution, and serde 1.0.0 does not compile on a
+# modern toolchain at all — so the loose form claims a compatibility this
+# crate does not have. The three below were loosened only after verifying the
+# full suite passes at their floors (thiserror 2.0.0, lalrpop-util 0.23.0,
+# fluent-uri 0.4.0). The `Minimal versions` CI job keeps that honest.
 [dependencies]
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
-lalrpop-util = { version = "0.23.1", features = ["lexer"], optional = true }
-fluent-uri = { version = "0.4.1", optional = true }
-thiserror = "2.0.18"
+lalrpop-util = { version = "0.23", features = ["lexer"], optional = true }
+fluent-uri = { version = "0.4", optional = true }
+thiserror = "2.0"
 
 [dev-dependencies]
-pretty_assertions = "1.4.1"
-test-case = "3.3.1"
-uuid = { version = "1.22.0", features = ["serde"]}
+pretty_assertions = "1.4"
+test-case = "3.3"
+uuid = { version = "1.22", features = ["serde"] }
 
 [lib]
 doc-scrape-examples = true

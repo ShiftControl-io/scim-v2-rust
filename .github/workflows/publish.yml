@@ -1,34 +1,84 @@
-name: Publish scim_v2 crate to crates.io
+name: Publish to crates.io
+
+# Manual only. Publishing to crates.io is irreversible — a version can be
+# yanked but never replaced or deleted — so it does not belong on a tag-push
+# trigger where a mistyped tag spends the version number.
 on:
-  push:
-    tags:
-      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (must equal Cargo.toml, e.g. 1.0.0). No "v" prefix.'
+        required: true
+        type: string
+      dry_run:
+        description: 'Dry run — validate and package without publishing.'
+        required: true
+        type: boolean
+        default: true
+
 permissions:
   contents: read
-  packages: write
+
 jobs:
   publish:
-    name: Publish
+    name: ${{ inputs.dry_run && 'Dry run' || 'Publish' }} ${{ inputs.version }}
     runs-on: ubuntu-latest
+    # Scope CRATES_TOKEN to this environment and add a required reviewer there
+    # to gate a real publish behind an approval.
+    environment: crates-io
     steps:
-      - name: Checkout sources
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-
-      - name: Install stable toolchain
-        uses: hecrj/setup-rust-action@110f36749599534ca96628b82f52ae67e5d95a3c # v2.0.1
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: hecrj/setup-rust-action@110f36749599534ca96628b82f52ae67e5d95a3c # v2.0.1
         with:
-            rust-version: stable
-            profile: minimal
+          rust-version: stable
+          profile: minimal
 
-      - name: Verify tag matches crate version
+      - name: Check the inputs agree with the manifest and the tag
         run: |
-          crate_version=$(grep '^version = ' Cargo.toml | cut -d'"' -f2)
-          tag_version="${GITHUB_REF_NAME#v}"
-          if [ "$crate_version" != "$tag_version" ]; then
-            echo "::error::tag $GITHUB_REF_NAME does not match Cargo.toml version $crate_version"
+          set -euo pipefail
+          input="${{ inputs.version }}"
+          manifest="$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)"
+
+          if [ "$input" != "$manifest" ]; then
+            echo "::error::requested version '$input' does not match Cargo.toml version '$manifest'"
             exit 1
           fi
 
-      - run: cargo publish --token ${CRATES_TOKEN}
+          # A published version should be reachable in git history. Require the
+          # tag to exist so the release is reproducible from the repository.
+          if ! git rev-parse "v$input" >/dev/null 2>&1; then
+            echo "::error::tag v$input does not exist. Tag the commit you intend to publish first."
+            exit 1
+          fi
+
+          tagged="$(git rev-parse "v$input^{commit}")"
+          head="$(git rev-parse HEAD)"
+          if [ "$tagged" != "$head" ]; then
+            echo "::error::tag v$input points at $tagged but this run is on $head. Run the workflow from the tagged commit."
+            exit 1
+          fi
+
+          echo "Publishing $input from $(git rev-parse --short HEAD)"
+
+      # Everything CI would have run, again, because the published artifact is
+      # the one thing that cannot be corrected afterwards.
+      - name: Verify
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets --all-features -- -D warnings
+          cargo test --all-features
+
+      - name: Package
+        run: cargo package
+
+      - name: Publish (dry run)
+        if: ${{ inputs.dry_run }}
+        run: |
+          cargo publish --dry-run
+          echo "::notice::Dry run only. Re-run with dry_run unchecked to publish ${{ inputs.version }}."
+
+      - name: Publish
+        if: ${{ !inputs.dry_run }}
         env:
-          CRATES_TOKEN: ${{ secrets.CRATES_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}
+        run: cargo publish

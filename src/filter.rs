@@ -9,18 +9,18 @@
 //!
 //! Filters arrive already deserialized inside other SCIM message types:
 //!
-//! - [`SearchRequest::filter`](crate::models::others::SearchRequest::filter) — from a
+//! - `SearchRequest::filter` — from a
 //!   `POST /.search` body.
-//! - [`ListQuery::filter`](crate::models::others::ListQuery::filter) — from a `GET`
+//! - `ListQuery::filter` — from a `GET`
 //!   query string (`?filter=...`), parsed by your web framework into this struct.
-//! - [`PatchOperation`](crate::models::others::PatchOperation) — each operation's
+//! - `PatchOperation` — each operation's
 //!   `path` field deserializes as a [`PatchPath`].
 //!
 //! By default these types fail deserialization when the filter expression is
 //! malformed, which takes `start_index`, `count`, and other fields down with
 //! it. To produce an RFC 7644 §3.12 `invalidFilter` response instead, use the
-//! [`TolerantListQuery`](crate::models::others::TolerantListQuery) /
-//! [`TolerantSearchRequest`](crate::models::others::TolerantSearchRequest)
+//! `TolerantListQuery` /
+//! `TolerantSearchRequest`
 //! aliases (equivalently `ListQuery<MaybeFilter>` / `SearchRequest<MaybeFilter>`)
 //! and match on [`MaybeFilter::Valid`] vs [`MaybeFilter::Invalid`] to build
 //! the error body from the captured `raw` string and [`ParseError`].
@@ -50,8 +50,8 @@
 //!
 //! # Depth limit
 //!
-//! [`Filter::from_str`] and [`PatchPath::from_str`] (and the corresponding
-//! [`Deserialize`](serde::Deserialize) impls, which delegate to
+//! [`Filter::from_str`](std::str::FromStr::from_str) and [`PatchPath::from_str`](std::str::FromStr::from_str) (and the corresponding
+//! [`Deserialize`] impls, which delegate to
 //! [`FromStr`](std::str::FromStr)) reject any input whose parsed AST would exceed
 //! [`MAX_FILTER_DEPTH`]. This bounds the call stack used by the crate's own
 //! recursive [`Display`], derived [`PartialEq`] / [`Debug`], serialization, and
@@ -63,8 +63,8 @@
 //! # SCIM client: building a filter to send in a request
 //!
 //! Construct the AST directly and assign it to the `filter` field of
-//! [`SearchRequest`](crate::models::others::SearchRequest) or
-//! [`ListQuery`](crate::models::others::ListQuery). Those types implement
+//! `SearchRequest` or
+//! `ListQuery`. Those types implement
 //! `serde::Serialize`, so the filter is serialized automatically as a JSON
 //! string when you serialize the containing struct. You can also call
 //! `.to_string()` directly when you need the raw filter string for a query
@@ -91,7 +91,7 @@ use thiserror::Error;
 
 /// Maximum allowed nesting depth for a parsed [`Filter`] or [`ValFilter`] tree.
 ///
-/// [`Filter::from_str`] and [`PatchPath::from_str`] reject any input whose parsed
+/// [`Filter::from_str`](std::str::FromStr::from_str) and [`PatchPath::from_str`](std::str::FromStr::from_str) reject any input whose parsed
 /// AST would exceed this depth, returning
 /// [`ParseError::User`] wrapping [`FilterActionError::DepthExceeded`]. The same
 /// enforcement runs on the [`Deserialize`] paths (SCIM `SearchRequest.filter`,
@@ -126,14 +126,14 @@ pub enum FilterActionError {
     DepthExceeded(usize),
 }
 
-/// Error returned by [`Filter::from_str`] and [`PatchPath::from_str`] when the
+/// Error returned by [`Filter::from_str`](std::str::FromStr::from_str) and [`PatchPath::from_str`](std::str::FromStr::from_str) when the
 /// input is not a valid filter or path expression.
 pub type ParseError = LalrParseError<usize, String, FilterActionError>;
 
 /// Payload of [`MaybeFilter::Invalid`] and error type of the
 /// `TryFrom<Tolerant*>` / `into_strict` conversions on
-/// [`TolerantListQuery`](crate::models::others::TolerantListQuery) and
-/// [`TolerantSearchRequest`](crate::models::others::TolerantSearchRequest).
+/// `TolerantListQuery` and
+/// `TolerantSearchRequest`.
 ///
 /// Captures the original filter string and underlying [`ParseError`] so
 /// callers can build an RFC 7644 §3.12 `invalidFilter` response body
@@ -261,8 +261,8 @@ impl<'de> Deserialize<'de> for Filter {
 /// SCIM handlers that receive a malformed `?filter=...` need to return a
 /// `400 invalidFilter` response per RFC 7644 §3.12. Using this wrapper in
 /// place of [`Filter`] lets the surrounding
-/// [`ListQuery`](crate::models::others::ListQuery) /
-/// [`SearchRequest`](crate::models::others::SearchRequest) deserialize
+/// `ListQuery` /
+/// `SearchRequest` deserialize
 /// successfully so the handler can inspect `start_index`, `count`, etc. and
 /// produce an RFC-compliant error body instead of a generic 400.
 ///

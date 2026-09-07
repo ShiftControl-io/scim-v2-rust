@@ -1,118 +1,201 @@
 # SCIM v2
 
-\`scim_v2\` is a Rust crate that provides utilities for working with the System for Cross-domain Identity Management (
-SCIM) version 2.0 protocol.
+[![CI](https://github.com/ShiftControl-io/scim-v2-rust/actions/workflows/build.yml/badge.svg)](https://github.com/ShiftControl-io/scim-v2-rust/actions/workflows/build.yml)
+[![Test Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/shiftcontrol-dan/REPLACE_GIST_ID/raw/scim_v2_coverage.json)](#)
+[![crates.io](https://img.shields.io/crates/v/scim_v2.svg)](https://crates.io/crates/scim_v2)
+[![docs.rs](https://img.shields.io/docsrs/scim_v2)](https://docs.rs/scim_v2)
+[![MSRV](https://img.shields.io/badge/MSRV-1.85-blue)](https://blog.rust-lang.org/2025/02/20/Rust-1.85.0.html)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-## Description
+Models, parsers and validators for the System for Cross-domain Identity
+Management (SCIM) 2.0 protocol — [RFC 7642](https://www.rfc-editor.org/rfc/rfc7642),
+[RFC 7643](https://www.rfc-editor.org/rfc/rfc7643) and
+[RFC 7644](https://www.rfc-editor.org/rfc/rfc7644).
 
-This crate provides functionalities for:
+**Contents** — [Scope](#scope) · [Installation](#installation) ·
+[Feature flags](#feature-flags) · [Usage](#usage) ·
+[For SCIM servers](#for-scim-servers) · [Contributing](#contributing)
 
-- Models for various SCIM resources such as \`User\`, \`Group\`, \`ResourceType\`, \`ServiceProviderConfig\`, and \`
-  EnterpriseUser\`.
-- Functions for validating these resources.
-- Functions for serializing these resources to JSON.
-- Functions for deserializing these resources from JSON.
-- SCIM filter expression parsing (RFC 7644 §3.4.2.2) via the `filter` module.
-  servers can return an RFC 7644 §3.12 `invalidFilter` response instead of a generic parse error.
+## Scope
+
+This crate is deliberately narrow. It models the wire format, parses the two
+grammars the RFC defines, and checks the attributes the RFC marks REQUIRED.
+
+- **Resources** — `User`, `Group`, `EnterpriseUser`, `Schema`, `ResourceType`,
+  `ServiceProviderConfig`.
+- **Protocol messages** — `ListResponse`, `SearchRequest`, `ListQuery`,
+  `PatchOp`, `ScimHttpError`.
+- **Filter and PATCH-path parsing** — the full RFC 7644 §3.4.2.2 filter
+  grammar and the §3.5.2 PATCH path rule, with a depth guard.
+- **Validation** — the `Validate` trait, reporting failures by SCIM wire path
+  so a server can echo them in an RFC 7644 §3.12 response.
+
+It performs no I/O, evaluates no filter against storage, and does not wrap
+`serde` — use `serde_json` directly for that. Parsing a filter gives you the
+AST; mapping that AST onto your storage is your call.
 
 ## Installation
 
-To use \`scim_v2\` in your project, add the following to your \`Cargo.toml\`:
-
 ```toml
 [dependencies]
-scim_v2 = "0.4"
+scim_v2 = "1"
 ```
+
+### Feature flags
+
+All three are on by default.
+
+| Feature | Provides |
+|---------|----------|
+| `filter` | the filter and PATCH-path parsers |
+| `models` | every resource and protocol message |
+| `schemas` | the embedded RFC 7643 schema definitions and `get_schemas` |
+
+Turning off `filter` drops eight crates — `lalrpop-util`, `fluent-uri`,
+`regex-automata`, `regex-syntax`, `aho-corasick`, `borrow-or-share`,
+`ref-cast`, `ref-cast-impl` — taking the tree from 22 to 14 and removing a
+regex engine from the supply chain. A SCIM server that has its own resource
+model and wants only the grammar:
+
+```toml
+scim_v2 = { version = "1", default-features = false, features = ["filter"] }
+```
+
+`SearchRequest`, `ListQuery` and `PatchOp` each carry a parsed filter or PATCH
+path, so they need both `models` and `filter`.
 
 ## Usage
 
-Here are some examples of how you can use this crate:
+### Deserializing a resource
 
-### Validating a User
+Every model is a plain `serde` type, so use `serde_json` directly.
 
 ```rust
 use scim_v2::models::user::User;
 
-let user = User {
-    user_name: "jdoe@example.com".to_string(),
-    // other fields...
+let json = r#"{"schemas":["urn:ietf:params:scim:schemas:core:2.0:User"],"userName":"jdoe@example.com"}"#;
+let user: User<String> = serde_json::from_str(json)?;
+assert_eq!(user.user_name, "jdoe@example.com");
+# Ok::<(), serde_json::Error>(())
+```
+
+### Checking RFC-required attributes
+
+Nearly every SCIM attribute is optional, so the models make almost everything
+`Option` or defaulted. `Validate` carries the checks `serde` cannot express,
+and names the offending attribute by its wire path — `userName`, not
+`user_name` — which is what a server needs for its error response.
+
+```rust
+use scim_v2::{Validate, models::user::User};
+
+let user = User::<String> {
+    schemas: vec!["urn:ietf:params:scim:schemas:core:2.0:User".to_string()],
+    user_name: String::new(),
     ..Default::default()
 };
 
-match user.validate() {
-    Ok(_) => println!("User is valid."),
-    Err(e) => println!("User is invalid: {}", e),
-}
+let err = user.validate().unwrap_err();
+assert_eq!(err.path(), "userName");
+assert_eq!(err.scim_type(), "invalidValue");
+
+// And the RFC 7644 §3.12 body to return:
+let body = err.to_http_error("400");
+assert_eq!(body.scim_type.as_deref(), Some("invalidValue"));
 ```
 
-### Serializing a User to JSON
+### Reading a list response
+
+`ListResponse` is generic over the resource. When the endpoint returns one
+kind — as `GET /Users` does — name it, and the resources deserialize
+directly with no enum to match through.
+
+```rust
+use scim_v2::{Validate, models::{others::ListResponse, user::User}};
+
+let body = r#"{
+  "schemas": ["urn:ietf:params:scim:api:messages:2.0:ListResponse"],
+  "totalResults": 1,
+  "startIndex": 1,
+  "itemsPerPage": 1,
+  "Resources": [
+    {"schemas":["urn:ietf:params:scim:schemas:core:2.0:User"],"userName":"bjensen"}
+  ]
+}"#;
+
+let list: ListResponse<User<String>> = serde_json::from_str(body)?;
+list.validate()?;
+assert_eq!(list.resources[0].user_name, "bjensen");
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+For a heterogeneous page — which RFC 7644 §3.4.3 allows when querying the root
+`/.search` endpoint — use `ListResponse<Resource<String>>` and match on the
+`Resource` variant.
+
+### Multi-valued attributes
+
+RFC 7643 §2.5 makes an unassigned attribute, an explicit `null`, and an empty
+array equivalent in state, so multi-valued attributes are `Vec<T>` rather than
+`Option<Vec<T>>`. All three wire forms deserialize to an empty `Vec`, and an
+empty `Vec` is omitted on serialize rather than emitted as `null` or `[]`.
 
 ```rust
 use scim_v2::models::user::User;
-use scim_v2::schema_urns;
 
-let user = User {
-    schemas: vec![schema_urns::USER.to_string()],
-    user_name: "jdoe@example.com".to_string(),
-    // Initialize other fields as necessary...
-    ..Default::default()
-};
-
-match user.serialize() {
-    Ok(json) => println ! ("Serialized User: {}", json),
-    Err(e) => println !("Serialization error: {}", e),
+for body in [
+    r#"{"schemas":["urn:ietf:params:scim:schemas:core:2.0:User"],"userName":"b"}"#,
+    r#"{"schemas":["urn:ietf:params:scim:schemas:core:2.0:User"],"userName":"b","emails":null}"#,
+    r#"{"schemas":["urn:ietf:params:scim:schemas:core:2.0:User"],"userName":"b","emails":[]}"#,
+] {
+    let user: User<String> = serde_json::from_str(body)?;
+    assert!(user.emails.is_empty());
 }
-```
-
-### Deserializing a User from JSON
-
-```rust
-use scim_v2::models::user::User;
-
-let user_json = r#"{"schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"], "userName": "jdoe@example.com"}"#;
-match serde_json::from_str::<User<String>>(user_json) {
-    Ok(user) => println!("Successfully converted JSON to User: {:?}", user),
-    Err(e) => println!("Error converting from JSON to User: {}", e),
-}
-```
-
-You can also use a built-in deserialize function if you'd prefer.
-
-```rust
-use scim_v2::models::user::User;
-
-let user_json = r#"{"schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"], "userName": "jdoe@example.com"}"#;
-match User::<String>::deserialize(user_json) {
-    Ok(user) => println!("Deserialized User: {:?}", user),
-    Err(e) => println!("Deserialization error: {}", e),
-}
+# Ok::<(), serde_json::Error>(())
 ```
 
 ### Parsing a SCIM filter
 
+`Filter` implements `FromStr`, so `.parse()` is all you need.
+
 ```rust
-use std::str::FromStr;
 use scim_v2::filter::Filter;
 
-let filter = Filter::from_str(r#"userName eq "jdoe@example.com""#)
-    .expect("valid filter");
-println!("Parsed filter: {}", filter);
+let filter: Filter = r#"userName eq "bjensen" and title pr"#.parse()?;
+
+// The AST is yours to walk. Rendering it back gives an equivalent filter.
+assert!(matches!(filter, Filter::And(_, _)));
+println!("{filter}");
+
+// A malformed filter is an error, not a panic.
+assert!("userName garbage".parse::<Filter>().is_err());
+# Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-Filters parsed via `Filter::from_str` or deserialization are rejected if their
-AST exceeds `filter::MAX_FILTER_DEPTH` (64) to prevent stack-overflow DoS from
-pathologically nested input.
+You get the parsed expression; **evaluating it against your storage is your
+job**. That split is deliberate — the grammar is the fiddly, spec-bound part,
+and how a filter maps onto SQL, LDAP or an in-memory index is specific to your
+server. What this crate saves you is the grammar.
 
-### Tolerant filter parsing for servers
+Filters are rejected if their AST exceeds `filter::MAX_FILTER_DEPTH` (64),
+whether they arrive via `.parse()` or deserialization. Without that bound,
+pathologically nested input like `not (not (… (title pr) …))` builds an AST
+that overflows the stack on the *next* `Display`, `==`, `{:?}`, serialize or
+drop — a remote DoS with no bad allocation in sight.
 
-Use `TolerantListQuery` / `TolerantSearchRequest` so a malformed `filter=` does
-not fail the whole request — letting you return an RFC 7644 §3.12
-`invalidFilter` response while keeping `startIndex`, `count`, etc.
+## For SCIM servers
 
-The suggested pattern is to deserialize into the tolerant variant, then call
-`.into_strict()` and `map_err` the resulting `InvalidFilterError` into your
-SCIM error response. After the conversion you have a `StrictListQuery` /
-`StrictSearchRequest` with a fully-parsed `Filter`.
+### Tolerant filter parsing
+
+A client that sends a malformed `filter=` should get RFC 7644 §3.12
+`invalidFilter` back, not a generic 400 — but if the filter fails to parse
+during deserialization, the whole query envelope fails with it and you lose
+`startIndex` and `count` along the way.
+
+`TolerantListQuery` and `TolerantSearchRequest` keep the envelope. Deserialize
+into the tolerant variant, then `.into_strict()` and map the resulting
+`InvalidFilterError` onto your error response; what you hold afterwards is a
+`StrictListQuery` / `StrictSearchRequest` with a fully-parsed `Filter`.
 
 ```rust
 use scim_v2::models::others::{StrictListQuery, TolerantListQuery};
@@ -151,7 +234,7 @@ match &query.filter {
 }
 ```
 
-### Parsing a SCIM PATCH operation
+### Handling a SCIM PATCH
 
 ```rust
 use scim_v2::models::others::{PatchOp, PatchOperation, OperationTarget};
@@ -177,11 +260,14 @@ for op in &patch.operations {
 }
 ```
 
-### Using custom ID types
+## Using custom ID types
 
-`User`, `Group`, `Member`, `Resource`, and `ListResponse` are generic over their
-ID type, defaulting to `String`. Substitute `uuid::Uuid`, `i64`, or any
+`User`, `Group`, `Member` and `Resource` are generic over their ID type,
+defaulting to `String`. Substitute `uuid::Uuid`, `i64`, or any
 `Serialize + DeserializeOwned` type.
+
+`ListResponse` is generic over the *resource*, not the ID type, so the ID type
+travels inside it: `ListResponse<User<Uuid>>`.
 
 ```rust
 use scim_v2::models::user::User;
@@ -212,7 +298,8 @@ Commit both `src/filter_parser.lalrpop` and the updated `src/filter_parser.rs` t
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) — note that
+**all commits must be signed**; CI rejects unsigned or unverifiable commits.
 
 ## License
 

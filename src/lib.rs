@@ -10,17 +10,17 @@
 //!
 //! ## What is here
 //!
-//! - **Resources** — [`User`](models::user::User), [`Group`](models::group::Group),
-//!   [`EnterpriseUser`](models::enterprise_user::EnterpriseUser),
-//!   [`Schema`](models::scim_schema::Schema),
-//!   [`ResourceType`](models::resource_types::ResourceType),
-//!   [`ServiceProviderConfig`](models::service_provider_config::ServiceProviderConfig).
-//! - **Protocol messages** — [`ListResponse`](models::others::ListResponse),
-//!   [`SearchRequest`](models::others::SearchRequest),
-//!   [`ListQuery`](models::others::ListQuery),
-//!   [`PatchOp`](models::others::PatchOp),
-//!   [`ScimHttpError`](models::errors::ScimHttpError).
-//! - **Filter and PATCH-path parsing** — [`filter`], implementing the
+//! - **Resources** — `User`, `Group`,
+//!   `EnterpriseUser`,
+//!   `Schema`,
+//!   `ResourceType`,
+//!   `ServiceProviderConfig`.
+//! - **Protocol messages** — `ListResponse`,
+//!   `SearchRequest`,
+//!   `ListQuery`,
+//!   `PatchOp`,
+//!   `ScimHttpError`.
+//! - **Filter and PATCH-path parsing** — `filter`, implementing the
 //!   RFC 7644 §3.4.2.2 grammar and the §3.5.2 PATCH path rule.
 //! - **Validation** — the [`Validate`] trait, reporting failures by SCIM wire
 //!   path so a server can echo them in an RFC 7644 §3.12 response.
@@ -31,9 +31,9 @@
 //!
 //! | Feature | Provides | Cost when off |
 //! |---------|----------|---------------|
-//! | `filter` | [`filter`] and its parser | eight fewer crates: `lalrpop-util`, `fluent-uri`, `regex-automata`, `regex-syntax`, `aho-corasick`, `borrow-or-share`, `ref-cast`, `ref-cast-impl` |
+//! | `filter` | `filter` and its parser | eight fewer crates: `lalrpop-util`, `fluent-uri`, `regex-automata`, `regex-syntax`, `aho-corasick`, `borrow-or-share`, `ref-cast`, `ref-cast-impl` |
 //! | `models` | every resource and protocol message | |
-//! | `schemas` | the embedded RFC 7643 schema definitions and the [`get_schemas`](models::scim_schema::get_schemas) lookup | ~48 KB of `include_str!` data |
+//! | `schemas` | the embedded RFC 7643 schema definitions and the `get_schemas` lookup | ~48 KB of `include_str!` data |
 //!
 //! Dropping `filter` takes the dependency tree from 22 crates to 14, and the
 //! total compile work from 35s to 14s measured serially (`-j1`, release). On a
@@ -97,7 +97,14 @@
 //! ```
 //!
 //! For the parsed shape, precedence rules and the `invalidFilter` error path,
-//! see the [`filter`] module docs.
+//! see the `filter` module docs.
+
+/// Every `rust` block in README.md is compiled and run as a doctest, so the
+/// front page cannot drift from the API. Costs nothing at build time —
+/// `cfg(doctest)` is set only while rustdoc collects tests.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct ReadmeDoctests;
 
 // Include the schema files into the binary.
 #[cfg(feature = "schemas")]
