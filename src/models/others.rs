@@ -8,7 +8,7 @@ use crate::models::resource_types::ResourceType;
 use crate::models::scim_schema::Schema;
 use crate::models::user::User;
 use crate::schema_urns;
-use crate::utils::error::SCIMError;
+use crate::utils::validation::{Validate, ValidationError};
 
 /// Server-side variant of [`ListQuery`] that tolerates malformed filter
 /// expressions so the handler can produce an RFC 7644 §3.12 `invalidFilter`
@@ -282,9 +282,115 @@ where
     }
 }
 
+mod sealed {
+    /// Private supertrait of [`ScimResource`]. Nothing outside this crate can
+    /// name it, so nothing outside this crate can implement `ScimResource`.
+    pub trait Sealed {}
+}
+
+/// A resource that may appear in the `Resources` array of a
+/// [`ListResponse`].
+///
+/// **Sealed.** [`ScimResource`] has a private supertrait, so the implementing
+/// set is fixed by this crate: [`User`], [`Group`], [`Schema`],
+/// [`ResourceType`], and [`Resource`] for the heterogeneous case. The bound
+/// exists to make `ListResponse<R>` reject a nonsense `R` at compile time —
+/// before 1.0 the type parameter was the *id* type, so `ListResponse<Resource<String>>`
+/// meant "ids are strings"; it now means "resources are strings", which the
+/// sealing turns into a compile error rather than a runtime deserialization
+/// failure.
+///
+/// `EnterpriseUser` is deliberately absent: RFC 7643 §4.3 makes it a schema
+/// *extension* carried inside a `User`, never a resource in its own right.
+/// `ServiceProviderConfig` is absent because RFC 7643 §5 serves it as a
+/// singleton, not a list.
+///
+/// # The bound is what makes the 1.0 change safe
+///
+/// `ListResponse<String>` compiled before 1.0 and meant "ids are strings".
+/// Reusing the parameter for the resource would have left that code compiling
+/// with a new meaning and failing only at runtime, on deserialize. The bound
+/// turns it into a compile error instead:
+///
+/// ```compile_fail,E0277
+/// use scim_v2::models::others::ListResponse;
+///
+/// // `String` is not a SCIM resource, so this does not compile.
+/// let _list: ListResponse<String> = unimplemented!();
+/// ```
+///
+/// The sealing is also why no downstream crate can widen that set:
+///
+/// ```compile_fail,E0277
+/// struct MyResource;
+/// // `sealed::Sealed` is private to scim_v2, so this cannot be satisfied.
+/// impl scim_v2::models::others::ScimResource for MyResource {
+///     fn schema_urn(&self) -> &'static str { "urn:example" }
+/// }
+/// ```
+pub trait ScimResource: sealed::Sealed {
+    /// The RFC 7643 schema URN this resource declares.
+    fn schema_urn(&self) -> &'static str;
+}
+
+impl<T> sealed::Sealed for User<T> {}
+impl<T> ScimResource for User<T> {
+    fn schema_urn(&self) -> &'static str {
+        schema_urns::USER
+    }
+}
+
+impl<T> sealed::Sealed for Group<T> {}
+impl<T> ScimResource for Group<T> {
+    fn schema_urn(&self) -> &'static str {
+        schema_urns::GROUP
+    }
+}
+
+impl sealed::Sealed for Schema {}
+impl ScimResource for Schema {
+    fn schema_urn(&self) -> &'static str {
+        schema_urns::SCHEMA
+    }
+}
+
+impl sealed::Sealed for ResourceType {}
+impl ScimResource for ResourceType {
+    fn schema_urn(&self) -> &'static str {
+        schema_urns::RESOURCE_TYPE
+    }
+}
+
+impl<T> sealed::Sealed for Resource<T> {}
+impl<T> ScimResource for Resource<T> {
+    fn schema_urn(&self) -> &'static str {
+        match self {
+            Resource::User(_) => schema_urns::USER,
+            Resource::Group(_) => schema_urns::GROUP,
+            Resource::Schema(_) => schema_urns::SCHEMA,
+            Resource::ResourceType(_) => schema_urns::RESOURCE_TYPE,
+        }
+    }
+}
+
+/// RFC 7644 §3.4.2 `ListResponse`.
+///
+/// Generic over the resource, not over the id type. Use a concrete resource
+/// when the endpoint returns one kind — `GET /Users` is
+/// `ListResponse<User<String>>`, deserializing straight into
+/// `Vec<User<String>>` with no enum to match through and one allocation
+/// instead of one per resource. Use [`Resource`] for the heterogeneous case,
+/// which §3.4.3 allows when querying the root `/.search` endpoint:
+/// `ListResponse<Resource<String>>`.
+///
+/// `R` is bounded by the sealed [`ScimResource`] trait, so a type that is not
+/// a SCIM resource is rejected at compile time.
 #[derive(Serialize, Deserialize, Debug)]
-#[serde(rename_all = "camelCase", bound(deserialize = "T: DeserializeOwned"))]
-pub struct ListResponse<T> {
+#[serde(
+    rename_all = "camelCase",
+    bound(deserialize = "R: ScimResource + DeserializeOwned")
+)]
+pub struct ListResponse<R: ScimResource = Resource<String>> {
     /// RFC 7644 §3.4.2: REQUIRED when partial results are returned due to
     /// pagination; omitted otherwise. Not enforced by the type — see
     /// [`ListResponse::validate`].
@@ -300,10 +406,10 @@ pub struct ListResponse<T> {
     // RFC 7644 section 3.4.2: `Resources` is REQUIRED only if `totalResults` is
     // non-zero, so a query returning no matches may omit it on the wire.
     #[serde(rename = "Resources", default)]
-    pub resources: Vec<Resource<T>>,
+    pub resources: Vec<R>,
 }
 
-impl<T> ListResponse<T> {
+impl<R: ScimResource> Validate for ListResponse<R> {
     /// Validates a `ListResponse` against RFC 7644 §3.4.2.
     ///
     /// Checks performed:
@@ -321,31 +427,55 @@ impl<T> ListResponse<T> {
     ///
     /// # Returns
     ///
-    /// * `Ok(())` - If the response is valid.
-    /// * `Err(SCIMError::MissingRequiredField)` - If `schemas` is empty, or a
-    ///   pagination field is absent from a partial result set.
+    /// * `Ok(())` — the response is conformant.
+    /// * `Err(ValidationError)` — `schemas` is empty, or a pagination marker is
+    ///   absent from a partial result set. The error names the offending
+    ///   attribute by its wire path.
     ///
     /// # Example
     ///
-    /// ```
-    /// use scim_v2::models::others::ListResponse;
+    /// A homogeneous page from `GET /Users` deserializes straight into
+    /// `Vec<User<String>>`, with no enum to match through:
     ///
-    /// let list: ListResponse<String> = ListResponse {
+    /// ```
+    /// use scim_v2::{Validate, models::{others::ListResponse, user::User}};
+    ///
+    /// let body = r#"{
+    ///   "schemas": ["urn:ietf:params:scim:api:messages:2.0:ListResponse"],
+    ///   "totalResults": 2,
+    ///   "startIndex": 1,
+    ///   "itemsPerPage": 2,
+    ///   "Resources": [
+    ///     {"schemas":["urn:ietf:params:scim:schemas:core:2.0:User"],"userName":"bjensen"},
+    ///     {"schemas":["urn:ietf:params:scim:schemas:core:2.0:User"],"userName":"jsmith"}
+    ///   ]
+    /// }"#;
+    ///
+    /// let list: ListResponse<User<String>> = serde_json::from_str(body)?;
+    /// list.validate()?;
+    /// assert_eq!(list.resources[0].user_name, "bjensen");
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    ///
+    /// A partial page that omits its pagination markers is rejected:
+    ///
+    /// ```
+    /// use scim_v2::{Validate, models::{others::{ListResponse, Resource}, user::User}};
+    ///
+    /// let list: ListResponse<Resource<String>> = ListResponse {
     ///     schemas: vec!["urn:ietf:params:scim:api:messages:2.0:ListResponse".to_string()],
-    ///     total_results: 0,
+    ///     total_results: 100,
     ///     items_per_page: None,
     ///     start_index: None,
     ///     resources: vec![],
     /// };
     ///
-    /// match list.validate() {
-    ///     Ok(_) => println!("ListResponse is valid."),
-    ///     Err(e) => println!("ListResponse is invalid: {}", e),
-    /// }
+    /// let err = list.validate().unwrap_err();
+    /// assert_eq!(err.path(), "startIndex");
     /// ```
-    pub fn validate(&self) -> Result<(), SCIMError> {
+    fn validate(&self) -> Result<(), ValidationError> {
         if self.schemas.is_empty() {
-            return Err(SCIMError::MissingRequiredField("schemas".to_string()));
+            return Err(ValidationError::missing_required("schemas"));
         }
         // A short page — fewer `Resources` returned than the total that match —
         // is "partial results ... returned due to pagination" per §3.4.2, which
@@ -353,10 +483,10 @@ impl<T> ListResponse<T> {
         let is_partial = (self.resources.len() as i64) < self.total_results;
         if is_partial {
             if self.start_index.is_none() {
-                return Err(SCIMError::MissingRequiredField("startIndex".to_string()));
+                return Err(ValidationError::missing_required("startIndex"));
             }
             if self.items_per_page.is_none() {
-                return Err(SCIMError::MissingRequiredField("itemsPerPage".to_string()));
+                return Err(ValidationError::missing_required("itemsPerPage"));
             }
         }
         Ok(())
@@ -431,6 +561,77 @@ pub enum PatchOperation {
 
 #[cfg(test)]
 mod tests {
+
+    /// The headline of the 1.0 `ListResponse` change: a homogeneous page
+    /// deserializes into the concrete resource, so a caller that already knows
+    /// `GET /Users` returns users does not match through a four-way enum to
+    /// prove it.
+    #[test]
+    fn typed_list_response_deserializes_without_matching_an_enum() {
+        let schema = schema_urns::LIST_RESPONSE;
+        let user = schema_urns::USER;
+        let body = format!(
+            r#"{{"schemas":["{schema}"],"totalResults":2,"startIndex":1,"itemsPerPage":2,
+                 "Resources":[
+                   {{"schemas":["{user}"],"userName":"bjensen"}},
+                   {{"schemas":["{user}"],"userName":"jsmith"}}]}}"#
+        );
+
+        let list: ListResponse<User<String>> =
+            serde_json::from_str(&body).expect("typed ListResponse must deserialize");
+        assert!(list.validate().is_ok());
+        let names: Vec<&str> = list
+            .resources
+            .iter()
+            .map(|u| u.user_name.as_str())
+            .collect();
+        assert_eq!(names, ["bjensen", "jsmith"]);
+    }
+
+    /// The heterogeneous form still works, which RFC 7644 §3.4.3 needs for a
+    /// query against the root `/.search` endpoint.
+    #[test]
+    fn heterogeneous_list_response_still_dispatches_per_resource() {
+        let schema = schema_urns::LIST_RESPONSE;
+        let user = schema_urns::USER;
+        let group = schema_urns::GROUP;
+        let body = format!(
+            r#"{{"schemas":["{schema}"],"totalResults":2,"startIndex":1,"itemsPerPage":2,
+                 "Resources":[
+                   {{"schemas":["{user}"],"userName":"bjensen"}},
+                   {{"schemas":["{group}"],"displayName":"Tour Guides"}}]}}"#
+        );
+
+        let list: ListResponse<Resource<String>> =
+            serde_json::from_str(&body).expect("heterogeneous ListResponse must deserialize");
+        let urns: Vec<&str> = list
+            .resources
+            .iter()
+            .map(ScimResource::schema_urn)
+            .collect();
+        assert_eq!(urns, [schema_urns::USER, schema_urns::GROUP]);
+    }
+
+    /// A typed `ListResponse` rejects a payload whose resources are a
+    /// different type, rather than silently accepting it. The `schemas` URN in
+    /// the body does not select the type here — `R` does — so the mismatch has
+    /// to surface as a deserialization failure.
+    #[test]
+    fn typed_list_response_rejects_a_mismatched_resource() {
+        let schema = schema_urns::LIST_RESPONSE;
+        let group = schema_urns::GROUP;
+        let body = format!(
+            r#"{{"schemas":["{schema}"],"totalResults":1,"startIndex":1,"itemsPerPage":1,
+                 "Resources":[{{"schemas":["{group}"],"displayName":"Tour Guides"}}]}}"#
+        );
+
+        // `Group` has no `userName`, which `User` requires.
+        let parsed: Result<ListResponse<User<String>>, _> = serde_json::from_str(&body);
+        assert!(
+            parsed.is_err(),
+            "a Group payload must not deserialize as ListResponse<User>"
+        );
+    }
     use super::*;
     use crate::filter::{
         AttrExp, AttrPath, CompValue, CompareOp, PatchPath, PatchValuePath, ValFilter,
@@ -445,7 +646,7 @@ mod tests {
         let body = format!(
             r#"{{"schemas":["{schema}"],"totalResults":0,"startIndex":1,"itemsPerPage":0}}"#
         );
-        let list: ListResponse<String> =
+        let list: ListResponse<Resource<String>> =
             serde_json::from_str(&body).expect("Failed to deserialize empty list response");
         assert_eq!(list.total_results, 0);
         assert!(list.resources.is_empty());
@@ -459,7 +660,7 @@ mod tests {
         // must deserialize rather than fail with a `missing field` error.
         let schema = schema_urns::LIST_RESPONSE;
         let body = format!(r#"{{"schemas":["{schema}"],"totalResults":0}}"#);
-        let list: ListResponse<String> = serde_json::from_str(&body)
+        let list: ListResponse<Resource<String>> = serde_json::from_str(&body)
             .expect("ListResponse without startIndex/itemsPerPage must deserialize");
         assert_eq!(list.total_results, 0);
         assert_eq!(list.start_index, None);
@@ -476,7 +677,7 @@ mod tests {
         let body = format!(
             r#"{{"schemas":["{schema}"],"totalResults":0,"startIndex":1,"itemsPerPage":0}}"#
         );
-        let list: ListResponse<String> =
+        let list: ListResponse<Resource<String>> =
             serde_json::from_str(&body).expect("Failed to deserialize list response");
         assert_eq!(list.start_index, Some(1));
         assert_eq!(list.items_per_page, Some(0));
@@ -486,7 +687,7 @@ mod tests {
     fn test_list_response_omits_none_pagination_fields_on_serialize() {
         // `None` must be omitted from the wire, not emitted as `null` —
         // `"itemsPerPage": null` is not valid SCIM.
-        let list: ListResponse<String> = ListResponse {
+        let list: ListResponse<Resource<String>> = ListResponse {
             items_per_page: None,
             total_results: 0,
             start_index: None,
@@ -510,7 +711,7 @@ mod tests {
 
     #[test]
     fn test_list_response_pagination_fields_round_trip() {
-        let list: ListResponse<String> = ListResponse {
+        let list: ListResponse<Resource<String>> = ListResponse {
             items_per_page: Some(20),
             total_results: 137,
             start_index: Some(41),
@@ -518,7 +719,7 @@ mod tests {
             resources: vec![],
         };
         let json = serde_json::to_string(&list).expect("serialize ListResponse");
-        let back: ListResponse<String> = serde_json::from_str(&json).expect("round-trip");
+        let back: ListResponse<Resource<String>> = serde_json::from_str(&json).expect("round-trip");
         assert_eq!(back.items_per_page, Some(20));
         assert_eq!(back.start_index, Some(41));
         assert_eq!(back.total_results, 137);
@@ -530,7 +731,7 @@ mod tests {
         // real SCIM value (a zero-result page) and MUST reach the wire — only
         // `None` may be dropped. Guards against a `skip_serializing_if`
         // predicate that also swallows `Some(0)`.
-        let list: ListResponse<String> = ListResponse {
+        let list: ListResponse<Resource<String>> = ListResponse {
             items_per_page: Some(0),
             total_results: 0,
             start_index: Some(0),
@@ -547,7 +748,7 @@ mod tests {
             "Some(0) startIndex must be emitted, not skipped: {json}"
         );
 
-        let back: ListResponse<String> = serde_json::from_str(&json).expect("round-trip");
+        let back: ListResponse<Resource<String>> = serde_json::from_str(&json).expect("round-trip");
         assert_eq!(back.items_per_page, Some(0));
         assert_eq!(back.start_index, Some(0));
     }
@@ -556,7 +757,7 @@ mod tests {
     fn validate_list_response_accepts_complete_unpaginated_response() {
         // `Resources` count == `totalResults`: not a partial page, so the
         // pagination markers are legitimately absent (RFC 7644 §3.4.2).
-        let list: ListResponse<String> = ListResponse {
+        let list: ListResponse<Resource<String>> = ListResponse {
             schemas: vec![schema_urns::LIST_RESPONSE.to_string()],
             total_results: 0,
             items_per_page: None,
@@ -568,7 +769,7 @@ mod tests {
 
     #[test]
     fn validate_list_response_accepts_partial_page_with_pagination_markers() {
-        let list: ListResponse<String> = ListResponse {
+        let list: ListResponse<Resource<String>> = ListResponse {
             schemas: vec![schema_urns::LIST_RESPONSE.to_string()],
             total_results: 100,
             items_per_page: Some(10),
@@ -580,47 +781,44 @@ mod tests {
 
     #[test]
     fn validate_list_response_rejects_partial_page_missing_start_index() {
-        let list: ListResponse<String> = ListResponse {
+        let list: ListResponse<Resource<String>> = ListResponse {
             schemas: vec![schema_urns::LIST_RESPONSE.to_string()],
             total_results: 100,
             items_per_page: Some(10),
             start_index: None,
             resources: vec![],
         };
-        assert!(matches!(
-            list.validate(),
-            Err(SCIMError::MissingRequiredField(f)) if f == "startIndex"
-        ));
+        let err = list.validate().expect_err("must fail validation");
+        assert_eq!(err.path(), "startIndex");
+        assert_eq!(err.scim_type(), "invalidValue");
     }
 
     #[test]
     fn validate_list_response_rejects_partial_page_missing_items_per_page() {
-        let list: ListResponse<String> = ListResponse {
+        let list: ListResponse<Resource<String>> = ListResponse {
             schemas: vec![schema_urns::LIST_RESPONSE.to_string()],
             total_results: 100,
             items_per_page: None,
             start_index: Some(1),
             resources: vec![],
         };
-        assert!(matches!(
-            list.validate(),
-            Err(SCIMError::MissingRequiredField(f)) if f == "itemsPerPage"
-        ));
+        let err = list.validate().expect_err("must fail validation");
+        assert_eq!(err.path(), "itemsPerPage");
+        assert_eq!(err.scim_type(), "invalidValue");
     }
 
     #[test]
     fn validate_list_response_rejects_empty_schemas() {
-        let list: ListResponse<String> = ListResponse {
+        let list: ListResponse<Resource<String>> = ListResponse {
             schemas: vec![],
             total_results: 0,
             items_per_page: None,
             start_index: None,
             resources: vec![],
         };
-        assert!(matches!(
-            list.validate(),
-            Err(SCIMError::MissingRequiredField(f)) if f == "schemas"
-        ));
+        let err = list.validate().expect_err("must fail validation");
+        assert_eq!(err.path(), "schemas");
+        assert_eq!(err.scim_type(), "invalidValue");
     }
 
     // ---- RFC 7644 sample payloads (verbatim, except as noted) ----
@@ -638,7 +836,7 @@ mod tests {
     #[test]
     fn rfc7644_s3_4_2_list_response() {
         let raw = include_str!("../test_data/rfc7644/s3.4.2_list_response.json");
-        let list: ListResponse<String> =
+        let list: ListResponse<Resource<String>> =
             serde_json::from_str(raw).expect("RFC 7644 §3.4.2 list response must deserialize");
         assert_eq!(list.total_results, 2);
         assert_eq!(list.start_index, None);
@@ -660,7 +858,7 @@ mod tests {
     #[test]
     fn rfc7644_s3_4_2_4_fig3_pagination_response() {
         let raw = include_str!("../test_data/rfc7644/s3.4.2.4_fig3_pagination_response.json");
-        let list: ListResponse<String> =
+        let list: ListResponse<Resource<String>> =
             serde_json::from_str(raw).expect("RFC 7644 Figure 3 must deserialize");
         assert_eq!(list.total_results, 100);
         assert_eq!(list.items_per_page, Some(10));
@@ -683,7 +881,7 @@ mod tests {
     #[test]
     fn rfc7644_s3_4_3_fig5_post_query_response() {
         let raw = include_str!("../test_data/rfc7644/s3.4.3_fig5_post_query_response.json");
-        let list: ListResponse<String> =
+        let list: ListResponse<Resource<String>> =
             serde_json::from_str(raw).expect("RFC 7644 Figure 5 must deserialize");
         assert_eq!(list.total_results, 100);
         assert_eq!(list.items_per_page, Some(10));
@@ -1653,7 +1851,7 @@ mod tests {
                 group = group_json(),
                 schema = schema_json()
             );
-            let list: ListResponse<String> = serde_json::from_str(&json).unwrap();
+            let list: ListResponse<Resource<String>> = serde_json::from_str(&json).unwrap();
             assert_eq!(list.resources.len(), 3);
             assert!(matches!(list.resources[0], Resource::User(_)));
             assert!(matches!(list.resources[1], Resource::Group(_)));

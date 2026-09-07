@@ -745,9 +745,9 @@ mod tests {
     /// whole `ListResponse` down with it.
     #[test]
     fn deserialize_github_enterprise_user_list() {
-        use crate::models::others::ListResponse;
+        use crate::models::others::{ListResponse, Resource};
 
-        let list: ListResponse<String> = serde_json::from_str(include_str!(
+        let list: ListResponse<Resource<String>> = serde_json::from_str(include_str!(
             "../test_data/provider_samples/github_enterprise_user_list_test.json"
         ))
         .expect("GitHub Enterprise user list should deserialize");
