@@ -41,7 +41,10 @@ so is free, and every break is listed below.
   (E0277) rather than a runtime surprise. The sealing also fixes the
   implementing set to this crate's resources, which is the intended scope.
   Note that `cargo-semver-checks` has no lint for this class of change — the
-  seal is what catches it.
+  seal is what catches it. It has no lint for a public field's type changing
+  either, which is why the 0.5.0 release below needed its break verified by
+  compiling a consumer against the published 0.4.2 rather than by trusting the
+  tool.
 
 - **The `serialize()` and `deserialize()` methods are gone** from `User`,
   `Group`, `EnterpriseUser`, `Schema`, `ResourceType` and
@@ -164,6 +167,15 @@ so is free, and every break is listed below.
   run, requires the version input to match `Cargo.toml` and a tag on the same
   commit, and runs behind a `crates-io` environment. It was previously
   triggered by any `v*.*.*` tag push.
+- A weekly scheduled `Weekly drift` workflow, which is the guard the loose
+  caret requirements actually need: consumers get whatever is newest on the day
+  they build, and nothing about that is exercised by a PR, since `build.yml`
+  only runs when this repo changes and the risk here is something outside it
+  changing. It resolves fresh with no cache, runs the suite and the feature
+  matrix on stable (plus beta, advisory), re-checks that the advertised MSRV
+  still holds — a dependency can raise its own `rust-version` with no commit
+  here — re-runs the advisory audit, and files an issue on failure, since
+  GitHub does not surface a failed scheduled run the way it does a failed PR.
 - Dependency requirements are stated as caret requirements at major.minor
   (`serde = "1.0"`, `thiserror = "2.0"`, `lalrpop-util = "0.23"`,
   `fluent-uri = "0.4"`). Every form is a caret requirement and cargo resolves

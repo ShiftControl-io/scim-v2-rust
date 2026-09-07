@@ -1,0 +1,138 @@
+name: Weekly drift
+
+# Requirements are caret requirements at major.minor, so consumers get whatever
+# the newest compatible release is on the day they build. Nothing about that is
+# tested by a PR: `build.yml` only runs when something in this repo changes, and
+# the risk here is something *outside* it changing. Three ways that bites a
+# published crate, all caught below:
+#
+#   1. A dependency ships a minor or patch that breaks us.
+#   2. A new rustc release breaks us, or adds a lint we deny.
+#   3. A dependency raises its own `rust-version` above the MSRV we advertise —
+#      which cargo enforces, so it breaks the build outright.
+#
+# Cargo.lock is gitignored, so every run already resolves fresh; the schedule is
+# what makes the check happen without a push.
+
+on:
+  schedule:
+    # Mondays 06:00 UTC, so a failure is waiting at the start of the week.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  drift:
+    name: ${{ matrix.toolchain }} against latest dependencies
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Stable is the real signal: this is what consumers are on.
+          - toolchain: stable
+            required: true
+          # Beta is a six-week early warning for the next stable. Advisory —
+          # a beta regression is not a reason to page anyone, but knowing
+          # before it ships is worth having.
+          - toolchain: beta
+            required: false
+    continue-on-error: ${{ !matrix.required }}
+    env:
+      # Not set for beta: a lint added in beta would fail the run for reasons
+      # that are not a defect in this crate.
+      RUSTFLAGS: ${{ matrix.required && '-D warnings' || '' }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: hecrj/setup-rust-action@110f36749599534ca96628b82f52ae67e5d95a3c # v2.0.1
+        with:
+          rust-version: ${{ matrix.toolchain }}
+          components: clippy
+
+      # No cache: a warm cache could serve a dependency version older than the
+      # one a consumer would resolve today, which is the whole thing under test.
+      - name: Record what resolved
+        run: |
+          cargo tree --edges normal --all-features > resolved.txt
+          cat resolved.txt >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Test
+        run: cargo test --all-features
+
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Feature matrix still builds
+        run: |
+          for f in "--no-default-features" \
+                   "--no-default-features --features filter" \
+                   "--no-default-features --features models" \
+                   "--no-default-features --features schemas"; do
+            echo "::group::cargo test $f"
+            # shellcheck disable=SC2086
+            cargo test $f
+            echo "::endgroup::"
+          done
+
+  # A dependency that raises its own `rust-version` above ours breaks every
+  # consumer on the MSRV we advertise, and it happens without any commit here.
+  msrv-still-holds:
+    name: MSRV still holds against latest dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Read rust-version from Cargo.toml
+        id: msrv
+        run: |
+          set -euo pipefail
+          version="$(grep -m1 '^rust-version = ' Cargo.toml | cut -d'"' -f2)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: hecrj/setup-rust-action@110f36749599534ca96628b82f52ae67e5d95a3c # v2.0.1
+        with:
+          rust-version: ${{ steps.msrv.outputs.version }}
+      - name: Build
+        run: cargo build --all-features
+
+  # Advisories move on their own schedule too — a RUSTSEC entry can land against
+  # an unchanged dependency tree.
+  audit:
+    name: Advisories
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check advisories
+
+  # A scheduled failure nobody sees is not a check. GitHub does not notify on
+  # scheduled-run failures the way it does on a PR, so file an issue.
+  report:
+    name: Report failure
+    runs-on: ubuntu-latest
+    needs: [drift, msrv-still-holds, audit]
+    if: failure() && github.event_name == 'schedule'
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Open or update an issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          title="Weekly drift check failed"
+          existing="$(gh issue list --repo "$REPO" --state open --label drift \
+                        --search "$title in:title" --json number --jq '.[0].number // empty')"
+          body=$(printf '%s\n\n%s\n' \
+            "The weekly check against freshly resolved dependencies failed: $RUN" \
+            "Something outside this repository changed: a dependency release, a new rustc, a raised upstream MSRV, or a new advisory. The run log shows which job failed and what resolved.")
+
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$REPO" --body "$body"
+          else
+            gh issue create --repo "$REPO" --title "$title" --label drift --body "$body"
+          fi
