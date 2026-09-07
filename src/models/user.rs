@@ -96,9 +96,20 @@ impl<T> Default for User<T> {
     }
 }
 
+/// The components of the user's name.
+///
+/// Unassigned sub-attributes are omitted from serialized output rather than
+/// emitted as `null`; RFC 7643 §2.5 treats the two as equivalent in resource
+/// state. Note the consequence for `PUT`: per RFC 7644 §3.5.1 an omitted
+/// `readWrite` attribute is "not asserted by the client" and the server MAY
+/// keep the existing value or apply a default — it is *not* a deterministic
+/// clear. Callers that need to clear a sub-attribute on `PUT` should use a
+/// `PATCH` operation or hand-build a `serde_json::Value` carrying an explicit
+/// `null`.
 #[derive(Serialize, Deserialize, Debug, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Name {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub formatted: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub family_name: Option<String>,
@@ -917,6 +928,65 @@ mod tests {
             assert_eq!(
                 user.meta.as_ref().unwrap().last_modified.as_deref(),
                 Some("2011-08-08T08:00:12Z")
+            );
+        }
+        /// An unset `Name.formatted` is omitted on serialize rather than
+        /// emitted as `null` — consistent with the rest of `Name` and every
+        /// other model in the crate. RFC 7643 §2.5 treats `null` and omitted
+        /// as equivalent, so this is a compactness/consistency choice, and a
+        /// present value still round-trips.
+        #[test]
+        fn name_omits_unset_formatted_on_serialize() {
+            let name = Name {
+                formatted: None,
+                family_name: Some("Jensen".to_string()),
+                given_name: Some("Barbara".to_string()),
+                ..Name::default()
+            };
+            let serialized = serde_json::to_string(&name).unwrap();
+            assert!(
+                !serialized.contains("formatted"),
+                "unset formatted must not appear on the wire: {serialized}"
+            );
+            assert!(
+                !serialized.contains("null"),
+                "no field should be null: {serialized}"
+            );
+
+            let full = Name {
+                formatted: Some("Ms. Barbara J Jensen III".to_string()),
+                ..name
+            };
+            let round: Name = serde_json::from_str(&serde_json::to_string(&full).unwrap()).unwrap();
+            assert_eq!(round.formatted.as_deref(), Some("Ms. Barbara J Jensen III"));
+            assert_eq!(round.family_name.as_deref(), Some("Jensen"));
+        }
+
+        /// The read path must keep accepting an explicit `"formatted": null` from
+        /// peers that send it (RFC 7643 §2.5) — a missing key, `null`, and `{}`
+        /// all deserialize to `None`. Regression guard against a future
+        /// `#[serde(default)]`, `deny_unknown_fields`, or custom deserializer
+        /// silently changing this (cf. `Role.primary`, CHANGELOG 0.4.2).
+        #[test]
+        fn name_explicit_null_deserializes_to_none() {
+            let name: Name =
+                serde_json::from_str(r#"{"formatted": null, "familyName": "Jensen"}"#).unwrap();
+            assert_eq!(name.formatted, None);
+            assert_eq!(name.family_name.as_deref(), Some("Jensen"));
+
+            let empty: Name = serde_json::from_str("{}").unwrap();
+            assert_eq!(empty.formatted, None);
+        }
+
+        /// A fully-unset `Name` serializes to an empty object, not one padded
+        /// with `null`s. `formatted` was the last field without
+        /// `skip_serializing_if`, so before this it emitted `{"formatted":null}`.
+        /// Nested in a `User` this is the `"name":{}` a downstream peer receives.
+        #[test]
+        fn name_default_serializes_to_empty_object() {
+            assert_eq!(
+                serde_json::to_value(Name::default()).unwrap(),
+                serde_json::json!({})
             );
         }
     }
