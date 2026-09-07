@@ -844,6 +844,92 @@ fn drop_val_filter_iteratively(root: ValFilter) {
 #[cfg(test)]
 mod tests {
 
+    // -----------------------------------------------------------------------
+    // RFC 7644 §3.4.2.2 grammar permutations. Each row is a case the parser
+    // handled correctly when probed by hand; without these, a grammar
+    // regression on any of them would pass the suite.
+    // -----------------------------------------------------------------------
+
+    /// ABNF: `ATTRNAME = ALPHA *(nameChar)`, `nameChar = "-" / "_" / DIGIT / ALPHA`.
+    /// Keywords and operators are case-insensitive (§3.4.2.2). `compValue` is
+    /// JSON: `false / null / true / number / string`, so a JSON number in any
+    /// form is legal. Whitespace between tokens is any run of SP or HTAB.
+    #[test_case(r#"x509Certificates.value eq "abc""# ; "digit_inside_attrname")]
+    #[test_case(r#"my-attr eq "x""# ; "hyphen_in_attrname")]
+    #[test_case(r#"my_attr eq "x""# ; "underscore_in_attrname")]
+    #[test_case(r#"USERNAME EQ "x""# ; "attr_and_operator_uppercase")]
+    #[test_case("title PR" ; "pr_uppercase")]
+    #[test_case(r#"a eq "1" AND b eq "2""# ; "and_uppercase")]
+    #[test_case(r#"a eq "1" Or b eq "2""# ; "or_mixed_case")]
+    #[test_case("NOT (a pr)" ; "not_uppercase")]
+    #[test_case("age gt -1" ; "negative_integer")]
+    #[test_case("score eq 1.5" ; "decimal")]
+    #[test_case("n eq 1e3" ; "exponent")]
+    #[test_case("n eq 1.5e-3" ; "negative_exponent")]
+    #[test_case("userName eq null" ; "null_value")]
+    #[test_case("active eq true" ; "true_value")]
+    #[test_case("active eq false" ; "false_value")]
+    #[test_case("emails[primary pr]" ; "pr_inside_value_path")]
+    #[test_case(r#"not (emails[type eq "work"])"# ; "not_on_value_path")]
+    #[test_case(r#"urn:ietf:params:scim:schemas:extension:enterprise:2.0:User:manager.value eq "x""# ; "urn_prefix_with_sub_attr")]
+    #[test_case(r#"userName    eq     "x""# ; "multiple_spaces")]
+    #[test_case("userName\teq\t\"x\"" ; "tabs_as_whitespace")]
+    #[test_case("not (not (title pr))" ; "nested_not")]
+    #[test_case(r#"emails[type eq "work" or type eq "home"]"# ; "value_path_with_or")]
+    fn grammar_accepts(s: &str) {
+        let f: Filter = s
+            .parse()
+            .unwrap_or_else(|e| panic!("{s:?} must parse: {e}"));
+        let back: Filter = f.to_string().parse().expect("display output must re-parse");
+        assert_eq!(f, back, "{s:?} must round-trip through Display");
+    }
+
+    /// The rejections the ABNF requires. `pr` takes no value; a `FILTER` may
+    /// contain a `valuePath` but not `valuePath "." subAttr` (that form exists
+    /// only in the PATCH `PATH` rule); JSON literals are lowercase; an
+    /// attribute name starts with ALPHA.
+    #[test_case(r#"1abc eq "x""# ; "attrname_leading_digit")]
+    #[test_case(r#"_abc eq "x""# ; "attrname_leading_underscore")]
+    #[test_case("active eq True" ; "capitalised_boolean_literal")]
+    #[test_case("userName eq bjensen" ; "bare_word_value")]
+    #[test_case(r#"title pr "x""# ; "pr_with_a_value")]
+    #[test_case("userName eq" ; "missing_comp_value")]
+    #[test_case(r#"(userName eq "x""# ; "unbalanced_open_paren")]
+    #[test_case(r#"userName eq "x")"# ; "unbalanced_close_paren")]
+    #[test_case("" ; "empty")]
+    #[test_case("   " ; "whitespace_only")]
+    #[test_case(r#"userName eq "x" garbage"# ; "trailing_garbage")]
+    #[test_case(r#"userName eq "x"# ; "unterminated_string")]
+    #[test_case(r#"emails[type eq "work"].value eq "x""# ; "value_path_sub_attr_in_filter")]
+    #[test_case(r#"emails[type eq "work"][primary eq true]"# ; "double_value_path")]
+    fn grammar_rejects(s: &str) {
+        assert!(s.parse::<Filter>().is_err(), "{s:?} must be rejected");
+    }
+
+    /// RFC 7644 Figure 8 ("Example Path Values"), all five, plus the
+    /// URN-prefixed forms the `PATH` rule admits.
+    #[test_case("members" ; "fig8_attr")]
+    #[test_case("name.familyName" ; "fig8_sub_attr")]
+    #[test_case(r#"addresses[type eq "work"]"# ; "fig8_value_path")]
+    #[test_case(r#"members[value eq "2819c223-7f76-453a-919d-413861904646"]"# ; "fig8_value_path_by_id")]
+    #[test_case(r#"members[value eq "2819c223-7f76-453a-919d-413861904646"].displayName"# ; "fig8_value_path_sub_attr")]
+    #[test_case(r#"emails[type eq "work" and primary eq true].value"# ; "value_path_and_sub_attr")]
+    #[test_case("urn:ietf:params:scim:schemas:extension:enterprise:2.0:User:manager" ; "urn_prefixed_attr")]
+    #[test_case("urn:ietf:params:scim:schemas:extension:enterprise:2.0:User:manager.value" ; "urn_prefixed_sub_attr")]
+    fn patch_path_accepts(s: &str) {
+        let p: PatchPath = s
+            .parse()
+            .unwrap_or_else(|e| panic!("{s:?} must parse: {e}"));
+        let back: PatchPath = p.to_string().parse().expect("display output must re-parse");
+        assert_eq!(p, back, "{s:?} must round-trip through Display");
+    }
+
+    #[test_case(r#"emails[type eq "work"][primary eq true]"# ; "double_value_path")]
+    #[test_case("" ; "empty")]
+    fn patch_path_rejects(s: &str) {
+        assert!(s.parse::<PatchPath>().is_err(), "{s:?} must be rejected");
+    }
+
     /// Every comparison operator and every `compValue` kind must survive
     /// parse -> Display -> parse. This is the cheapest way to cover the
     /// `Display` arms exhaustively; before it, `ew`, `false`, `not (...)` and

@@ -9,7 +9,7 @@ use crate::models::resource_types::ResourceType;
 use crate::models::scim_schema::Schema;
 use crate::models::user::User;
 use crate::schema_urns;
-use crate::utils::validation::{Validate, ValidationError};
+use crate::utils::validation::{Validate, ValidationError, require_schema_urn};
 
 #[cfg(feature = "filter")]
 /// Server-side variant of [`ListQuery`] that tolerates malformed filter
@@ -48,6 +48,8 @@ impl TryFrom<TolerantListQuery> for StrictListQuery {
         };
         Ok(ListQuery {
             filter,
+            sort_by: q.sort_by,
+            sort_order: q.sort_order,
             start_index: q.start_index,
             count: q.count,
             attributes: q.attributes,
@@ -71,6 +73,8 @@ impl TryFrom<TolerantSearchRequest> for StrictSearchRequest {
             attributes: r.attributes,
             excluded_attributes: r.excluded_attributes,
             filter,
+            sort_by: r.sort_by,
+            sort_order: r.sort_order,
             start_index: r.start_index,
             count: r.count,
         })
@@ -103,17 +107,46 @@ impl SearchRequest<MaybeFilter> {
     }
 }
 
+/// RFC 7644 §3.4.2.3 `sortOrder`. "Allowed values are `ascending` and
+/// `descending`. If a value for `sortBy` is provided and no `sortOrder` is
+/// specified, `sortOrder` SHALL default to ascending."
+///
+/// Exhaustive on purpose: the RFC closes the set. Deserialization is
+/// case-insensitive, matching the crate's posture on provider spelling.
 #[cfg(feature = "filter")]
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SortOrder {
+    #[default]
+    #[serde(alias = "Ascending", alias = "ASCENDING")]
+    Ascending,
+    #[serde(alias = "Descending", alias = "DESCENDING")]
+    Descending,
+}
+
+#[cfg(feature = "filter")]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchRequest<F = Filter> {
     pub schemas: Vec<String>,
+    /// RFC 7644 §3.9 attribute selection, not a resource attribute — so unlike
+    /// the multi-valued attributes on `User` and `Group`, an empty list is
+    /// omitted rather than sent as `[]`. §3.5.1's "empty array to clear all
+    /// values" is about a resource's own attributes; an empty *selection* is
+    /// not an assertion about anything, and a server could reasonably read
+    /// `"attributes": []` as a request for no attributes at all.
     #[serde(
         default = "Vec::new",
         deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
         skip_serializing_if = "Vec::is_empty"
     )]
     pub attributes: Vec<String>,
+    /// RFC 7644 §3.9 attribute selection, not a resource attribute — so unlike
+    /// the multi-valued attributes on `User` and `Group`, an empty list is
+    /// omitted rather than sent as `[]`. §3.5.1's "empty array to clear all
+    /// values" is about a resource's own attributes; an empty *selection* is
+    /// not an assertion about anything, and a server could reasonably read
+    /// `"attributes": []` as a request for no attributes at all.
     #[serde(
         default = "Vec::new",
         deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
@@ -122,6 +155,14 @@ pub struct SearchRequest<F = Filter> {
     pub excluded_attributes: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filter: Option<F>,
+    /// RFC 7644 §3.4.2.3: the attribute whose value orders the results,
+    /// e.g. `userName` or `name.familyName`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sort_by: Option<String>,
+    /// RFC 7644 §3.4.2.3. When `sort_by` is set and this is `None`, the
+    /// server SHALL treat it as [`SortOrder::Ascending`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sort_order: Option<SortOrder>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub start_index: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -136,6 +177,8 @@ impl<F> Default for SearchRequest<F> {
             attributes: Vec::new(),
             excluded_attributes: Vec::new(),
             filter: None,
+            sort_by: None,
+            sort_order: None,
             start_index: Some(1),
             count: Some(100),
         }
@@ -143,11 +186,18 @@ impl<F> Default for SearchRequest<F> {
 }
 
 #[cfg(feature = "filter")]
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ListQuery<F = Filter> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filter: Option<F>,
+    /// RFC 7644 §3.4.2.3 `sortBy` query parameter.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sort_by: Option<String>,
+    /// RFC 7644 §3.4.2.3 `sortOrder`; defaults to ascending when `sort_by` is
+    /// set and this is absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sort_order: Option<SortOrder>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub start_index: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -163,6 +213,8 @@ impl<F> Default for ListQuery<F> {
     fn default() -> Self {
         ListQuery {
             filter: None,
+            sort_by: None,
+            sort_order: None,
             start_index: Some(1),
             count: Some(100),
             attributes: Some("".to_string()),
@@ -184,7 +236,7 @@ impl<F> Default for ListQuery<F> {
 /// beyond the four this crate models, so variants will be added in minor
 /// releases. Match with a trailing `_ =>` arm.
 #[non_exhaustive]
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, Clone, PartialEq)]
 #[serde(untagged)]
 pub enum Resource<T> {
     User(Box<User<T>>),
@@ -327,16 +379,17 @@ mod sealed {
 /// `ListResponse<String>` compiled before 1.0 and meant "ids are strings".
 /// Reusing the parameter for the resource would have left that code compiling
 /// with a new meaning and failing only at runtime, on deserialize. The bound
-/// turns it into a compile error instead:
+/// turns it into a compile error instead. Each snippet below inlines the full
+/// path deliberately: a `use` line could fail for an unrelated reason — a
+/// renamed module, a moved re-export — and `compile_fail` would still pass
+/// while the bound it is guarding had been relaxed.
 ///
 /// ```compile_fail,E0277
-/// use scim_v2::models::others::ListResponse;
-///
 /// // `String` is not a SCIM resource, so this does not compile.
-/// let _list: ListResponse<String> = unimplemented!();
+/// let _list: scim_v2::models::others::ListResponse<String> = unimplemented!();
 /// ```
 ///
-/// The sealing is also why no downstream crate can widen that set:
+/// The sealing is why no downstream crate can widen that set:
 ///
 /// ```compile_fail,E0277
 /// struct MyResource;
@@ -345,13 +398,36 @@ mod sealed {
 ///     fn schema_urn(&self) -> &'static str { "urn:example" }
 /// }
 /// ```
+///
+/// And the seal holds because the supertrait's module is private. Naming it
+/// from outside is an E0603, which is what keeps a later `pub mod sealed` —
+/// added to quiet a `private_interfaces` warning, say — from silently
+/// unsealing the trait: this snippet starts compiling, and therefore starts
+/// failing, the moment the module is public.
+///
+/// ```compile_fail,E0603
+/// struct MyResource;
+/// impl scim_v2::models::others::sealed::Sealed for MyResource {}
+/// ```
 pub trait ScimResource: sealed::Sealed {
-    /// The RFC 7643 schema URN this resource declares.
+    /// The RFC 7643 schema URN for this resource's type.
     fn schema_urn(&self) -> &'static str;
+
+    /// The `schemas` attribute this particular instance carries on the wire.
+    ///
+    /// Empty when the payload omitted it, which RFC 7643 §§6-7 permit for the
+    /// discovery resources. [`ListResponse::validate`] compares this against
+    /// [`schema_urn`](ScimResource::schema_urn) so the typed path performs the
+    /// same discriminator check the [`Resource`] deserializer does.
+    fn declared_schemas(&self) -> &[String];
 }
 
 impl<T> sealed::Sealed for User<T> {}
 impl<T> ScimResource for User<T> {
+    fn declared_schemas(&self) -> &[String] {
+        &self.schemas
+    }
+
     fn schema_urn(&self) -> &'static str {
         schema_urns::USER
     }
@@ -359,6 +435,10 @@ impl<T> ScimResource for User<T> {
 
 impl<T> sealed::Sealed for Group<T> {}
 impl<T> ScimResource for Group<T> {
+    fn declared_schemas(&self) -> &[String] {
+        &self.schemas
+    }
+
     fn schema_urn(&self) -> &'static str {
         schema_urns::GROUP
     }
@@ -366,6 +446,10 @@ impl<T> ScimResource for Group<T> {
 
 impl sealed::Sealed for Schema {}
 impl ScimResource for Schema {
+    fn declared_schemas(&self) -> &[String] {
+        &self.schemas
+    }
+
     fn schema_urn(&self) -> &'static str {
         schema_urns::SCHEMA
     }
@@ -373,6 +457,10 @@ impl ScimResource for Schema {
 
 impl sealed::Sealed for ResourceType {}
 impl ScimResource for ResourceType {
+    fn declared_schemas(&self) -> &[String] {
+        &self.schemas
+    }
+
     fn schema_urn(&self) -> &'static str {
         schema_urns::RESOURCE_TYPE
     }
@@ -380,6 +468,15 @@ impl ScimResource for ResourceType {
 
 impl<T> sealed::Sealed for Resource<T> {}
 impl<T> ScimResource for Resource<T> {
+    fn declared_schemas(&self) -> &[String] {
+        match self {
+            Resource::User(u) => &u.schemas,
+            Resource::Group(g) => &g.schemas,
+            Resource::Schema(s) => &s.schemas,
+            Resource::ResourceType(r) => &r.schemas,
+        }
+    }
+
     fn schema_urn(&self) -> &'static str {
         match self {
             Resource::User(_) => schema_urns::USER,
@@ -402,7 +499,7 @@ impl<T> ScimResource for Resource<T> {
 ///
 /// `R` is bounded by the sealed [`ScimResource`] trait, so a type that is not
 /// a SCIM resource is rejected at compile time.
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(
     rename_all = "camelCase",
     bound(deserialize = "R: ScimResource + DeserializeOwned")
@@ -422,7 +519,12 @@ pub struct ListResponse<R: ScimResource = Resource<String>> {
     pub schemas: Vec<String>,
     // RFC 7644 section 3.4.2: `Resources` is REQUIRED only if `totalResults` is
     // non-zero, so a query returning no matches may omit it on the wire.
-    #[serde(rename = "Resources", default)]
+    #[serde(
+        rename = "Resources",
+        default = "Vec::new",
+        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
+        skip_serializing_if = "crate::utils::serde::skip_multi_valued"
+    )]
     pub resources: Vec<R>,
 }
 
@@ -432,6 +534,11 @@ impl<R: ScimResource> Validate for ListResponse<R> {
     /// Checks performed:
     ///
     /// * `schemas` is present.
+    /// * `totalResults` is not negative, and is not smaller than the number of
+    ///   entries in `Resources` — §3.4.2 describes it as a count that "may be
+    ///   larger than the number of resources returned".
+    /// * A present `startIndex` is at least 1 (§3.4.2: "the 1-based index of
+    ///   the first result") and a present `itemsPerPage` is not negative.
     /// * When the response carries a *partial* result set — fewer entries in
     ///   `Resources` than `totalResults` — both `startIndex` and `itemsPerPage`
     ///   are present. §3.4.2 makes them REQUIRED "when partial results are
@@ -491,14 +598,35 @@ impl<R: ScimResource> Validate for ListResponse<R> {
     /// assert_eq!(err.path(), "startIndex");
     /// ```
     fn validate(&self) -> Result<(), ValidationError> {
-        if self.schemas.is_empty() {
-            return Err(ValidationError::missing_required("schemas"));
+        require_schema_urn(&self.schemas, schema_urns::LIST_RESPONSE)?;
+
+        // §3.4.2 describes `totalResults` as a count that "may be larger than
+        // the number of resources returned" — larger, never smaller, and never
+        // negative. Both directions matter, because the doc above presents this
+        // as the check to run on a response assembled by hand, and filling
+        // `Resources` while leaving `totalResults` at its default is the
+        // mistake that shape invites.
+        if self.total_results < 0 {
+            return Err(ValidationError::invalid_value(
+                "totalResults",
+                format!("must not be negative, got {}", self.total_results),
+            ));
         }
+        let returned = self.resources.len() as i64;
+        if returned > self.total_results {
+            return Err(ValidationError::invalid_value(
+                "totalResults",
+                format!(
+                    "{returned} resources returned but totalResults is {}",
+                    self.total_results
+                ),
+            ));
+        }
+
         // A short page — fewer `Resources` returned than the total that match —
         // is "partial results ... returned due to pagination" per §3.4.2, which
         // makes both pagination markers REQUIRED.
-        let is_partial = (self.resources.len() as i64) < self.total_results;
-        if is_partial {
+        if returned < self.total_results {
             if self.start_index.is_none() {
                 return Err(ValidationError::missing_required("startIndex"));
             }
@@ -506,12 +634,55 @@ impl<R: ScimResource> Validate for ListResponse<R> {
                 return Err(ValidationError::missing_required("itemsPerPage"));
             }
         }
+
+        // The typed path chooses `R` at the call site, so nothing has compared
+        // the payload's declared `schemas` against the type it was parsed as.
+        // `Resource`'s own deserializer dispatches on that URN specifically
+        // "to prevent type confusion"; without this, a Group payload carrying
+        // a `userName` deserialized cleanly into `ListResponse<User<String>>`
+        // and both validators returned Ok. Absence stays legal, per §§6-7.
+        for (i, resource) in self.resources.iter().enumerate() {
+            let declared = resource.declared_schemas();
+            if !declared.is_empty() {
+                let expected = resource.schema_urn();
+                if !declared.iter().any(|s| s == expected) {
+                    return Err(ValidationError::invalid_value(
+                        format!("Resources[{i}].schemas"),
+                        format!(
+                            "does not declare {expected}, the schema of the type it was parsed as"
+                        ),
+                    ));
+                }
+            }
+        }
+
+        // §3.4.2 defines `startIndex` as "The 1-based index of the first
+        // result". A present-but-nonsensical marker is worth catching, and
+        // this is the only place it can be: the fields deliberately keep a
+        // wire `0` distinct from an omitted field, so serde will not reject it.
+        if let Some(start) = self.start_index
+            && start < 1
+        {
+            return Err(ValidationError::invalid_value(
+                "startIndex",
+                format!("is 1-based, got {start}"),
+            ));
+        }
+        if let Some(per_page) = self.items_per_page
+            && per_page < 0
+        {
+            return Err(ValidationError::invalid_value(
+                "itemsPerPage",
+                format!("must not be negative, got {per_page}"),
+            ));
+        }
+
         Ok(())
     }
 }
 
 #[cfg(feature = "filter")]
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct PatchOp {
     pub schemas: Vec<String>,
     #[serde(rename = "Operations")]
@@ -519,7 +690,7 @@ pub struct PatchOp {
 }
 
 #[cfg(feature = "filter")]
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, Clone, PartialEq)]
 #[serde(untagged)]
 #[expect(clippy::large_enum_variant)]
 pub enum OperationTarget {
@@ -565,7 +736,7 @@ impl<'de> Deserialize<'de> for OperationTarget {
 }
 
 #[cfg(feature = "filter")]
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(tag = "op")]
 pub enum PatchOperation {
     #[serde(rename = "add", alias = "Add", alias = "ADD")]
@@ -578,6 +749,49 @@ pub enum PatchOperation {
     },
     #[serde(rename = "replace", alias = "Replace", alias = "REPLACE")]
     Replace(OperationTarget),
+}
+
+#[cfg(feature = "filter")]
+impl<F> Validate for SearchRequest<F> {
+    /// RFC 7644 §3.4.3: the body carries the SearchRequest URN. §3.4.2.3:
+    /// `sortOrder` without `sortBy` orders nothing, so it is rejected rather
+    /// than silently ignored.
+    fn validate(&self) -> Result<(), ValidationError> {
+        require_schema_urn(&self.schemas, schema_urns::SEARCH_REQUEST)?;
+        if self.sort_order.is_some() && self.sort_by.is_none() {
+            return Err(ValidationError::invalid_value(
+                "sortOrder",
+                "present without sortBy; RFC 7644 §3.4.2.3 defines it as the order in which sortBy is applied",
+            ));
+        }
+        if let Some(count) = self.count
+            && count < 0
+        {
+            return Err(ValidationError::invalid_value(
+                "count",
+                format!("must not be negative, got {count}"),
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[cfg(feature = "filter")]
+impl Validate for PatchOp {
+    /// RFC 7644 §3.5.2: the body carries the PatchOp URN and "an array of one
+    /// or more PATCH operations". Each operation's own shape — `remove` needs
+    /// a path, pathless `add`/`replace` need an object — is enforced by the
+    /// [`PatchOperation`] type, so this only has to check the envelope.
+    fn validate(&self) -> Result<(), ValidationError> {
+        require_schema_urn(&self.schemas, schema_urns::PATCH_OP)?;
+        if self.operations.is_empty() {
+            return Err(ValidationError::invalid_value(
+                "Operations",
+                "must contain at least one operation (RFC 7644 §3.5.2)",
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// Tests for the parts of this module that do not depend on the `filter`
@@ -613,6 +827,67 @@ mod resource_tests {
             .map(|u| u.user_name.as_str())
             .collect();
         assert_eq!(names, ["bjensen", "jsmith"]);
+    }
+
+    /// L-2: the typed path chooses `R` at the call site, so before this the
+    /// payload's declared `schemas` was never compared against the type it was
+    /// parsed as. A Group payload carrying a `userName` deserialized cleanly
+    /// into `ListResponse<User<String>>` and both validators returned `Ok`.
+    #[test]
+    fn typed_list_response_validate_rejects_a_schema_mismatch() {
+        let schema = schema_urns::LIST_RESPONSE;
+        let group = schema_urns::GROUP;
+        let body = format!(
+            r#"{{"schemas":["{schema}"],"totalResults":1,"startIndex":1,"itemsPerPage":1,
+                 "Resources":[{{"schemas":["{group}"],"userName":"admin","displayName":"Tour Guides"}}]}}"#
+        );
+
+        // It still deserializes — `R` decides the shape, and every attribute
+        // `User` requires is present.
+        let list: ListResponse<User<String>> =
+            serde_json::from_str(&body).expect("shape matches User");
+        assert_eq!(list.resources[0].user_name, "admin");
+
+        let err = list
+            .validate()
+            .expect_err("a Group URN in a ListResponse<User> is a mismatch");
+        assert_eq!(err.path(), "Resources[0].schemas");
+        assert_eq!(err.scim_type_str(), "invalidValue");
+    }
+
+    /// RFC 7643 §§6-7 let a discovery resource omit `schemas` entirely, so an
+    /// absent discriminator must stay legal rather than becoming a new failure.
+    #[test]
+    fn typed_list_response_validate_tolerates_an_absent_discriminator() {
+        let list: ListResponse<User<String>> = ListResponse {
+            schemas: vec![schema_urns::LIST_RESPONSE.to_string()],
+            total_results: 1,
+            start_index: Some(1),
+            items_per_page: Some(1),
+            resources: vec![User::<String> {
+                schemas: Vec::new(),
+                user_name: "bjensen".to_string(),
+                ..Default::default()
+            }],
+        };
+        assert!(
+            list.validate().is_ok(),
+            "an omitted `schemas` is legal per §§6-7"
+        );
+    }
+
+    /// The `schemas` array may carry URNs this crate does not model — a
+    /// custom extension, say — alongside one it does. Dispatch follows the
+    /// recognised URN rather than failing on the unrecognised one.
+    #[test]
+    fn resource_dispatch_ignores_an_unknown_urn_beside_a_known_one() {
+        let body = format!(
+            r#"{{"schemas":["urn:example:custom:Thing","{}"],"userName":"bjensen"}}"#,
+            schema_urns::USER
+        );
+        let r: Resource<String> =
+            serde_json::from_str(&body).expect("must dispatch on the User URN");
+        assert!(matches!(r, Resource::User(_)));
     }
 
     /// The heterogeneous form still works, which RFC 7644 §3.4.3 needs for a
@@ -664,9 +939,118 @@ mod resource_tests {
 #[cfg(all(test, feature = "filter"))]
 mod tests {
     use super::*;
+    use test_case::test_case;
+
+    /// RFC 7644 §3.5.2 spells the ops lowercase; Entra and others send them
+    /// capitalised. Each accepted spelling must map to the same variant.
+    #[test_case("add", "Add", "ADD" ; "add")]
+    #[test_case("remove", "Remove", "REMOVE" ; "remove")]
+    #[test_case("replace", "Replace", "REPLACE" ; "replace")]
+    fn patch_op_accepts_every_documented_spelling(lower: &str, title: &str, upper: &str) {
+        for op in [lower, title, upper] {
+            let body = format!(
+                r#"{{"schemas":["{}"],"Operations":[{{"op":"{op}","path":"nickName","value":"x"}}]}}"#,
+                schema_urns::PATCH_OP
+            );
+            let patch: PatchOp =
+                serde_json::from_str(&body).unwrap_or_else(|e| panic!("{op}: {e}"));
+            let as_lower = serde_json::to_value(&patch).unwrap()["Operations"][0]["op"].clone();
+            assert_eq!(
+                as_lower, lower,
+                "{op} must serialize back as the RFC's lowercase form"
+            );
+        }
+    }
+
+    /// §3.5.2: "an array of one or more PATCH operations". Deserialization
+    /// accepts the envelope; `validate` is where the requirement lives.
+    #[test]
+    fn patch_op_validate_requires_at_least_one_operation_and_the_urn() {
+        let empty: PatchOp = serde_json::from_str(&format!(
+            r#"{{"schemas":["{}"],"Operations":[]}}"#,
+            schema_urns::PATCH_OP
+        ))
+        .expect("an empty Operations array deserializes");
+        let err = empty.validate().expect_err("but is not conformant");
+        assert_eq!(err.path(), "Operations");
+
+        let wrong_urn: PatchOp = serde_json::from_str(&format!(
+            r#"{{"schemas":["{}"],"Operations":[{{"op":"remove","path":"nickName"}}]}}"#,
+            schema_urns::USER
+        ))
+        .unwrap();
+        assert_eq!(
+            wrong_urn
+                .validate()
+                .expect_err("URN must be PatchOp")
+                .path(),
+            "schemas"
+        );
+    }
+
+    /// RFC 7644 §3.4.2.3 / §3.4.3: `sortBy` and `sortOrder` are part of the
+    /// search body and must survive a round-trip. Before 1.0 both were
+    /// silently dropped on deserialize.
+    #[test]
+    fn search_request_round_trips_sort_parameters() {
+        let body = format!(
+            r#"{{"schemas":["{}"],"sortBy":"name.familyName","sortOrder":"descending","startIndex":1,"count":10}}"#,
+            schema_urns::SEARCH_REQUEST
+        );
+        let req: SearchRequest<Filter> = serde_json::from_str(&body).unwrap();
+        assert_eq!(req.sort_by.as_deref(), Some("name.familyName"));
+        assert_eq!(req.sort_order, Some(SortOrder::Descending));
+        assert!(req.validate().is_ok());
+
+        let back = serde_json::to_value(&req).unwrap();
+        assert_eq!(back["sortBy"], "name.familyName");
+        assert_eq!(back["sortOrder"], "descending");
+
+        // Provider spelling is tolerated; the RFC's lowercase is what goes out.
+        let caps: ListQuery<Filter> =
+            serde_json::from_str(r#"{"sortBy":"userName","sortOrder":"Ascending"}"#).unwrap();
+        assert_eq!(caps.sort_order, Some(SortOrder::Ascending));
+        assert_eq!(
+            serde_json::to_value(&caps).unwrap()["sortOrder"],
+            "ascending"
+        );
+    }
+
+    /// §3.4.2.3 defines `sortOrder` as "the order in which the sortBy parameter
+    /// is applied", so on its own it orders nothing.
+    #[test]
+    fn search_request_validate_rejects_sort_order_without_sort_by() {
+        let req = SearchRequest::<Filter> {
+            sort_order: Some(SortOrder::Descending),
+            ..Default::default()
+        };
+        assert_eq!(
+            req.validate().expect_err("orphan sortOrder").path(),
+            "sortOrder"
+        );
+        assert!(SearchRequest::<Filter>::default().validate().is_ok());
+    }
+
+    /// RFC 7643 §3 makes `schemas` the discriminator, and the ListResponse
+    /// envelope has one fixed URN.
+    #[test]
+    fn list_response_validate_requires_its_own_urn() {
+        let list = ListResponse::<Resource<String>> {
+            schemas: vec![schema_urns::USER.to_string()],
+            total_results: 0,
+            items_per_page: None,
+            start_index: None,
+            resources: vec![],
+        };
+        let err = list
+            .validate()
+            .expect_err("a User URN is not the ListResponse URN");
+        assert_eq!(err.path(), "schemas");
+    }
     use crate::filter::{
         AttrExp, AttrPath, CompValue, CompareOp, PatchPath, PatchValuePath, ValFilter,
     };
+    use crate::utils::serde::drop_unassigned;
     use pretty_assertions::assert_eq;
 
     const PATCH_OP_SCHEMA: &str = schema_urns::PATCH_OP;
@@ -821,7 +1205,7 @@ mod tests {
         };
         let err = list.validate().expect_err("must fail validation");
         assert_eq!(err.path(), "startIndex");
-        assert_eq!(err.scim_type(), "invalidValue");
+        assert_eq!(err.scim_type_str(), "invalidValue");
     }
 
     #[test]
@@ -835,7 +1219,7 @@ mod tests {
         };
         let err = list.validate().expect_err("must fail validation");
         assert_eq!(err.path(), "itemsPerPage");
-        assert_eq!(err.scim_type(), "invalidValue");
+        assert_eq!(err.scim_type_str(), "invalidValue");
     }
 
     #[test]
@@ -849,7 +1233,7 @@ mod tests {
         };
         let err = list.validate().expect_err("must fail validation");
         assert_eq!(err.path(), "schemas");
-        assert_eq!(err.scim_type(), "invalidValue");
+        assert_eq!(err.scim_type_str(), "invalidValue");
     }
 
     // ---- RFC 7644 sample payloads (verbatim, except as noted) ----
@@ -878,7 +1262,11 @@ mod tests {
         let reserialized: Value =
             serde_json::from_str(&serde_json::to_string(&list).unwrap()).unwrap();
         let original: Value = serde_json::from_str(raw).unwrap();
-        assert_eq!(reserialized, original);
+        assert_eq!(
+            drop_unassigned(reserialized),
+            drop_unassigned(original),
+            "every assigned attribute of the RFC payload must survive the round-trip"
+        );
     }
 
     /// RFC 7644 §3.4.2.4, Figure 3 ("ListResponse Format for Returning Multiple
@@ -900,7 +1288,11 @@ mod tests {
         let reserialized: Value =
             serde_json::from_str(&serde_json::to_string(&list).unwrap()).unwrap();
         let original: Value = serde_json::from_str(raw).unwrap();
-        assert_eq!(reserialized, original);
+        assert_eq!(
+            drop_unassigned(reserialized),
+            drop_unassigned(original),
+            "every assigned attribute of the RFC payload must survive the round-trip"
+        );
     }
 
     /// RFC 7644 §3.4.3, Figure 5 ("Example POST Query Response") — POST
@@ -923,7 +1315,11 @@ mod tests {
         let reserialized: Value =
             serde_json::from_str(&serde_json::to_string(&list).unwrap()).unwrap();
         let original: Value = serde_json::from_str(raw).unwrap();
-        assert_eq!(reserialized, original);
+        assert_eq!(
+            drop_unassigned(reserialized),
+            drop_unassigned(original),
+            "every assigned attribute of the RFC payload must survive the round-trip"
+        );
     }
 
     /// RFC 7644 §3.4.3, Figure 4 ("Example POST Query Request") — POST
@@ -1504,6 +1900,8 @@ mod tests {
             attributes: Vec::new(),
             excluded_attributes: Vec::new(),
             filter: None,
+            sort_by: None,
+            sort_order: None,
             start_index: None,
             count: None,
         };

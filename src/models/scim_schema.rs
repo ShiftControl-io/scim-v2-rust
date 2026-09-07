@@ -1,10 +1,11 @@
 use serde::{Deserialize, Serialize};
 
 use crate::utils::error::SCIMError;
+use crate::utils::validation::{Validate, ValidationError, require_schema_urn};
 #[cfg(feature = "schemas")]
 use crate::{ENTERPRISE_USER_SCHEMA, GROUP_SCHEMA, USER_SCHEMA};
 
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 pub struct Meta {
     #[serde(rename = "resourceType", skip_serializing_if = "Option::is_none")]
     pub resource_type: Option<String>,
@@ -18,7 +19,7 @@ pub struct Meta {
     pub location: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct Schema {
     /// RFC 7643 §7: schema resources are commonly served without a
     /// `schemas` attribute, so this defaults to empty; a present value
@@ -32,7 +33,7 @@ pub struct Schema {
     pub meta: Meta,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct Attributes {
     pub name: String,
     pub r#type: String,
@@ -46,7 +47,7 @@ pub struct Attributes {
         rename = "canonicalValues",
         default = "Vec::new",
         deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
-        skip_serializing_if = "Vec::is_empty"
+        skip_serializing_if = "crate::utils::serde::skip_multi_valued"
     )]
     pub canonical_values: Vec<String>,
     #[serde(rename = "caseExact", skip_serializing_if = "Option::is_none")]
@@ -61,19 +62,19 @@ pub struct Attributes {
         rename = "subAttributes",
         default = "Vec::new",
         deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
-        skip_serializing_if = "Vec::is_empty"
+        skip_serializing_if = "crate::utils::serde::skip_multi_valued"
     )]
     pub sub_attributes: Vec<SubAttributes>,
     #[serde(
         rename = "referenceTypes",
         default = "Vec::new",
         deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
-        skip_serializing_if = "Vec::is_empty"
+        skip_serializing_if = "crate::utils::serde::skip_multi_valued"
     )]
     pub reference_types: Vec<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct SubAttributes {
     pub name: String,
     pub r#type: String,
@@ -87,7 +88,7 @@ pub struct SubAttributes {
         rename = "canonicalValues",
         default = "Vec::new",
         deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
-        skip_serializing_if = "Vec::is_empty"
+        skip_serializing_if = "crate::utils::serde::skip_multi_valued"
     )]
     pub canonical_values: Vec<String>,
     #[serde(rename = "caseExact", skip_serializing_if = "Option::is_none")]
@@ -102,7 +103,7 @@ pub struct SubAttributes {
         rename = "referenceTypes",
         default = "Vec::new",
         deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
-        skip_serializing_if = "Vec::is_empty"
+        skip_serializing_if = "crate::utils::serde::skip_multi_valued"
     )]
     pub reference_types: Vec<String>,
 }
@@ -292,6 +293,22 @@ impl TryFrom<&str> for Schema {
     }
 }
 
+impl Validate for Schema {
+    /// RFC 7643 §7: `id` is the schema URI and "service providers MUST
+    /// specify" it; `name` and `description` are OPTIONAL. §§6-7 allow the
+    /// `schemas` attribute itself to be absent, but when present it must name
+    /// this resource type.
+    fn validate(&self) -> Result<(), ValidationError> {
+        if !self.schemas.is_empty() {
+            require_schema_urn(&self.schemas, crate::schema_urns::SCHEMA)?;
+        }
+        if self.id.is_empty() {
+            return Err(ValidationError::missing_required("id"));
+        }
+        Ok(())
+    }
+}
+
 /// Tests for the `Schema` type itself, independent of the embedded
 /// definitions, so they still run without the `schemas` feature.
 #[cfg(test)]
@@ -325,6 +342,7 @@ mod schema_tests {
     /// `canonicalValues`, `subAttributes` and `referenceTypes` are
     /// multi-valued, so RFC 7643 §2.5 applies: absent, `null` and `[]` are one
     /// state, and unassigned is omitted on the way out.
+    #[cfg(not(feature = "compact-multi-valued"))]
     #[test]
     fn multi_valued_sub_attributes_treat_absent_null_and_empty_alike() {
         for raw in [
@@ -337,9 +355,8 @@ mod schema_tests {
             assert!(attr.canonical_values.is_empty());
             assert!(attr.reference_types.is_empty());
             let out = serde_json::to_value(&attr).unwrap();
-            let obj = out.as_object().unwrap();
-            assert!(!obj.contains_key("canonicalValues"));
-            assert!(!obj.contains_key("referenceTypes"));
+            assert_eq!(out["canonicalValues"], serde_json::json!([]));
+            assert_eq!(out["referenceTypes"], serde_json::json!([]));
         }
     }
 }

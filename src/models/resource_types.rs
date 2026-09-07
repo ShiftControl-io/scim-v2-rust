@@ -1,11 +1,11 @@
-use crate::utils::validation::{Validate, ValidationError};
+use crate::utils::validation::{Validate, ValidationError, require_schema_urn};
 use serde::{Deserialize, Serialize};
 
 use crate::models::scim_schema::Meta;
 use crate::schema_urns;
 use crate::utils::error::SCIMError;
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct ResourceType {
     /// RFC 7643: the schema URN(s) this resource conforms to.
     /// `#[serde(default)]` because RFC 7643 §§6-7 allow the discovery
@@ -23,7 +23,7 @@ pub struct ResourceType {
         rename = "schemaExtensions",
         default = "Vec::new",
         deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
-        skip_serializing_if = "Vec::is_empty"
+        skip_serializing_if = "crate::utils::serde::skip_multi_valued"
     )]
     pub schema_extensions: Vec<SchemaExtension>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -45,7 +45,7 @@ impl Default for ResourceType {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct SchemaExtension {
     pub schema: String,
     pub required: bool,
@@ -207,13 +207,15 @@ impl TryFrom<&str> for ResourceType {
     }
 }
 
-impl ResourceType {}
-
 impl Validate for ResourceType {
     /// RFC 7643 §6 marks `name`, `endpoint` and `schema` REQUIRED. `id` is
     /// explicitly not required for this resource, and `schemas` may be absent
     /// (§§6-7), so neither is checked.
     fn validate(&self) -> Result<(), ValidationError> {
+        // §§6-7 allow `schemas` to be absent; when present it must name this type.
+        if !self.schemas.is_empty() {
+            require_schema_urn(&self.schemas, schema_urns::RESOURCE_TYPE)?;
+        }
         if self.name.is_empty() {
             return Err(ValidationError::missing_required("name"));
         }
@@ -262,7 +264,7 @@ mod tests {
                 .validate()
                 .expect_err("blank required attribute must fail");
             assert_eq!(err.path(), expected);
-            assert_eq!(err.scim_type(), "invalidValue");
+            assert_eq!(err.scim_type_str(), "invalidValue");
         }
     }
 

@@ -32,10 +32,16 @@ jobs:
 
           commits="$(gh api "repos/$REPO/pulls/$PR/commits" --paginate --jq '.[].sha')"
           for sha in $commits; do
-            read -r verified reason < <(
-              gh api "repos/$REPO/commits/$sha" \
-                --jq '[.commit.verification.verified, .commit.verification.reason] | @tsv'
-            )
+            # Capture in an assignment, not a process substitution: `set -e`
+            # cannot see a failure inside `< <( ... )`, so a rate limit or a
+            # transient 5xx killed the loop mid-way and reported it as an
+            # unsigned commit with an empty summary.
+            if ! resp="$(gh api "repos/$REPO/commits/$sha" \
+                  --jq '[.commit.verification.verified, .commit.verification.reason] | @tsv')"; then
+              echo "::error::could not read signature verification for $sha (API failure, not a signature problem)"
+              exit 1
+            fi
+            read -r verified reason <<<"$resp"
             short="${sha:0:8}"
 
             if [ "$verified" = "true" ]; then

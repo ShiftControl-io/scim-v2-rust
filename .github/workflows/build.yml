@@ -78,6 +78,10 @@ jobs:
           - --no-default-features --features models
           - --no-default-features --features schemas
           - --no-default-features --features filter,models
+          # Strict postures: no lenient booleans, no case folding.
+          - --no-default-features --features filter,models,schemas
+          # Compact output posture.
+          - --features compact-multi-valued
           - --all-features
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -140,7 +144,10 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
         with:
-          command: check advisories licenses sources
+          # `bans` included: deny.toml declares `wildcards = "deny"` and
+          # `multiple-versions`, and cargo-deny only evaluates the checks named
+          # here, so omitting it left both settings inert.
+          command: check advisories bans licenses sources
 
   # Coverage, published as a Shields endpoint in a Gist — the same mechanism
   # the other ShiftControl Rust repos use. Only on push to main, because the
@@ -199,8 +206,14 @@ jobs:
           fi
 
           json="$(printf '{"schemaVersion": 1, "label": "test coverage", "message": "%.2f%%", "color": "%s"}' "$PCT" "$color")"
-          curl -sS -X PATCH \
+          # `--fail-with-body` so an expired token surfaces. Without it curl
+          # exits 0 on a 401, the job goes green, and the badge silently
+          # serves its last written value for ever.
+          if ! curl -sS --fail-with-body -X PATCH \
             -H "Authorization: token $CODECOV_GIST_TOKEN" \
             -H "Content-Type: application/json" \
             -d "{\"files\": {\"scim_v2_coverage.json\": {\"content\": $(echo "$json" | jq -R .)}}}" \
-            "https://api.github.com/gists/$GIST_ID" > /dev/null
+            "https://api.github.com/gists/$GIST_ID"; then
+            echo "::error::gist PATCH failed; the coverage badge is now stale"
+            exit 1
+          fi

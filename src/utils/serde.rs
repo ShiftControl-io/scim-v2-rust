@@ -1,5 +1,44 @@
 use serde::{Deserialize, Deserializer};
 
+/// Reduce a JSON value to its *assigned* attributes, recursively, dropping
+/// `null` and `[]`.
+///
+/// RFC 7643 §2.5: "Unassigned attributes, the null value, or an empty array
+/// ... SHALL be considered to be equivalent in state", and such attributes
+/// "MAY be omitted for compactness". This crate emits `[]` rather than
+/// omitting, because RFC 7644 §3.5.1 gives `[]` operational meaning on a
+/// request body, while the RFC's own sample payloads omit. Comparing raw bytes
+/// against those fixtures would therefore test a formatting choice rather than
+/// fidelity, so round-trip assertions reduce both sides first.
+///
+/// Only `null` and `[]` are removed. Every attribute carrying real data
+/// survives on both sides, which is what those assertions are for.
+#[cfg(test)]
+pub(crate) fn drop_unassigned(v: serde_json::Value) -> serde_json::Value {
+    use serde_json::Value;
+    match v {
+        Value::Object(map) => Value::Object(
+            map.into_iter()
+                .filter(|(_, val)| !val.is_null() && val.as_array() != Some(&vec![]))
+                .map(|(k, val)| (k, drop_unassigned(val)))
+                .collect(),
+        ),
+        Value::Array(items) => Value::Array(items.into_iter().map(drop_unassigned).collect()),
+        other => other,
+    }
+}
+
+/// `skip_serializing_if` predicate for multi-valued attributes.
+///
+/// Skips only when the `compact-multi-valued` feature is on. By default an
+/// empty `Vec` is emitted as `[]`, because RFC 7644 §3.5.1 gives `[]`
+/// clear-all meaning on a request body that omission does not have
+/// (omission means "not asserted" and the server MAY keep or default the
+/// values). RFC 7643 §2.5 only *permits* omitting an unassigned attribute.
+pub(crate) fn skip_multi_valued<T>(v: &[T]) -> bool {
+    cfg!(feature = "compact-multi-valued") && v.is_empty()
+}
+
 /// Deserializes a multi-valued attribute, collapsing an explicit `null` to an
 /// empty `Vec`.
 ///
@@ -43,6 +82,12 @@ where
         }
 
         fn visit_str<E: de::Error>(self, v: &str) -> Result<Option<bool>, E> {
+            // The `lenient-booleans` feature is the switch. RFC 7643 §2.3.2
+            // defines a boolean as the JSON literal; accepting the string form
+            // is an accommodation of providers that send `"True"`.
+            if !cfg!(feature = "lenient-booleans") {
+                return Err(E::invalid_type(de::Unexpected::Str(v), &"a JSON boolean"));
+            }
             if v.eq_ignore_ascii_case("true") {
                 Ok(Some(true))
             } else if v.eq_ignore_ascii_case("false") {
@@ -91,6 +136,7 @@ mod tests {
         assert_eq!(parsed.primary, Some(false));
     }
 
+    #[cfg(feature = "lenient-booleans")]
     #[test]
     fn accepts_a_stringified_bool_case_insensitively() {
         let parsed: WithDefault = serde_json::from_str(r#"{"primary": "True"}"#).unwrap();
@@ -126,5 +172,22 @@ mod tests {
             "deserialize_with alone does not default an omitted key to None; \
              #[serde(default)] is required at the call site"
         );
+    }
+
+    /// With `lenient-booleans` off, RFC 7643 §2.3.2 is applied literally.
+    #[cfg(not(feature = "lenient-booleans"))]
+    #[test]
+    fn rejects_a_stringified_bool_when_lenience_is_off() {
+        #[derive(serde::Deserialize)]
+        struct S {
+            #[serde(default, deserialize_with = "deserialize_optional_lenient_bool")]
+            v: Option<bool>,
+        }
+        assert!(serde_json::from_str::<S>(r#"{"v": "true"}"#).is_err());
+        assert_eq!(
+            serde_json::from_str::<S>(r#"{"v": true}"#).unwrap().v,
+            Some(true)
+        );
+        assert_eq!(serde_json::from_str::<S>(r#"{"v": null}"#).unwrap().v, None);
     }
 }

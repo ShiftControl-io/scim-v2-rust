@@ -27,13 +27,17 @@
 //!
 //! ## Feature flags
 //!
-//! All three are enabled by default. Turn them off to shrink the build.
+//! Three features select what is compiled; three select how strictly the wire
+//! is read.
 //!
-//! | Feature | Provides | Cost when off |
-//! |---------|----------|---------------|
-//! | `filter` | `filter` and its parser | eight fewer crates: `lalrpop-util`, `fluent-uri`, `regex-automata`, `regex-syntax`, `aho-corasick`, `borrow-or-share`, `ref-cast`, `ref-cast-impl` |
-//! | `models` | every resource and protocol message | |
-//! | `schemas` | the embedded RFC 7643 schema definitions and the `get_schemas` lookup | ~48 KB of `include_str!` data |
+//! | Feature | Default | Provides / changes |
+//! |---------|---------|--------------------|
+//! | `filter` | on | `filter` and its parser. Off: eight fewer crates (`lalrpop-util`, `fluent-uri`, `regex-automata`, `regex-syntax`, `aho-corasick`, `borrow-or-share`, `ref-cast`, `ref-cast-impl`) |
+//! | `models` | on | every resource and protocol message |
+//! | `schemas` | on | the embedded RFC 7643 schema definitions and the `get_schemas` lookup; ~48 KB of `include_str!` |
+//! | `lenient-booleans` | on | accept `"true"`/`"True"` strings where RFC 7643 §2.3.2 says a JSON boolean. Entra sends this. Off: a deserialization error |
+//! | `case-insensitive` | on | `utils::case`, which canonicalises attribute-name case before deserializing (RFC 7643 §2.1). Off: not compiled |
+//! | `compact-multi-valued` | **off** | omit an empty multi-valued attribute on serialize instead of emitting `[]`. Off by default because RFC 7644 §3.5.1 gives `[]` clear-all meaning that omission lacks |
 //!
 //! Dropping `filter` takes the dependency tree from 22 crates to 14, and the
 //! total compile work from 35s to 14s measured serially (`-j1`, release). On a
@@ -63,11 +67,38 @@
 //! # }
 //! ```
 //!
-//! ## Checking RFC-required attributes
+//! ## Leniency on input, canonical form on output
 //!
-//! Nearly every SCIM attribute is optional, so the models make almost
-//! everything `Option`. [`Validate`] carries the handful of checks `serde`
-//! cannot express, and names the offending attribute by its **wire** path.
+//! Real providers do not all send conformant SCIM, and a client that cannot
+//! read a provider's payload is useless. So every wire parser here is
+//! lenient, and every serializer emits the RFC's canonical form. A round-trip
+//! therefore *canonicalizes* rather than preserving bytes.
+//!
+//! | Accepted on input | Emitted | Why |
+//! |---|---|---|
+//! | `"true"` / `"True"` for a boolean (`lenient-booleans`) | `true` | Entra; RFC 7643 §2.3.2 defines the JSON literal |
+//! | `null`, `[]` or absence for a multi-valued attribute | `[]` | RFC 7643 §2.5 equivalence; RFC 7644 §3.5.1 gives `[]` clear-all meaning |
+//! | `Add` / `ADD` for a PATCH `op` | `add` | RFC 7644 §3.5.2 spells it lowercase; Entra does not |
+//! | `Ascending`, `GROUP` for `sortOrder` / `members.type` | `ascending`, `Group` | schema `caseExact: false` |
+//! | a `members.type` or `scimType` outside the RFC's list | preserved verbatim | RFC 7643 §7: canonical values are *suggested* |
+//! | attribute names in any case, via `utils::case` (`case-insensitive` feature) | canonical camelCase | RFC 7643 §2.1: "Attribute names are case insensitive" |
+//!
+//! ## Validation — deserializing does not validate
+//!
+//! None of the leniency above is where conformance is enforced, and neither is
+//! deserialization: `serde_json::from_str::<User>(..)` will return a `User`
+//! with an empty `userName`, two `primary: true` emails, or an `id` on a create
+//! request. Store that and you will later emit a non-conformant response, or
+//! echo a `password` back.
+//!
+//! [`Validate`] holds the RFC's REQUIRED rules and names the offending
+//! attribute by its **wire** path. It is direction-aware:
+//! [`validate_as`](Validate::validate_as) takes a [`Context`], because RFC 7643
+//! §3.1 forbids `id` on a create and requires it on a response. [`Valid<T>`]
+//! is a value the type system knows has passed, and [`Strict<T, M>`] runs the
+//! check inside deserialization so a bad body never becomes a `T` at all. A
+//! server should take `Strict<User, CreateRequest>` in its handlers; a client
+//! can usually stop at `validate()`.
 //!
 //! ```rust
 //! # #[cfg(feature = "models")] {
@@ -81,7 +112,7 @@
 //!
 //! let err = user.validate().unwrap_err();
 //! assert_eq!(err.path(), "userName");
-//! assert_eq!(err.scim_type(), "invalidValue");
+//! assert_eq!(err.scim_type_str(), "invalidValue");
 //! # }
 //! ```
 //!
@@ -113,11 +144,11 @@ struct ReadmeDoctests;
 
 // Include the schema files into the binary.
 #[cfg(feature = "schemas")]
-const USER_SCHEMA: &str = include_str!("schemas/user.json");
+pub(crate) const USER_SCHEMA: &str = include_str!("schemas/user.json");
 #[cfg(feature = "schemas")]
-const GROUP_SCHEMA: &str = include_str!("schemas/group.json");
+pub(crate) const GROUP_SCHEMA: &str = include_str!("schemas/group.json");
 #[cfg(feature = "schemas")]
-const ENTERPRISE_USER_SCHEMA: &str = include_str!("schemas/enterprise_user.json");
+pub(crate) const ENTERPRISE_USER_SCHEMA: &str = include_str!("schemas/enterprise_user.json");
 
 /// The RFC 7643 resource models and RFC 7644 protocol messages.
 #[cfg(feature = "models")]
@@ -140,10 +171,15 @@ pub(crate) mod filter_parser;
 pub mod filter;
 pub mod schema_urns;
 
-pub use utils::validation::{Validate, ValidationError, ValidationErrorKind};
+pub use utils::validation::{
+    Context, ContextMarker, CreateRequest, ReplaceRequest, Response, Strict, Valid, Validate,
+    ValidationError, ValidationErrorKind, at_most_one_primary, require_schema_urn,
+};
 
 /// Declaring the utils module which contains the error submodule
 pub mod utils {
+    #[cfg(feature = "case-insensitive")]
+    pub mod case;
     pub mod error;
     #[cfg(feature = "models")]
     pub(crate) mod serde;

@@ -1,11 +1,13 @@
-use crate::utils::validation::{Validate, ValidationError};
+use crate::utils::validation::{
+    Validate, ValidationError, at_most_one_primary, require_schema_urn,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::models::scim_schema::Meta;
 use crate::schema_urns;
 use crate::utils::error::SCIMError;
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct ServiceProviderConfig {
     /// RFC 7643: the schema URN(s) this resource conforms to.
     /// `#[serde(default)]` because RFC 7643 §§6-7 allow the discovery
@@ -21,7 +23,12 @@ pub struct ServiceProviderConfig {
     pub change_password: Supported,
     pub sort: Supported,
     pub etag: Supported,
-    #[serde(rename = "authenticationSchemes")]
+    #[serde(
+        rename = "authenticationSchemes",
+        default = "Vec::new",
+        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
+        skip_serializing_if = "crate::utils::serde::skip_multi_valued"
+    )]
     pub authentication_schemes: Vec<AuthenticationScheme>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
@@ -44,33 +51,32 @@ impl Default for ServiceProviderConfig {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct AuthenticationScheme {
     pub name: String,
-    pub r#type: String,
+    /// RFC 7643 §5 marks `type` REQUIRED ("oauth", "oauth2",
+    /// "oauthbearertoken", "httpbasic", "httpdigest"). It is `Option` here
+    /// only because the §8.7 schema representation — which §8 itself calls
+    /// non-normative — omits it, and real servers follow that text; a
+    /// discovery document should still parse. [`Validate`] enforces the §5
+    /// requirement.
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub r#type: Option<String>,
     pub description: String,
-    #[serde(rename = "specUri")]
-    pub spec_uri: String,
+    /// OPTIONAL per RFC 7643 §5.
+    #[serde(rename = "specUri", skip_serializing_if = "Option::is_none")]
+    pub spec_uri: Option<String>,
     #[serde(rename = "documentationUri", skip_serializing_if = "Option::is_none")]
     pub documentation_uri: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::utils::serde::deserialize_optional_lenient_bool"
+    )]
     pub primary: Option<bool>,
 }
 
-impl Default for AuthenticationScheme {
-    fn default() -> Self {
-        AuthenticationScheme {
-            name: "".to_string(),
-            r#type: "".to_string(),
-            description: "".to_string(),
-            spec_uri: "".to_string(),
-            documentation_uri: Some("".to_string()),
-            primary: None,
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(PartialEq, Eq, Serialize, Deserialize, Debug, Clone)]
 pub struct Filter {
     pub supported: bool,
     #[serde(rename = "maxResults")]
@@ -88,7 +94,7 @@ impl Default for Filter {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(PartialEq, Eq, Serialize, Deserialize, Debug, Clone)]
 pub struct Bulk {
     pub supported: bool,
     #[serde(rename = "maxOperations")]
@@ -114,7 +120,7 @@ impl Default for Bulk {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(PartialEq, Eq, Serialize, Deserialize, Debug, Default, Clone)]
 pub struct Supported {
     pub supported: bool,
 }
@@ -178,13 +184,30 @@ impl TryFrom<&str> for ServiceProviderConfig {
     }
 }
 
-impl ServiceProviderConfig {}
+impl Validate for AuthenticationScheme {
+    /// RFC 7643 §5: `type`, `name` and `description` are REQUIRED; `specUri`
+    /// and `documentationUri` are OPTIONAL.
+    fn validate(&self) -> Result<(), ValidationError> {
+        if self.r#type.as_deref().is_none_or(str::is_empty) {
+            return Err(ValidationError::missing_required("type"));
+        }
+        if self.name.is_empty() {
+            return Err(ValidationError::missing_required("name"));
+        }
+        if self.description.is_empty() {
+            return Err(ValidationError::missing_required("description"));
+        }
+        Ok(())
+    }
+}
 
 impl Validate for ServiceProviderConfig {
     /// RFC 7643 §5 marks `authenticationSchemes` REQUIRED, so an empty list is
-    /// a conformance failure. `patch`, `bulk`, `filter`, `changePassword`,
-    /// `sort` and `etag` are REQUIRED too, but they are non-`Option` fields, so
-    /// `serde` already refuses a payload that omits them.
+    /// a conformance failure, and each scheme is checked in turn with its
+    /// index in the reported path. `patch`, `bulk`, `filter`,
+    /// `changePassword`, `sort` and `etag` are REQUIRED too, but they are
+    /// non-`Option` fields, so `serde` already refuses a payload that omits
+    /// them.
     ///
     /// Before 1.0 this returned `MissingRequiredField` whenever any of those
     /// six reported `supported: false`, which rejected valid configurations:
@@ -192,9 +215,27 @@ impl Validate for ServiceProviderConfig {
     /// server that does not implement bulk correctly advertises
     /// `"bulk": {"supported": false}`.
     fn validate(&self) -> Result<(), ValidationError> {
+        // §5: "id is not required"; `schemas` may be absent per §§6-7 practice,
+        // but when present it must name this resource.
+        if !self.schemas.is_empty() {
+            require_schema_urn(&self.schemas, schema_urns::SERVICE_PROVIDER_CONFIG)?;
+        }
         if self.authentication_schemes.is_empty() {
             return Err(ValidationError::missing_required("authenticationSchemes"));
         }
+        for (i, scheme) in self.authentication_schemes.iter().enumerate() {
+            if let Err(e) = scheme.validate() {
+                return Err(ValidationError::missing_required(format!(
+                    "authenticationSchemes[{i}].{}",
+                    e.path()
+                )));
+            }
+        }
+        at_most_one_primary(
+            &self.authentication_schemes,
+            |a| a.primary,
+            "authenticationSchemes",
+        )?;
         Ok(())
     }
 }
@@ -225,6 +266,108 @@ mod tests {
             "primary": true
         }]
     }"#;
+
+    /// The ninth `primary` carrier. `CHANGELOG` claimed all nine shared the
+    /// lenient deserializer while this one did not, so a provider stringifying
+    /// booleans made the *entire* discovery document unparseable — the one call
+    /// a client makes before it knows any of the provider's quirks.
+    #[cfg(feature = "lenient-booleans")]
+    #[test]
+    fn authentication_scheme_primary_accepts_a_stringified_boolean() {
+        for raw in [
+            r#"{"name":"OAuth Bearer Token","description":"d","primary":true}"#,
+            r#"{"name":"OAuth Bearer Token","description":"d","primary":"true"}"#,
+            r#"{"name":"OAuth Bearer Token","description":"d","primary":"True"}"#,
+        ] {
+            let scheme: AuthenticationScheme =
+                serde_json::from_str(raw).unwrap_or_else(|e| panic!("{raw}: {e}"));
+            assert_eq!(scheme.primary, Some(true), "{raw}");
+        }
+        let absent: AuthenticationScheme =
+            serde_json::from_str(r#"{"name":"n","description":"d"}"#).unwrap();
+        assert_eq!(absent.primary, None);
+    }
+
+    /// A scheme without `type` parses — the §8.7 representation omits it and
+    /// real servers follow that text — but does not validate, because §5 marks
+    /// it REQUIRED. Before 1.0 the field was a mandatory `String` and such a
+    /// document could not be read at all.
+    #[test]
+    fn a_scheme_without_type_parses_but_does_not_validate() {
+        let scheme: AuthenticationScheme =
+            serde_json::from_str(r#"{"name":"HTTP Basic","description":"RFC 2617"}"#)
+                .expect("name + description is the RFC's required set");
+        assert_eq!(scheme.r#type, None);
+        assert_eq!(scheme.spec_uri, None);
+        assert_eq!(
+            scheme.validate().expect_err("§5: type is REQUIRED").path(),
+            "type"
+        );
+
+        let back = serde_json::to_value(&scheme).unwrap();
+        let obj = back.as_object().unwrap();
+        assert!(!obj.contains_key("type"), "unset type must be omitted");
+        assert!(
+            !obj.contains_key("specUri"),
+            "unset specUri must be omitted"
+        );
+    }
+
+    /// L-10: the two-diverging-defaults fix asserted each constructor on a
+    /// different field subset, so re-hand-building the struct while a
+    /// component default drifted would have passed. Assert the delegation
+    /// invariant directly instead.
+    #[test]
+    fn service_provider_config_default_delegates_to_component_defaults() {
+        let config = ServiceProviderConfig::default();
+        assert_eq!(config.patch, Supported::default());
+        assert_eq!(config.change_password, Supported::default());
+        assert_eq!(config.sort, Supported::default());
+        assert_eq!(config.etag, Supported::default());
+        assert_eq!(config.bulk, Bulk::default());
+        assert_eq!(config.filter, Filter::default());
+    }
+
+    /// RFC 7643 §5 marks `type`, `name` and `description` REQUIRED on every
+    /// scheme. §8's schema representation omits `type`, but §8 describes
+    /// itself as non-normative, so the prose governs. The lenient type lets
+    /// the document parse; `validate` reports the gap with its index.
+    #[test]
+    fn validate_requires_type_name_and_description_on_each_scheme() {
+        let mut config = ServiceProviderConfig::try_from(RFC_S5_EXAMPLE).unwrap();
+        assert!(config.validate().is_ok());
+
+        config.authentication_schemes.push(AuthenticationScheme {
+            name: "HTTP Basic".to_string(),
+            description: "RFC 2617".to_string(),
+            r#type: None,
+            ..Default::default()
+        });
+        let err = config.validate().expect_err("missing type");
+        assert_eq!(err.path(), "authenticationSchemes[1].type");
+
+        config.authentication_schemes[1].r#type = Some("httpbasic".to_string());
+        config.authentication_schemes[1].description.clear();
+        assert_eq!(
+            config.validate().expect_err("missing description").path(),
+            "authenticationSchemes[1].description"
+        );
+    }
+
+    /// §2.4 applies to `authenticationSchemes` too: it is multi-valued and
+    /// carries `primary`.
+    #[test]
+    fn validate_rejects_two_primary_schemes() {
+        let mut config = ServiceProviderConfig::try_from(RFC_S5_EXAMPLE).unwrap();
+        let mut second = config.authentication_schemes[0].clone();
+        second.name = "Second".to_string();
+        second.primary = Some(true);
+        config.authentication_schemes.push(second);
+        assert_eq!(
+            config.validate().expect_err("two primaries").path(),
+            "authenticationSchemes"
+        );
+    }
 
     /// The `schemas` attribute is modelled from 1.0 on. RFC 7643 §5's own
     /// example carries it, and before 1.0 there was no field to hold it, so a
@@ -265,7 +408,7 @@ mod tests {
         config.authentication_schemes.clear();
         let err = config.validate().expect_err("empty list must fail");
         assert_eq!(err.path(), "authenticationSchemes");
-        assert_eq!(err.scim_type(), "invalidValue");
+        assert_eq!(err.scim_type_str(), "invalidValue");
     }
 
     /// Regression guard for the pre-1.0 bug. §5 makes the `supported` *field*
@@ -383,14 +526,14 @@ mod tests {
             "Authentication scheme using the OAuth Bearer Token Standard"
         );
         assert_eq!(
-            oauth_scheme.spec_uri,
-            "http://www.rfc-editor.org/info/rfc6750"
+            oauth_scheme.spec_uri.as_deref(),
+            Some("http://www.rfc-editor.org/info/rfc6750")
         );
         assert_eq!(
             oauth_scheme.documentation_uri,
             Some("http://example.com/help/oauth.html".to_string())
         );
-        assert_eq!(oauth_scheme.r#type, "oauthbearertoken");
+        assert_eq!(oauth_scheme.r#type.as_deref(), Some("oauthbearertoken"));
         assert_eq!(oauth_scheme.primary, Some(true));
         let http_scheme = &config.authentication_schemes[1];
         assert_eq!(http_scheme.name, "HTTP Basic");
@@ -399,13 +542,13 @@ mod tests {
             "Authentication scheme using the HTTP Basic Standard"
         );
         assert_eq!(
-            http_scheme.spec_uri,
-            "http://www.rfc-editor.org/info/rfc2617"
+            http_scheme.spec_uri.as_deref(),
+            Some("http://www.rfc-editor.org/info/rfc2617")
         );
         assert_eq!(
             http_scheme.documentation_uri,
             Some("http://example.com/help/httpBasic.html".to_string())
         );
-        assert_eq!(http_scheme.r#type, "httpbasic");
+        assert_eq!(http_scheme.r#type.as_deref(), Some("httpbasic"));
     }
 }

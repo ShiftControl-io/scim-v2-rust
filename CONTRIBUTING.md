@@ -82,7 +82,7 @@ recollection of the spec: `EnterpriseUser::validate` demanded six attributes
 the schema marks `required: false`, and `ServiceProviderConfig::validate`
 rejected `"bulk": {"supported": false}`, which §5 explicitly permits.
 
-Note that RFC 7643's `canonicalValues` are *suggestions* (§2.2), and its
+Note that RFC 7643's `canonicalValues` are *suggestions* (§7), and its
 per-attribute schema listings are not always complete — §4.1.2 omits the
 `primary` sub-attribute that §2.4 defines for every multi-valued attribute.
 

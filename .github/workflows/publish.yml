@@ -28,15 +28,38 @@ jobs:
     environment: crates-io
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          # The guard below resolves `v$VERSION`, which needs the tag
+          # namespace. Checkout's defaults are `fetch-depth: 1` and
+          # `fetch-tags: false`, so without this the guard reported "tag does
+          # not exist" for a tag that did, and following that advice is how a
+          # tag gets force-moved onto the wrong commit.
+          fetch-depth: 0
       - uses: hecrj/setup-rust-action@110f36749599534ca96628b82f52ae67e5d95a3c # v2.0.1
         with:
           rust-version: stable
           profile: minimal
 
       - name: Check the inputs agree with the manifest and the tag
+        env:
+          # Through `env:`, never `${{ }}` inside the script. `${{ }}` is
+          # textual substitution performed before bash parses the line, so a
+          # version containing a quote would close the string and run whatever
+          # followed — in the one job that holds CRATES_TOKEN, and after the
+          # environment approval has already been granted.
+          VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          input="${{ inputs.version }}"
+
+          case "$VERSION" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::error::version '$VERSION' is not MAJOR.MINOR.PATCH"; exit 1 ;;
+          esac
+          case "$VERSION" in
+            *[!0-9.+A-Za-z-]*) echo "::error::version '$VERSION' has unexpected characters"; exit 1 ;;
+          esac
+
+          input="$VERSION"
           manifest="$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)"
 
           if [ "$input" != "$manifest" ]; then
@@ -44,10 +67,15 @@ jobs:
             exit 1
           fi
 
-          # A published version should be reachable in git history. Require the
-          # tag to exist so the release is reproducible from the repository.
+          # Resolve against the remote, so "tag was never pushed" and "tag was
+          # not fetched into this checkout" stop being reported as the same
+          # thing.
+          if ! git ls-remote --exit-code --tags origin "refs/tags/v$input" >/dev/null 2>&1; then
+            echo "::error::tag v$input does not exist on origin. Tag the commit you intend to publish and push the tag first."
+            exit 1
+          fi
           if ! git rev-parse "v$input" >/dev/null 2>&1; then
-            echo "::error::tag v$input does not exist. Tag the commit you intend to publish first."
+            echo "::error::tag v$input exists on origin but is not in this checkout. This is a workflow bug, not a tagging mistake."
             exit 1
           fi
 
@@ -60,22 +88,44 @@ jobs:
 
           echo "Publishing $input from $(git rev-parse --short HEAD)"
 
-      # Everything CI would have run, again, because the published artifact is
-      # the one thing that cannot be corrected afterwards.
+      # Re-run what CI runs, because the published artifact is the one thing
+      # that cannot be corrected afterwards. The advisory audit matters most
+      # here: requirements are caret at major.minor and Cargo.lock is not in
+      # the repo, so a RUSTSEC entry landing since the last run on main would
+      # otherwise be invisible at publish time.
       - name: Verify
+        env:
+          RUSTFLAGS: -D warnings
+          RUSTDOCFLAGS: -D warnings
         run: |
+          set -euo pipefail
           cargo fmt --check
           cargo clippy --all-targets --all-features -- -D warnings
           cargo test --all-features
+          cargo doc --all-features --no-deps
+          for f in "--no-default-features" \
+                   "--no-default-features --features filter" \
+                   "--no-default-features --features models" \
+                   "--no-default-features --features schemas"; do
+            # shellcheck disable=SC2086
+            cargo test $f
+          done
+
+      - name: Audit dependencies
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check advisories bans licenses sources
 
       - name: Package
         run: cargo package
 
       - name: Publish (dry run)
         if: ${{ inputs.dry_run }}
+        env:
+          VERSION: ${{ inputs.version }}
         run: |
           cargo publish --dry-run
-          echo "::notice::Dry run only. Re-run with dry_run unchecked to publish ${{ inputs.version }}."
+          echo "::notice::Dry run only. Re-run with dry_run unchecked to publish $VERSION."
 
       - name: Publish
         if: ${{ !inputs.dry_run }}

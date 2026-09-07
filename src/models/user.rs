@@ -1,10 +1,12 @@
 use crate::models::enterprise_user::EnterpriseUser;
 use crate::models::scim_schema::Meta;
 use crate::utils::serde::deserialize_optional_lenient_bool;
-use crate::utils::validation::{Validate, ValidationError};
+use crate::utils::validation::{
+    Context, Validate, ValidationError, at_most_one_primary, require_schema_urn,
+};
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct User<T = String> {
     // urn:ietf:params:scim:schemas:core:2.0:User
@@ -32,62 +34,69 @@ pub struct User<T = String> {
     pub locale: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timezone: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Lenient for the same reason every `primary` is: providers stringify
+    /// booleans, and a User that cannot be parsed because `active` arrived as
+    /// `"True"` is a worse outcome than accepting the spelling.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_lenient_bool"
+    )]
     pub active: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub password: Option<String>,
     #[serde(
         default = "Vec::new",
         deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
-        skip_serializing_if = "Vec::is_empty"
+        skip_serializing_if = "crate::utils::serde::skip_multi_valued"
     )]
     pub emails: Vec<Email>,
     #[serde(
         default = "Vec::new",
         deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
-        skip_serializing_if = "Vec::is_empty"
+        skip_serializing_if = "crate::utils::serde::skip_multi_valued"
     )]
     pub addresses: Vec<Address>,
     #[serde(
         default = "Vec::new",
         deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
-        skip_serializing_if = "Vec::is_empty"
+        skip_serializing_if = "crate::utils::serde::skip_multi_valued"
     )]
     pub phone_numbers: Vec<PhoneNumber>,
     #[serde(
         default = "Vec::new",
         deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
-        skip_serializing_if = "Vec::is_empty"
+        skip_serializing_if = "crate::utils::serde::skip_multi_valued"
     )]
     pub ims: Vec<Im>,
     #[serde(
         default = "Vec::new",
         deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
-        skip_serializing_if = "Vec::is_empty"
+        skip_serializing_if = "crate::utils::serde::skip_multi_valued"
     )]
     pub photos: Vec<Photo>,
     #[serde(
         default = "Vec::new",
         deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
-        skip_serializing_if = "Vec::is_empty"
+        skip_serializing_if = "crate::utils::serde::skip_multi_valued"
     )]
     pub groups: Vec<Group>,
     #[serde(
         default = "Vec::new",
         deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
-        skip_serializing_if = "Vec::is_empty"
+        skip_serializing_if = "crate::utils::serde::skip_multi_valued"
     )]
     pub entitlements: Vec<Entitlement>,
     #[serde(
         default = "Vec::new",
         deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
-        skip_serializing_if = "Vec::is_empty"
+        skip_serializing_if = "crate::utils::serde::skip_multi_valued"
     )]
     pub roles: Vec<Role>,
     #[serde(
         default = "Vec::new",
         deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
-        skip_serializing_if = "Vec::is_empty"
+        skip_serializing_if = "crate::utils::serde::skip_multi_valued"
     )]
     pub x509_certificates: Vec<X509Certificate>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -142,7 +151,7 @@ impl<T> Default for User<T> {
 /// clear. Callers that need to clear a sub-attribute on `PUT` should use a
 /// `PATCH` operation or hand-build a `serde_json::Value` carrying an explicit
 /// `null`.
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Name {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -159,7 +168,7 @@ pub struct Name {
     pub honorific_suffix: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 pub struct Email {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
@@ -175,7 +184,7 @@ pub struct Email {
     pub primary: Option<bool>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Address {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -211,7 +220,7 @@ pub struct Address {
     pub primary: Option<bool>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 pub struct PhoneNumber {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
@@ -227,7 +236,7 @@ pub struct PhoneNumber {
     pub primary: Option<bool>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 pub struct Im {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
@@ -243,7 +252,7 @@ pub struct Im {
     pub primary: Option<bool>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 pub struct Photo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
@@ -259,7 +268,7 @@ pub struct Photo {
     pub primary: Option<bool>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 pub struct Group {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
@@ -271,7 +280,7 @@ pub struct Group {
     pub r#type: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 pub struct Entitlement {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
@@ -287,7 +296,7 @@ pub struct Entitlement {
     pub primary: Option<bool>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 pub struct Role {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
@@ -303,7 +312,7 @@ pub struct Role {
     pub primary: Option<bool>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 pub struct X509Certificate {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
@@ -324,11 +333,52 @@ impl<T> Validate for User<T> {
     /// every resource. Every other User attribute is optional, so those two are
     /// the whole check.
     fn validate(&self) -> Result<(), ValidationError> {
-        if self.schemas.is_empty() {
-            return Err(ValidationError::missing_required("schemas"));
-        }
+        require_schema_urn(&self.schemas, crate::schema_urns::USER)?;
         if self.user_name.is_empty() {
             return Err(ValidationError::missing_required("userName"));
+        }
+        // RFC 7643 §2.4: at most one `primary: true` per multi-valued attribute.
+        at_most_one_primary(&self.emails, |e| e.primary, "emails")?;
+        at_most_one_primary(&self.phone_numbers, |p| p.primary, "phoneNumbers")?;
+        at_most_one_primary(&self.ims, |i| i.primary, "ims")?;
+        at_most_one_primary(&self.photos, |p| p.primary, "photos")?;
+        at_most_one_primary(&self.addresses, |a| a.primary, "addresses")?;
+        at_most_one_primary(&self.entitlements, |e| e.primary, "entitlements")?;
+        at_most_one_primary(&self.roles, |r| r.primary, "roles")?;
+        at_most_one_primary(&self.x509_certificates, |c| c.primary, "x509Certificates")?;
+        Ok(())
+    }
+
+    /// RFC 7643 §3.1: a server's representation "MUST include a non-empty
+    /// `id`", and `id` "MUST NOT be specified by the client" on create. §4.1:
+    /// `password` is `returned: never`, so a response carrying one is
+    /// non-conformant however it got there. A replace request tolerates `id`
+    /// because RFC 7644 §3.5.1 has the server *ignore* readOnly attributes,
+    /// and its own PUT example carries one.
+    fn validate_context(&self, ctx: Context) -> Result<(), ValidationError> {
+        match ctx {
+            Context::CreateRequest => {
+                if self.id.is_some() {
+                    return Err(ValidationError::invalid_value(
+                        "id",
+                        "MUST NOT be specified by the client on create (RFC 7643 §3.1)",
+                    ));
+                }
+            }
+            Context::Response => {
+                // `id` is generic over `T`, so only presence can be checked here;
+                // emptiness of a `String` id is a caller concern.
+                if self.id.is_none() {
+                    return Err(ValidationError::missing_required("id"));
+                }
+                if self.password.is_some() {
+                    return Err(ValidationError::invalid_value(
+                        "password",
+                        "is returned: never and MUST NOT appear in a response (RFC 7643 §4.1)",
+                    ));
+                }
+            }
+            _ => {}
         }
         Ok(())
     }
@@ -769,12 +819,62 @@ mod tests {
     }
 
     // Test data is from https://scimvalidator.microsoft.com/
+    //
+    // Asserts fidelity, not just parseability — it previously called only
+    // `.expect(...)`, so the fixture proved nothing about whether any modelled
+    // attribute survived, including the `addresses[].primary` this release
+    // added.
+    //
+    // Deliberately not `assert_user_round_trips`. This fixture carries
+    // `roles[0].primary` as the JSON *string* `"True"`, and the lenient
+    // deserializer normalises it to the boolean `true`, so re-serialising
+    // cannot reproduce the original value — by design, and the reason that
+    // deserializer exists. That normalisation is itself the most useful thing
+    // this fixture pins: it is the only real provider payload in the suite
+    // that exercises a stringified boolean end to end.
+    #[cfg(feature = "lenient-booleans")]
     #[test]
     fn deserialize_entra_user() {
-        let user: Result<User, serde_json::Error> = serde_json::from_str(include_str!(
-            "../test_data/provider_samples/entra_user_creation_test.json"
-        ));
-        user.expect("user should deserialize");
+        let raw = include_str!("../test_data/provider_samples/entra_user_creation_test.json");
+        assert!(
+            raw.contains(r#""primary": "True""#),
+            "fixture must still carry the stringified boolean this test is about"
+        );
+
+        let user: User = serde_json::from_str(raw).expect("Entra payload must deserialize");
+        assert_eq!(user.user_name, "isaias@bode.ca");
+        assert_eq!(user.active, Some(true));
+
+        // The stringified boolean, normalised.
+        assert_eq!(user.roles.len(), 1);
+        assert_eq!(user.roles[0].primary, Some(true));
+
+        // Every modelled multi-valued attribute the fixture populates.
+        assert_eq!(user.addresses.len(), 1);
+        assert_eq!(user.addresses[0].r#type.as_deref(), Some("work"));
+        assert_eq!(user.addresses[0].country.as_deref(), Some("Gibraltar"));
+        assert_eq!(user.emails.len(), 1);
+        assert_eq!(user.phone_numbers.len(), 3);
+
+        // The enterprise extension, from its URN key.
+        let ext = user
+            .enterprise_user
+            .as_ref()
+            .expect("the extension must deserialize from its URN key");
+        assert_eq!(ext.employee_number.as_deref(), Some("LLQMUPKSPYGA"));
+        assert!(ext.manager.is_some());
+
+        // Everything except that one normalisation does survive, which is the
+        // round-trip claim narrowed to what is actually true here.
+        let reserialized: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&user).expect("serialize")).unwrap();
+        let mut original: serde_json::Value = serde_json::from_str(raw).unwrap();
+        original["roles"][0]["primary"] = serde_json::json!(true);
+        assert_eq!(
+            crate::utils::serde::drop_unassigned(reserialized),
+            crate::utils::serde::drop_unassigned(original),
+            "apart from the stringified-boolean normalisation, no assigned attribute may be lost"
+        );
     }
 
     /// End-to-end regression for the omitted `Role.primary` key, using a
@@ -795,6 +895,204 @@ mod tests {
 
         assert_eq!(list.total_results, 2);
         assert_eq!(list.resources.len(), 2);
+    }
+
+    /// RFC 7643 §2.4: "The primary attribute value true MUST appear no more
+    /// than once." Checked per multi-valued attribute, reported by wire name.
+    #[test]
+    fn validate_rejects_a_second_primary() {
+        let two = User::<String> {
+            schemas: vec![crate::schema_urns::USER.to_string()],
+            user_name: "bjensen".to_string(),
+            emails: vec![
+                Email {
+                    value: Some("a@example.com".to_string()),
+                    primary: Some(true),
+                    ..Default::default()
+                },
+                Email {
+                    value: Some("b@example.com".to_string()),
+                    primary: Some(true),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        let err = two.validate().expect_err("two primaries");
+        assert_eq!(err.path(), "emails");
+
+        let one = User::<String> {
+            emails: vec![
+                Email {
+                    value: Some("a@example.com".to_string()),
+                    primary: Some(true),
+                    ..Default::default()
+                },
+                Email {
+                    value: Some("b@example.com".to_string()),
+                    primary: Some(false),
+                    ..Default::default()
+                },
+            ],
+            ..two
+        };
+        assert!(
+            one.validate().is_ok(),
+            "one primary plus an explicit false is fine"
+        );
+    }
+
+    /// RFC 7643 §3: `schemas` "MUST only contain values defined as schema and
+    /// schemaExtensions for the resource's defined resourceType". A User must
+    /// carry the User URN; the enterprise extension URN alongside it is fine.
+    #[test]
+    fn validate_requires_the_user_urn_in_schemas() {
+        let wrong = User::<String> {
+            schemas: vec![crate::schema_urns::GROUP.to_string()],
+            user_name: "bjensen".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(
+            wrong.validate().expect_err("Group URN on a User").path(),
+            "schemas"
+        );
+
+        let with_extension = User::<String> {
+            schemas: vec![
+                crate::schema_urns::USER.to_string(),
+                crate::schema_urns::ENTERPRISE_USER.to_string(),
+            ],
+            user_name: "bjensen".to_string(),
+            ..Default::default()
+        };
+        assert!(with_extension.validate().is_ok());
+    }
+
+    /// `active` tolerates the stringified booleans some providers send, the
+    /// same way every `primary` does.
+    #[cfg(feature = "lenient-booleans")]
+    #[test]
+    fn active_accepts_a_stringified_boolean() {
+        let urn = crate::schema_urns::USER;
+        for (raw, want) in [
+            (
+                format!(r#"{{"schemas":["{urn}"],"userName":"a","active":true}}"#),
+                Some(true),
+            ),
+            (
+                format!(r#"{{"schemas":["{urn}"],"userName":"a","active":"True"}}"#),
+                Some(true),
+            ),
+            (
+                format!(r#"{{"schemas":["{urn}"],"userName":"a","active":"false"}}"#),
+                Some(false),
+            ),
+            (format!(r#"{{"schemas":["{urn}"],"userName":"a"}}"#), None),
+        ] {
+            let u: User = serde_json::from_str(&raw).unwrap_or_else(|e| panic!("{raw}: {e}"));
+            assert_eq!(u.active, want, "{raw}");
+        }
+    }
+
+    /// With `lenient-booleans` off, RFC 7643 §2.3.2 is applied literally: a
+    /// stringified boolean is a deserialization error, not a coercion.
+    #[cfg(not(feature = "lenient-booleans"))]
+    #[test]
+    fn stringified_booleans_are_rejected_when_lenience_is_off() {
+        let urn = crate::schema_urns::USER;
+        let raw = format!(r#"{{"schemas":["{urn}"],"userName":"a","active":"True"}}"#);
+        assert!(serde_json::from_str::<User<String>>(&raw).is_err());
+        let ok = format!(r#"{{"schemas":["{urn}"],"userName":"a","active":true}}"#);
+        assert_eq!(
+            serde_json::from_str::<User<String>>(&ok).unwrap().active,
+            Some(true)
+        );
+    }
+
+    /// With `compact-multi-valued` on, an unassigned multi-valued attribute is
+    /// omitted rather than sent as `[]` — RFC 7643 §2.5's "MAY be omitted for
+    /// compactness", at the cost of RFC 7644 §3.5.1's clear-all.
+    #[cfg(feature = "compact-multi-valued")]
+    #[test]
+    fn unassigned_multi_valued_attributes_are_omitted_when_compact() {
+        let user = User::<String> {
+            schemas: vec![crate::schema_urns::USER.to_string()],
+            user_name: "bjensen".to_string(),
+            ..Default::default()
+        };
+        let json = serde_json::to_value(&user).unwrap();
+        let obj = json.as_object().unwrap();
+        for attr in ["emails", "roles", "groups", "x509Certificates"] {
+            assert!(
+                !obj.contains_key(attr),
+                "{attr} must be omitted under compact-multi-valued"
+            );
+        }
+    }
+
+    /// RFC 7643 §2.4's common sub-attributes on `Address`. `primary` is
+    /// covered by the JumpCloud fixture, but `value` and `display` appear in
+    /// no fixture, so deleting either left the suite green while
+    /// re-introducing the silent round-trip drop this release fixed. Asserted
+    /// here rather than by editing a fixture, since the fixtures are verbatim
+    /// RFC payloads and sanitized provider responses.
+    #[test]
+    fn address_common_sub_attributes_round_trip() {
+        let raw = r#"{
+            "formatted": "100 Universal City Plaza\nHollywood, CA 91608 USA",
+            "streetAddress": "100 Universal City Plaza",
+            "locality": "Hollywood",
+            "region": "CA",
+            "postalCode": "91608",
+            "country": "USA",
+            "type": "work",
+            "value": "100 Universal City Plaza, Hollywood, CA 91608 USA",
+            "display": "Work address",
+            "primary": true
+        }"#;
+
+        let address: Address = serde_json::from_str(raw).expect("address must deserialize");
+        assert_eq!(
+            address.value.as_deref(),
+            Some("100 Universal City Plaza, Hollywood, CA 91608 USA")
+        );
+        assert_eq!(address.display.as_deref(), Some("Work address"));
+        assert_eq!(address.primary, Some(true));
+
+        let back: serde_json::Value = serde_json::to_value(&address).unwrap();
+        let original: serde_json::Value = serde_json::from_str(raw).unwrap();
+        assert_eq!(back, original, "no Address sub-attribute may be dropped");
+    }
+
+    /// §2.4 defines `primary` as a boolean, but providers stringify it. The
+    /// lenient deserializer covers every carrier; this pins it through the
+    /// real model types rather than through a synthetic struct.
+    #[cfg(feature = "lenient-booleans")]
+    #[test]
+    fn primary_accepts_a_stringified_boolean_on_every_carrier() {
+        macro_rules! assert_lenient {
+            ($ty:ty, $label:literal) => {{
+                for raw in [
+                    r#"{"primary": true}"#,
+                    r#"{"primary": "true"}"#,
+                    r#"{"primary": "True"}"#,
+                ] {
+                    let v: $ty = serde_json::from_str(raw)
+                        .unwrap_or_else(|e| panic!("{}: {raw}: {e}", $label));
+                    assert_eq!(v.primary, Some(true), "{}: {raw}", $label);
+                }
+                let absent: $ty = serde_json::from_str("{}").unwrap();
+                assert_eq!(absent.primary, None, "{}: absent", $label);
+            }};
+        }
+        assert_lenient!(Email, "Email");
+        assert_lenient!(Address, "Address");
+        assert_lenient!(PhoneNumber, "PhoneNumber");
+        assert_lenient!(Im, "Im");
+        assert_lenient!(Photo, "Photo");
+        assert_lenient!(Entitlement, "Entitlement");
+        assert_lenient!(Role, "Role");
+        assert_lenient!(X509Certificate, "X509Certificate");
     }
 
     /// RFC 7643 §2.5 makes an absent attribute, an explicit `null`, and an
@@ -818,11 +1116,21 @@ mod tests {
         }
     }
 
-    /// An unassigned multi-valued attribute is omitted on the way out, the
-    /// "MAY be omitted for compactness" of §2.5 — never emitted as `null` or
-    /// as an empty array.
+    /// An unassigned multi-valued attribute serializes as `[]`, not as `null`
+    /// and not by omission.
+    ///
+    /// RFC 7643 §2.5 permits omitting it ("MAY be omitted for compactness"),
+    /// but RFC 7644 §3.5.1 gives `[]` operational meaning that omission does
+    /// not have: "Clients that want to override a server's defaults MAY
+    /// specify `null` for a single-valued attribute, or an empty array `[]`
+    /// for a multi-valued attribute, to clear all values", while an omitted
+    /// attribute is merely "not asserted by the client" and the server MAY
+    /// clear it *or* substitute a default. Since these models serve as request
+    /// bodies as well as representations, emitting `[]` is what keeps a
+    /// conformant clear-all expressible.
+    #[cfg(not(feature = "compact-multi-valued"))]
     #[test]
-    fn unassigned_multi_valued_attributes_are_omitted_on_serialize() {
+    fn unassigned_multi_valued_attributes_serialize_as_empty_arrays() {
         let user = User::<String> {
             schemas: vec![crate::schema_urns::USER.to_string()],
             user_name: "bjensen".to_string(),
@@ -841,14 +1149,44 @@ mod tests {
             "roles",
             "x509Certificates",
         ] {
-            assert!(
-                !obj.contains_key(attr),
-                "{attr} must be omitted when unassigned"
+            assert_eq!(
+                obj.get(attr),
+                Some(&serde_json::json!([])),
+                "{attr} must serialize as [] so a clear-all PUT is expressible"
             );
         }
         assert!(
             !json.to_string().contains("null"),
             "no attribute may be null: {json}"
+        );
+    }
+
+    /// The RFC 7644 §3.5.1 clear-all idiom, end to end: a client that empties a
+    /// multi-valued attribute produces a body carrying `[]` for it, which is
+    /// the form the RFC says clears existing values on the server.
+    #[cfg(not(feature = "compact-multi-valued"))]
+    #[test]
+    fn a_cleared_attribute_reaches_the_wire_as_an_empty_array() {
+        let user = User::<String> {
+            schemas: vec![crate::schema_urns::USER.to_string()],
+            user_name: "bjensen".to_string(),
+            roles: Vec::new(),
+            emails: vec![Email {
+                value: Some("bjensen@example.com".to_string()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let json = serde_json::to_value(&user).unwrap();
+        assert_eq!(
+            json["roles"],
+            serde_json::json!([]),
+            "cleared roles must be []"
+        );
+        assert_eq!(
+            json["emails"].as_array().unwrap().len(),
+            1,
+            "assigned values survive"
         );
     }
 
@@ -859,34 +1197,7 @@ mod tests {
         use super::*;
         use pretty_assertions::assert_eq;
 
-        /// Drop every unassigned attribute, recursively.
-        ///
-        /// RFC 7643 §2.5: "Unassigned attributes, the null value, or an empty
-        /// array ... SHALL be considered to be equivalent in state", and such
-        /// attributes "MAY be omitted for compactness". So a payload carrying
-        /// `"roles": []` and one omitting `roles` describe the same resource,
-        /// and this crate emits the compact form. Comparing raw bytes would
-        /// make the round-trip assertion a test of that formatting choice
-        /// rather than of fidelity, so both sides are reduced to assigned
-        /// attributes first.
-        ///
-        /// This removes only `null` and `[]`. Every attribute carrying real
-        /// data survives on both sides, which is what the assertion is for.
-        fn drop_unassigned(v: serde_json::Value) -> serde_json::Value {
-            use serde_json::Value;
-            match v {
-                Value::Object(map) => Value::Object(
-                    map.into_iter()
-                        .filter(|(_, val)| !val.is_null() && val.as_array() != Some(&vec![]))
-                        .map(|(k, val)| (k, drop_unassigned(val)))
-                        .collect(),
-                ),
-                Value::Array(items) => {
-                    Value::Array(items.into_iter().map(drop_unassigned).collect())
-                }
-                other => other,
-            }
-        }
+        use crate::utils::serde::drop_unassigned;
 
         fn assert_user_round_trips(raw: &str) {
             let user: User =
@@ -907,6 +1218,7 @@ mod tests {
         /// makes `deserialize_null_as_empty_vec` load-bearing rather than
         /// theoretical: with `#[serde(default)]` alone, modelling `emails` as
         /// `Vec<Email>` would reject this real provider response outright.
+        #[cfg(not(feature = "compact-multi-valued"))]
         #[test]
         fn jumpcloud_put_user_minimal_accepts_explicit_null_emails() {
             let raw = include_str!("../test_data/provider_samples/jumpcloud_put_user_minimal.json");
@@ -920,9 +1232,11 @@ mod tests {
             assert_eq!(user.user_name, "testuser@example.io");
             assert_eq!(user.active, Some(true));
 
-            // Unassigned on the way back out, never `null`.
+            // `[]` on the way back out, never `null` and never omitted:
+            // §2.5 makes the state equivalent, and `[]` keeps a §3.5.1
+            // clear-all expressible.
             let back = serde_json::to_value(&user).unwrap();
-            assert!(!back.as_object().unwrap().contains_key("emails"));
+            assert_eq!(back["emails"], serde_json::json!([]));
         }
 
         /// The full JumpCloud PUT carries empty arrays for `phoneNumbers` and

@@ -39,13 +39,21 @@ scim_v2 = "1"
 
 ### Feature flags
 
-All three are on by default.
+Three features select *what is compiled*; three select *how strictly the wire
+is read*. Defaults are marked.
 
-| Feature | Provides |
-|---------|----------|
-| `filter` | the filter and PATCH-path parsers |
-| `models` | every resource and protocol message |
-| `schemas` | the embedded RFC 7643 schema definitions and `get_schemas` |
+| Feature | Default | What it does |
+|---------|---------|--------------|
+| `filter` | on | the filter and PATCH-path parsers |
+| `models` | on | every resource and protocol message |
+| `schemas` | on | the embedded RFC 7643 schema definitions and `get_schemas` |
+| `lenient-booleans` | on | accept `"true"` / `"True"` where the RFC says a JSON boolean; Entra sends this. Off, it is a deserialization error |
+| `case-insensitive` | on | `utils::case`: canonicalise attribute-name case before deserializing, per RFC 7643 §2.1. Off, the module is not compiled |
+| `compact-multi-valued` | **off** | omit an empty multi-valued attribute on serialize instead of emitting `[]`. Off by default because RFC 7644 §3.5.1 gives `[]` clear-all meaning that omission lacks |
+
+The three postures exist because real providers deviate from the RFC in the
+same few ways, and a deployment should get to decide whether to meet them
+halfway. Each is documented at the point in the code where it applies.
 
 Turning off `filter` drops eight crates — `lalrpop-util`, `fluent-uri`,
 `regex-automata`, `regex-syntax`, `aho-corasick`, `borrow-or-share`,
@@ -61,8 +69,11 @@ scim_v2 = { version = "1", default-features = false, features = ["filter"] }
 path, so they need both `models` and `filter`.
 
 The MSRV is **1.86**, set by `lalrpop-util`, whose whole 0.23 line requires it.
-With `filter` off the crate builds on 1.85 (edition 2024's own floor), but
-`rust-version` has to describe the default feature set.
+`rust-version` is a package-wide floor that Cargo enforces before compiling
+anything and is not conditional on features, so 1.86 applies to every
+configuration — including `--no-default-features`, where the *code* would
+compile on 1.85. Cargo has no way to express a per-feature MSRV, so 1.86 is
+the floor in practice.
 
 ## Usage
 
@@ -79,15 +90,36 @@ assert_eq!(user.user_name, "jdoe@example.com");
 # Ok::<(), serde_json::Error>(())
 ```
 
-### Checking RFC-required attributes
+### Validation — read this before shipping a server
 
-Nearly every SCIM attribute is optional, so the models make almost everything
-`Option` or defaulted. `Validate` carries the checks `serde` cannot express,
-and names the offending attribute by its wire path — `userName`, not
-`user_name` — which is what a server needs for its error response.
+**Deserializing a model does not validate it.** The parsers are deliberately
+lenient so that a real provider's payload can always be read, and that means
+`serde_json::from_str::<User>(..)` will happily give you a `User` with an empty
+`userName`, two `primary: true` emails, an `id` the client had no business
+sending, or a `schemas` naming the wrong resource. If you store that and later
+build a response from it, you ship a non-conformant response; if it carried a
+`password`, you may echo it back.
+
+Nearly every SCIM attribute is optional, so `serde` cannot express the
+RFC's REQUIRED rules on its own. `Validate` does, and it names the offending
+attribute by its **wire** path — `userName`, not `user_name` — so a server can
+return it in the RFC 7644 §3.12 error.
+
+There are three ways to run it, from least to most enforced:
+
+1. `value.validate()` — the direction-agnostic checks. Easy to forget.
+2. `value.validate_as(Context::CreateRequest)` — adds the rules that depend on
+   direction: `id` MUST NOT be on a create, MUST be on a response, `password`
+   MUST NOT be on a response.
+3. `Valid<T>` and `Strict<T, M>` — make forgetting impossible. A handler that
+   takes `Valid<User>` cannot receive an unvalidated one, and `Strict<User,
+   CreateRequest>` rejects a non-conformant body at deserialization.
+
+For a server, use 3. For a client reading responses, 1 or 2 is usually enough,
+since a non-conformant *provider* is theirs to fix, not yours.
 
 ```rust
-use scim_v2::{Validate, models::user::User};
+use scim_v2::{Validate, models::{errors::ScimType, user::User}};
 
 let user = User::<String> {
     schemas: vec!["urn:ietf:params:scim:schemas:core:2.0:User".to_string()],
@@ -97,11 +129,33 @@ let user = User::<String> {
 
 let err = user.validate().unwrap_err();
 assert_eq!(err.path(), "userName");
-assert_eq!(err.scim_type(), "invalidValue");
+assert_eq!(err.scim_type_str(), "invalidValue");
 
 // And the RFC 7644 §3.12 body to return:
-let body = err.to_http_error("400");
-assert_eq!(body.scim_type.as_deref(), Some("invalidValue"));
+let body = err.to_http_error(400);
+assert_eq!(body.scim_type, Some(ScimType::InvalidValue));
+```
+
+The enforced form, which is what a server's request handler should take:
+
+```rust
+use scim_v2::{Context, CreateRequest, Strict, Valid, models::user::User};
+
+// Parse and validate in one step; a bad body never becomes a `User` at all.
+let body = r#"{"schemas":["urn:ietf:params:scim:schemas:core:2.0:User"],"userName":"bjensen"}"#;
+let valid: Valid<User<String>> =
+    serde_json::from_str::<Strict<User<String>, CreateRequest>>(body)?.into_valid();
+assert_eq!(valid.user_name, "bjensen");
+
+// A create body that carries an id is rejected at the door (RFC 7643 §3.1).
+let with_id = r#"{"schemas":["urn:ietf:params:scim:schemas:core:2.0:User"],"userName":"bjensen","id":"7"}"#;
+assert!(serde_json::from_str::<Strict<User<String>, CreateRequest>>(with_id).is_err());
+
+// Or validate a value you already hold, for a given direction.
+let user = valid.into_inner();
+assert!(Valid::new(user.clone(), Context::CreateRequest).is_ok());
+assert!(Valid::new(user, Context::Response).is_err()); // a response needs an id
+# Ok::<(), serde_json::Error>(())
 ```
 
 ### Reading a list response
@@ -137,8 +191,16 @@ For a heterogeneous page — which RFC 7644 §3.4.3 allows when querying the roo
 
 RFC 7643 §2.5 makes an unassigned attribute, an explicit `null`, and an empty
 array equivalent in state, so multi-valued attributes are `Vec<T>` rather than
-`Option<Vec<T>>`. All three wire forms deserialize to an empty `Vec`, and an
-empty `Vec` is omitted on serialize rather than emitted as `null` or `[]`.
+`Option<Vec<T>>`, and all three wire forms deserialize to an empty `Vec`.
+
+On the way out an empty `Vec` is emitted as `[]`, never as `null` and not by
+omission. That is deliberate: RFC 7644 §3.5.1 says a client "MAY specify … an
+empty array `[]` for a multi-valued attribute, to clear all values", while an
+omitted attribute is merely "not asserted" and the server may keep or default
+it. Since these models are request bodies as well as representations, `[]` is
+what keeps a conformant clear-all expressible. If you would rather have
+compact output and do not need clear-all, enable the `compact-multi-valued`
+feature.
 
 ```rust
 use scim_v2::models::user::User;
@@ -184,6 +246,16 @@ that overflows the stack on the *next* `Display`, `==`, `{:?}`, serialize or
 drop — a remote DoS with no bad allocation in sight.
 
 ## For SCIM servers
+
+### Accepting requests
+
+Take `Strict<T, CreateRequest>` (or `ReplaceRequest`) in your handlers, as
+shown under [Validation](#validation--read-this-before-shipping-a-server).
+A body that fails the RFC's rules never becomes a `T`, and the error names the
+attribute so you can return it in `scimType: invalidValue`. If a peer's
+attribute-name casing cannot be trusted, wrap in `CaseInsensitive<..>` first
+(RFC 7643 §2.1 makes names case-insensitive; most clients are camelCase, not
+all).
 
 ### Tolerant filter parsing
 

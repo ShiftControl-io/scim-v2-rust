@@ -16,7 +16,7 @@ rust-version = "1.86"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["filter", "models", "schemas"]
+default = ["filter", "models", "schemas", "lenient-booleans", "case-insensitive"]
 # RFC 7644 §3.4.2.2 filter and §3.5.2 PATCH-path parsing. Turning this off
 # drops eight crates: lalrpop-util, fluent-uri, regex-automata, regex-syntax,
 # aho-corasick, borrow-or-share, ref-cast and ref-cast-impl.
@@ -26,6 +26,25 @@ models = []
 # The embedded RFC 7643 schema definitions and the lookups over them. Implies
 # `models`, since `get_schemas` and `get_resource_types` return model types.
 schemas = ["models"]
+
+# --- Wire-leniency postures. Each is a documented deviation from a strict
+# reading of the RFC, made because real providers send it. Turn one off to
+# get the strict reading instead. ---
+
+# Accept "true"/"false"/"True" strings where RFC 7643 §2.3.2 says a JSON
+# boolean. Entra sends `"primary": "True"`. Off: a string boolean is a
+# deserialization error.
+lenient-booleans = []
+# `utils::case` — RFC 7643 §2.1 says attribute names are case-insensitive, so
+# `CaseInsensitive<T>` and `utils::case::from_str` canonicalise key case before
+# deserializing. Off: the module is not compiled; the plain derives remain
+# exact-match, as they are regardless.
+case-insensitive = ["models"]
+# Omit an empty multi-valued attribute on serialize instead of emitting `[]`.
+# Off by default on purpose: RFC 7644 §3.5.1 gives `[]` clear-all meaning that
+# omission lacks, so the default keeps a conformant clear-all expressible. On:
+# compact output, and no way to send a clear-all through these models.
+compact-multi-valued = []
 
 # Caret requirements at major.minor. Every form here is a caret requirement —
 # "1.0.228" means ">=1.0.228, <2.0.0", not a pin — and cargo always resolves to
@@ -43,6 +62,7 @@ fluent-uri = { version = "0.4", optional = true }
 thiserror = "2.0"
 
 [dev-dependencies]
+proptest = "1.6"
 pretty_assertions = "1.4"
 test-case = "3.3"
 uuid = { version = "1", features = ["serde"] }

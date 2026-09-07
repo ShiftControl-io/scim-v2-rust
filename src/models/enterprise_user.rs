@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::utils::error::SCIMError;
 
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 pub struct EnterpriseUser {
     #[serde(rename = "employeeNumber", skip_serializing_if = "Option::is_none")]
     pub employee_number: Option<String>,
@@ -53,8 +53,6 @@ impl TryFrom<&str> for EnterpriseUser {
     }
 }
 
-impl EnterpriseUser {}
-
 /// The user's manager.
 ///
 /// Unassigned fields are omitted from serialized output rather than emitted as
@@ -65,7 +63,7 @@ impl EnterpriseUser {}
 /// clear. Callers that need to clear a field on `PUT` should use a `PATCH`
 /// operation or hand-build a `serde_json::Value` carrying an explicit `null`.
 /// (`displayName` is `readOnly`, so §3.5.1 says the server SHALL ignore it.)
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct Manager {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
@@ -95,6 +93,52 @@ impl Validate for EnterpriseUser {
 mod tests {
     use super::*;
     use crate::Validate;
+
+    /// Restored from `main`. Added as the fix for #48's review finding M-1,
+    /// and removed by this PR's rewrite of the module — which raised coverage
+    /// from 0% to 93% while deleting its only guard against the defect the
+    /// module had been fixed for. Verified by mutation: dropping
+    /// `skip_serializing_if` from `Manager.value` survives the extension
+    /// round-trip test, and fails this one.
+    #[test]
+    fn manager_omits_all_unset_fields_on_serialize() {
+        assert_eq!(
+            serde_json::to_value(Manager::default()).unwrap(),
+            serde_json::json!({}),
+            "a wholly unset Manager must serialize to {{}}, not to nulls"
+        );
+    }
+
+    /// A partially populated `Manager` carries only what is assigned.
+    #[test]
+    fn manager_omits_the_unset_subset_on_serialize() {
+        let manager = Manager {
+            value: Some("26118915".to_string()),
+            ..Default::default()
+        };
+        let json = serde_json::to_value(&manager).unwrap();
+        assert_eq!(json["value"], "26118915");
+        let obj = json.as_object().unwrap();
+        assert!(!obj.contains_key("$ref"), "unset $ref must be omitted");
+        assert!(
+            !obj.contains_key("displayName"),
+            "unset displayName must be omitted"
+        );
+    }
+
+    /// The read path keeps accepting an explicit `null` for each sub-attribute
+    /// (RFC 7643 §2.5) — a missing key, `null`, and `{}` all give `None`.
+    #[test]
+    fn manager_explicit_null_deserializes_to_none() {
+        let m: Manager =
+            serde_json::from_str(r#"{"value": null, "$ref": null, "displayName": null}"#).unwrap();
+        assert_eq!(m.value, None);
+        assert_eq!(m.r#ref, None);
+        assert_eq!(m.display_name, None);
+
+        let empty: Manager = serde_json::from_str("{}").unwrap();
+        assert_eq!(empty.value, None);
+    }
 
     /// Regression guard for the pre-1.0 bug. Every attribute in RFC 7643 §4.3
     /// is `required: false` in the schema this crate embeds, so a wholly empty
