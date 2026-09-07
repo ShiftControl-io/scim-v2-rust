@@ -843,6 +843,104 @@ fn drop_val_filter_iteratively(root: ValFilter) {
 
 #[cfg(test)]
 mod tests {
+
+    /// Every comparison operator and every `compValue` kind must survive
+    /// parse -> Display -> parse. This is the cheapest way to cover the
+    /// `Display` arms exhaustively; before it, `ew`, `false`, `not (...)` and
+    /// value-path `or` had no test touching their formatting at all.
+    #[test]
+    fn display_round_trips_every_operator_and_value_kind() {
+        let exprs = [
+            r#"userName eq "bjensen""#,
+            r#"userName ne "bjensen""#,
+            r#"userName co "jen""#,
+            r#"userName sw "b""#,
+            r#"userName ew "n""#,
+            "title pr",
+            r#"meta.lastModified gt "2011-05-13T04:42:34Z""#,
+            r#"meta.lastModified lt "2011-05-13T04:42:34Z""#,
+            r#"meta.lastModified ge "2011-05-13T04:42:34Z""#,
+            r#"meta.lastModified le "2011-05-13T04:42:34Z""#,
+            "active eq true",
+            "active eq false",
+            "active eq null",
+            "loginCount eq 42",
+            "score eq 3.14",
+            r#"not (userName eq "bjensen")"#,
+            r#"userName eq "a" and title pr"#,
+            r#"userName eq "a" or title pr"#,
+            r#"emails[type eq "work" and value co "@example.com"]"#,
+            r#"emails[type eq "work" or type eq "home"]"#,
+            r#"emails[not (type eq "work")]"#,
+            r#"urn:ietf:params:scim:schemas:core:2.0:User:userName eq "bjensen""#,
+        ];
+
+        for raw in exprs {
+            let parsed: Filter = raw.parse().unwrap_or_else(|e| panic!("{raw:?}: {e}"));
+            let rendered = parsed.to_string();
+            let reparsed: Filter = rendered
+                .parse()
+                .unwrap_or_else(|e| panic!("re-parsing {rendered:?} from {raw:?}: {e}"));
+            assert_eq!(
+                parsed, reparsed,
+                "{raw:?} did not survive Display -> parse (rendered as {rendered:?})"
+            );
+        }
+    }
+
+    /// `AttrPath::with_name` is the programmatic constructor, the path callers
+    /// use when building a filter rather than parsing one.
+    #[test]
+    fn attr_path_can_be_built_without_parsing() {
+        let path = AttrPath::with_name("userName");
+        assert_eq!(path.name, "userName");
+        assert_eq!(path.uri, None);
+        assert_eq!(path.sub_attr, None);
+        assert_eq!(path.to_string(), "userName");
+    }
+
+    /// A bare attribute name has no URI prefix to detect, which is the
+    /// `rsplit_once(':')` miss branch in `parse_attr_path`.
+    #[test]
+    fn attr_path_without_a_colon_has_no_uri() {
+        let path = parse_attr_path("displayName").expect("a bare name is a valid attrPath");
+        assert_eq!(path.uri, None);
+        assert_eq!(path.name, "displayName");
+    }
+
+    /// `CompValue` converts from both owned and borrowed strings, so callers
+    /// building filters programmatically need no ceremony.
+    #[test]
+    fn comp_value_converts_from_strings() {
+        assert_eq!(
+            CompValue::from("bjensen".to_string()),
+            CompValue::Str("bjensen".to_string())
+        );
+        assert_eq!(
+            CompValue::from("bjensen"),
+            CompValue::Str("bjensen".to_string())
+        );
+        // Display emits a JSON string literal, so an embedded quote is
+        // escaped and the whole value is wrapped.
+        assert_eq!(CompValue::from("a\"b").to_string(), "\"a\\\"b\"");
+    }
+
+    /// A `PatchPath` serializes back to the wire form a PATCH body carries.
+    #[test]
+    fn patch_path_serializes_to_its_wire_form() {
+        for raw in [
+            "members",
+            "name.familyName",
+            r#"members[value eq "2819c223"]"#,
+            r#"addresses[type eq "work"].streetAddress"#,
+        ] {
+            let path: PatchPath = raw.parse().unwrap_or_else(|e| panic!("{raw:?}: {e}"));
+            let json = serde_json::to_value(&path).expect("PatchPath must serialize");
+            let reparsed: PatchPath =
+                serde_json::from_value(json.clone()).expect("and deserialize back");
+            assert_eq!(path, reparsed, "{raw:?} round-trip via {json}");
+        }
+    }
     use super::*;
     use test_case::test_case;
 

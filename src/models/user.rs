@@ -167,7 +167,11 @@ pub struct Email {
     pub display: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub r#type: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_lenient_bool"
+    )]
     pub primary: Option<bool>,
 }
 
@@ -188,6 +192,23 @@ pub struct Address {
     pub country: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub r#type: Option<String>,
+    /// RFC 7643 §2.4 defines `value`, `display` and `primary` as common
+    /// sub-attributes of *every* multi-valued attribute, and gives "the
+    /// preferred mailing address" as its example of `primary`. §4.1.2's
+    /// listing for `addresses` omits all three, which is why they were absent
+    /// before 1.0 — but providers do send `primary` here (see
+    /// `test_data/provider_samples/jumpcloud_create_user.json`), and it was
+    /// silently dropped on the way back out.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_lenient_bool"
+    )]
+    pub primary: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]
@@ -198,7 +219,11 @@ pub struct PhoneNumber {
     pub display: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub r#type: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_lenient_bool"
+    )]
     pub primary: Option<bool>,
 }
 
@@ -210,7 +235,11 @@ pub struct Im {
     pub display: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub r#type: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_lenient_bool"
+    )]
     pub primary: Option<bool>,
 }
 
@@ -222,7 +251,11 @@ pub struct Photo {
     pub display: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub r#type: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_lenient_bool"
+    )]
     pub primary: Option<bool>,
 }
 
@@ -246,7 +279,11 @@ pub struct Entitlement {
     pub display: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub r#type: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_lenient_bool"
+    )]
     pub primary: Option<bool>,
 }
 
@@ -274,7 +311,11 @@ pub struct X509Certificate {
     pub display: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub r#type: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_lenient_bool"
+    )]
     pub primary: Option<bool>,
 }
 
@@ -859,6 +900,69 @@ mod tests {
                 drop_unassigned(original),
                 "round-tripped User must carry every assigned attribute of the original RFC payload"
             );
+        }
+
+        /// JumpCloud sends `"emails": null` on a minimal PUT. RFC 7643 §2.5
+        /// makes that equivalent to unassigned, and this is the payload that
+        /// makes `deserialize_null_as_empty_vec` load-bearing rather than
+        /// theoretical: with `#[serde(default)]` alone, modelling `emails` as
+        /// `Vec<Email>` would reject this real provider response outright.
+        #[test]
+        fn jumpcloud_put_user_minimal_accepts_explicit_null_emails() {
+            let raw = include_str!("../test_data/provider_samples/jumpcloud_put_user_minimal.json");
+            assert!(
+                raw.contains(r#""emails": null"#),
+                "fixture must carry the null"
+            );
+
+            let user: User = serde_json::from_str(raw).expect("JumpCloud minimal PUT must parse");
+            assert!(user.emails.is_empty());
+            assert_eq!(user.user_name, "testuser@example.io");
+            assert_eq!(user.active, Some(true));
+
+            // Unassigned on the way back out, never `null`.
+            let back = serde_json::to_value(&user).unwrap();
+            assert!(!back.as_object().unwrap().contains_key("emails"));
+        }
+
+        /// The full JumpCloud PUT carries empty arrays for `phoneNumbers` and
+        /// `addresses`, the enterprise extension under its URN key, and
+        /// `photos` with a bare `value`. All three shapes have to survive.
+        #[test]
+        fn jumpcloud_put_user_full_round_trips() {
+            let raw = include_str!("../test_data/provider_samples/jumpcloud_put_user_full.json");
+            assert_user_round_trips(raw);
+
+            let user: User = serde_json::from_str(raw).unwrap();
+            assert!(user.phone_numbers.is_empty(), "explicit [] is unassigned");
+            assert!(user.addresses.is_empty(), "explicit [] is unassigned");
+            assert_eq!(user.photos.len(), 1);
+            let enterprise = user
+                .enterprise_user
+                .as_ref()
+                .expect("the enterprise extension must deserialize from its URN key");
+            assert!(
+                enterprise.validate().is_ok(),
+                "RFC 7643 §4.3 defines no required attribute on the extension"
+            );
+        }
+
+        /// The create request declares both the core and enterprise URNs in
+        /// `schemas` while carrying no extension body, which is legal and must
+        /// not be mistaken for a malformed payload.
+        #[test]
+        fn jumpcloud_create_user_round_trips() {
+            let raw = include_str!("../test_data/provider_samples/jumpcloud_create_user.json");
+            assert_user_round_trips(raw);
+
+            let user: User = serde_json::from_str(raw).unwrap();
+            assert!(
+                user.schemas
+                    .contains(&crate::schema_urns::ENTERPRISE_USER.to_string())
+            );
+            assert_eq!(user.emails.len(), 1);
+            assert_eq!(user.addresses.len(), 1);
+            assert!(user.validate().is_ok());
         }
 
         /// RFC 7644 §3.3 — unnumbered example, "a client sends a POST request

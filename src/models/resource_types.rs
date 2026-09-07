@@ -229,6 +229,92 @@ impl Validate for ResourceType {
 
 #[cfg(test)]
 mod tests {
+
+    /// RFC 7643 §6 marks `name`, `endpoint` and `schema` REQUIRED, and each is
+    /// reported by its wire name so a server can echo it.
+    #[test]
+    fn validate_requires_name_endpoint_and_schema() {
+        let good = ResourceType {
+            name: "User".to_string(),
+            endpoint: "/Users".to_string(),
+            schema: crate::schema_urns::USER.to_string(),
+            ..Default::default()
+        };
+        assert!(good.validate().is_ok());
+
+        for (blank, expected) in [
+            ("name", "name"),
+            ("endpoint", "endpoint"),
+            ("schema", "schema"),
+        ] {
+            let mut bad = ResourceType {
+                name: "User".to_string(),
+                endpoint: "/Users".to_string(),
+                schema: crate::schema_urns::USER.to_string(),
+                ..Default::default()
+            };
+            match blank {
+                "name" => bad.name.clear(),
+                "endpoint" => bad.endpoint.clear(),
+                _ => bad.schema.clear(),
+            }
+            let err = bad
+                .validate()
+                .expect_err("blank required attribute must fail");
+            assert_eq!(err.path(), expected);
+            assert_eq!(err.scim_type(), "invalidValue");
+        }
+    }
+
+    /// §6 explicitly says `id` is not required for this resource, and §§6-7
+    /// allow `schemas` to be absent, so neither may be validated.
+    #[test]
+    fn validate_ignores_id_and_schemas() {
+        let minimal = ResourceType {
+            id: None,
+            schemas: Vec::new(),
+            name: "User".to_string(),
+            endpoint: "/Users".to_string(),
+            schema: crate::schema_urns::USER.to_string(),
+            ..Default::default()
+        };
+        assert!(minimal.validate().is_ok());
+    }
+
+    /// The `schemas` attribute is modelled from 1.0 on. RFC 7643 §6's example
+    /// carries it; before 1.0 there was no field, so it was dropped.
+    #[test]
+    fn schemas_round_trips_and_absence_is_tolerated() {
+        let raw = format!(
+            r#"{{"schemas":["{}"],"id":"User","name":"User","endpoint":"/Users","schema":"{}"}}"#,
+            crate::schema_urns::RESOURCE_TYPE,
+            crate::schema_urns::USER
+        );
+        let rt: ResourceType = serde_json::from_str(&raw).unwrap();
+        assert_eq!(rt.schemas, vec![crate::schema_urns::RESOURCE_TYPE]);
+        let back = serde_json::to_value(&rt).unwrap();
+        assert_eq!(
+            back["schemas"],
+            serde_json::json!([crate::schema_urns::RESOURCE_TYPE])
+        );
+
+        let no_schemas = r#"{"name":"User","endpoint":"/Users","schema":"urn:x"}"#;
+        let rt: ResourceType = serde_json::from_str(no_schemas).unwrap();
+        assert!(rt.schemas.is_empty());
+    }
+
+    /// `Default` is constructible and carries the resource's own schema URN,
+    /// but is not conformant on its own — the three REQUIRED attributes are
+    /// blank.
+    #[test]
+    fn default_carries_its_urn_but_does_not_validate() {
+        let rt = ResourceType::default();
+        assert_eq!(rt.schemas, vec![crate::schema_urns::RESOURCE_TYPE]);
+        assert!(rt.name.is_empty());
+        assert!(rt.schema_extensions.is_empty());
+        assert!(rt.validate().is_err());
+        serde_json::to_string(&rt).expect("Default must serialize");
+    }
     use pretty_assertions::assert_eq;
 
     use super::*;

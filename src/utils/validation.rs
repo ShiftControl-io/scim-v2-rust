@@ -105,3 +105,87 @@ pub trait Validate {
     /// `Ok(())` when every REQUIRED attribute is present and permissible.
     fn validate(&self) -> Result<(), ValidationError>;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_required_reports_the_wire_path() {
+        let err = ValidationError::missing_required("userName");
+        assert_eq!(err.path(), "userName");
+        assert_eq!(err.kind(), &ValidationErrorKind::MissingRequiredAttribute);
+        assert_eq!(
+            err.to_string(),
+            "userName: required attribute is missing or empty"
+        );
+    }
+
+    /// A nested attribute is reported in dotted wire notation, the same
+    /// notation a filter or PATCH path uses, so a server can hand it straight
+    /// back to the client.
+    #[test]
+    fn invalid_value_carries_its_detail_and_a_dotted_path() {
+        let err = ValidationError::invalid_value("name.familyName", "must not be blank");
+        assert_eq!(err.path(), "name.familyName");
+        assert_eq!(
+            err.kind(),
+            &ValidationErrorKind::InvalidValue("must not be blank".to_string())
+        );
+        assert_eq!(err.to_string(), "name.familyName: must not be blank");
+    }
+
+    /// RFC 7644 §3.12: `invalidValue` covers "a required value was missing, or
+    /// the value specified was not compatible with the operation or attribute
+    /// type", which is both of the current kinds.
+    #[test]
+    fn both_kinds_map_to_invalid_value() {
+        assert_eq!(
+            ValidationError::missing_required("schemas").scim_type(),
+            "invalidValue"
+        );
+        assert_eq!(
+            ValidationError::invalid_value("x", "y").scim_type(),
+            "invalidValue"
+        );
+    }
+
+    /// The RFC 7644 §3.12 body a server returns. `status` is a JSON *string*
+    /// per §3.12, not a number.
+    #[cfg(feature = "models")]
+    #[test]
+    fn to_http_error_builds_the_rfc_error_body() {
+        let err = ValidationError::missing_required("userName");
+        let body = err.to_http_error("400");
+
+        assert_eq!(body.schemas, vec![crate::schema_urns::ERROR]);
+        assert_eq!(body.scim_type.as_deref(), Some("invalidValue"));
+        assert_eq!(
+            body.detail.as_deref(),
+            Some("userName: required attribute is missing or empty")
+        );
+        assert_eq!(body.status, "400");
+
+        let json = serde_json::to_value(&body).unwrap();
+        assert_eq!(json["scimType"], "invalidValue");
+        assert_eq!(json["status"], "400", "status must serialize as a string");
+    }
+
+    /// `ValidationError` is comparable, which is what lets tests assert on a
+    /// whole error rather than on its rendered string.
+    #[test]
+    fn errors_compare_by_path_and_kind() {
+        assert_eq!(
+            ValidationError::missing_required("a"),
+            ValidationError::missing_required("a")
+        );
+        assert_ne!(
+            ValidationError::missing_required("a"),
+            ValidationError::missing_required("b")
+        );
+        assert_ne!(
+            ValidationError::missing_required("a"),
+            ValidationError::invalid_value("a", "detail")
+        );
+    }
+}

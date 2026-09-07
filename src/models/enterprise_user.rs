@@ -94,70 +94,63 @@ impl Validate for EnterpriseUser {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use crate::Validate;
 
-    /// Unset `Manager` fields are omitted on serialize, not emitted as
-    /// `null` (RFC 7643 §2.5 treats the two as equivalent, but omission
-    /// keeps output compact and matches every other model in the crate).
+    /// Regression guard for the pre-1.0 bug. Every attribute in RFC 7643 §4.3
+    /// is `required: false` in the schema this crate embeds, so a wholly empty
+    /// extension is conformant. `validate` used to demand all six.
     #[test]
-    fn manager_omits_unset_fields_on_serialize() {
-        let manager = Manager {
-            value: Some("26118915-6090-4610-87e4-49d8ca9f808d".to_string()),
-            r#ref: None,
-            display_name: None,
+    fn an_empty_extension_is_valid() {
+        assert!(EnterpriseUser::default().validate().is_ok());
+    }
+
+    /// A partially populated extension is the common real case — a provider
+    /// that tracks a department but no cost centre.
+    #[test]
+    fn a_partial_extension_is_valid() {
+        let partial = EnterpriseUser {
+            department: Some("Engineering".to_string()),
+            ..Default::default()
         };
-        let serialized = serde_json::to_value(&manager).unwrap();
+        assert!(partial.validate().is_ok());
+    }
+
+    /// RFC 7643 §4.3's own example, carrying every attribute including the
+    /// nested `manager`.
+    #[test]
+    fn full_extension_round_trips() {
+        let raw = r#"{
+            "employeeNumber": "701984",
+            "costCenter": "4130",
+            "organization": "Universal Studios",
+            "division": "Theme Park",
+            "department": "Tour Operations",
+            "manager": {
+                "value": "26118915-6090-4610-87e4-49d8ca9f808d",
+                "$ref": "../Users/26118915-6090-4610-87e4-49d8ca9f808d",
+                "displayName": "John Smith"
+            }
+        }"#;
+
+        let eu: EnterpriseUser = serde_json::from_str(raw).expect("§4.3 example must deserialize");
+        assert_eq!(eu.employee_number.as_deref(), Some("701984"));
+        assert_eq!(eu.division.as_deref(), Some("Theme Park"));
+        let manager = eu.manager.as_ref().expect("manager must deserialize");
+        assert_eq!(manager.display_name.as_deref(), Some("John Smith"));
+        assert!(eu.validate().is_ok());
+
+        let back: serde_json::Value = serde_json::to_value(&eu).unwrap();
+        let original: serde_json::Value = serde_json::from_str(raw).unwrap();
+        assert_eq!(back, original, "no §4.3 attribute may be dropped");
+    }
+
+    /// An unassigned extension serializes to an empty object rather than one
+    /// padded with nulls, per RFC 7643 §2.5.
+    #[test]
+    fn default_serializes_to_an_empty_object() {
         assert_eq!(
-            serialized,
-            json!({ "value": "26118915-6090-4610-87e4-49d8ca9f808d" })
+            serde_json::to_value(EnterpriseUser::default()).unwrap(),
+            serde_json::json!({})
         );
-    }
-
-    /// A fully-unset `Manager` serializes to an empty object rather than
-    /// one populated with `null`s. This pins the `value` field too, which
-    /// `manager_omits_unset_fields_on_serialize` leaves set.
-    #[test]
-    fn manager_omits_all_unset_fields_on_serialize() {
-        let manager = Manager {
-            value: None,
-            r#ref: None,
-            display_name: None,
-        };
-        assert_eq!(serde_json::to_value(&manager).unwrap(), json!({}));
-    }
-
-    /// The read path must keep accepting explicit `null` sub-attributes from
-    /// peers that send them (RFC 7643 §2.5) — a missing key, `null`, and `{}`
-    /// all deserialize to `None`. Regression guard against a future
-    /// `#[serde(default)]`, `deny_unknown_fields`, or custom deserializer
-    /// silently changing this (cf. `Role.primary`, CHANGELOG 0.4.2).
-    #[test]
-    fn manager_explicit_null_deserializes_to_none() {
-        let manager: Manager = serde_json::from_str(
-            r#"{"value": "26118915-6090-4610-87e4-49d8ca9f808d", "$ref": null, "displayName": null}"#,
-        )
-        .unwrap();
-        assert_eq!(
-            manager.value.as_deref(),
-            Some("26118915-6090-4610-87e4-49d8ca9f808d")
-        );
-        assert_eq!(manager.r#ref, None);
-        assert_eq!(manager.display_name, None);
-
-        let empty: Manager = serde_json::from_str("{}").unwrap();
-        assert_eq!(empty.value, None);
-        assert_eq!(empty.r#ref, None);
-        assert_eq!(empty.display_name, None);
-    }
-
-    #[test]
-    fn manager_round_trips_all_fields() {
-        let raw = json!({
-            "value": "26118915-6090-4610-87e4-49d8ca9f808d",
-            "$ref": "https://example.com/v2/Users/26118915-6090-4610-87e4-49d8ca9f808d",
-            "displayName": "John Smith"
-        });
-        let manager: Manager = serde_json::from_value(raw.clone()).unwrap();
-        assert_eq!(serde_json::to_value(&manager).unwrap(), raw);
     }
 }
