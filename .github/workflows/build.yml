@@ -8,6 +8,16 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Deny plain rustc warnings, not just clippy lints. Clippy already ran with
+  # `-D warnings`, but `cargo build` and `cargo test` did not, so an unused
+  # import or a deprecation in a configuration clippy does not cover could
+  # reach main. Cargo passes `--cap-lints allow` to every registry dependency
+  # (verified: 30 of 30), so this bounds only this crate's own code.
+  #
+  # The `minimal-versions` job overrides this back to empty — it runs on
+  # nightly, where a newly added lint would fail CI for reasons unrelated to
+  # the change under review.
+  RUSTFLAGS: -D warnings
 
 # No `--locked` anywhere below: this is a library and `.gitignore` excludes
 # Cargo.lock deliberately, so there is no committed lock for cargo to honour
@@ -207,6 +217,10 @@ jobs:
   minimal-versions:
     name: Minimal versions
     runs-on: ubuntu-latest
+    env:
+      # Nightly gains lints on its own schedule; denying them here would fail
+      # CI for reasons unrelated to the change under review.
+      RUSTFLAGS: ''
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - uses: hecrj/setup-rust-action@110f36749599534ca96628b82f52ae67e5d95a3c # v2.0.1

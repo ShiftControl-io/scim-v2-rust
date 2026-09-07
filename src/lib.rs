@@ -102,7 +102,12 @@
 /// Every `rust` block in README.md is compiled and run as a doctest, so the
 /// front page cannot drift from the API. Costs nothing at build time —
 /// `cfg(doctest)` is set only while rustdoc collects tests.
-#[cfg(doctest)]
+///
+/// Gated on the full feature set. The README documents the crate as published
+/// (all features default on) and its examples use `filter`, `PatchOp` and the
+/// tolerant query types; the alternative would be `# #[cfg(...)] {` guards in
+/// the README itself, which rustdoc hides but GitHub renders literally.
+#[cfg(all(doctest, feature = "filter", feature = "models", feature = "schemas"))]
 #[doc = include_str!("../README.md")]
 struct ReadmeDoctests;
 
@@ -140,6 +145,7 @@ pub use utils::validation::{Validate, ValidationError, ValidationErrorKind};
 /// Declaring the utils module which contains the error submodule
 pub mod utils {
     pub mod error;
+    #[cfg(feature = "models")]
     pub(crate) mod serde;
     pub mod validation;
 }
