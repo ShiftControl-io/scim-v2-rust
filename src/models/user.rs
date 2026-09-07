@@ -36,24 +36,60 @@ pub struct User<T = String> {
     pub active: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub password: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub emails: Option<Vec<Email>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub addresses: Option<Vec<Address>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub phone_numbers: Option<Vec<PhoneNumber>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ims: Option<Vec<Im>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub photos: Option<Vec<Photo>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub groups: Option<Vec<Group>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub entitlements: Option<Vec<Entitlement>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub roles: Option<Vec<Role>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub x509_certificates: Option<Vec<X509Certificate>>,
+    #[serde(
+        default = "Vec::new",
+        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub emails: Vec<Email>,
+    #[serde(
+        default = "Vec::new",
+        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub addresses: Vec<Address>,
+    #[serde(
+        default = "Vec::new",
+        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub phone_numbers: Vec<PhoneNumber>,
+    #[serde(
+        default = "Vec::new",
+        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub ims: Vec<Im>,
+    #[serde(
+        default = "Vec::new",
+        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub photos: Vec<Photo>,
+    #[serde(
+        default = "Vec::new",
+        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub groups: Vec<Group>,
+    #[serde(
+        default = "Vec::new",
+        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub entitlements: Vec<Entitlement>,
+    #[serde(
+        default = "Vec::new",
+        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub roles: Vec<Role>,
+    #[serde(
+        default = "Vec::new",
+        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub x509_certificates: Vec<X509Certificate>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
     #[serde(
@@ -81,15 +117,15 @@ impl<T> Default for User<T> {
             timezone: None,
             active: None,
             password: None,
-            emails: None,
-            addresses: None,
-            phone_numbers: None,
-            ims: None,
-            photos: None,
-            groups: None,
-            entitlements: None,
-            roles: None,
-            x509_certificates: None,
+            emails: Vec::new(),
+            addresses: Vec::new(),
+            phone_numbers: Vec::new(),
+            ims: Vec::new(),
+            photos: Vec::new(),
+            groups: Vec::new(),
+            entitlements: Vec::new(),
+            roles: Vec::new(),
+            x509_certificates: Vec::new(),
             meta: None,
             enterprise_user: None,
         }
@@ -471,37 +507,28 @@ mod tests {
             user.profile_url,
             Some("https://login.example.com/bjensen".to_string())
         );
-        assert_eq!(user.emails.as_ref().unwrap().len(), 2);
+        assert_eq!(user.emails.len(), 2);
         assert_eq!(
-            user.emails.as_ref().unwrap()[0].value,
+            user.emails[0].value,
             Some("bjensen@example.com".to_string())
         );
+        assert_eq!(user.emails[0].r#type, Some("work".to_string()));
+        assert_eq!(user.addresses.len(), 2);
+        assert_eq!(user.addresses[0].r#type.as_ref().unwrap(), "work");
+        assert_eq!(user.phone_numbers.len(), 2);
         assert_eq!(
-            user.emails.as_ref().unwrap()[0].r#type,
-            Some("work".to_string())
-        );
-        assert_eq!(user.addresses.as_ref().unwrap().len(), 2);
-        assert_eq!(
-            user.addresses.as_ref().unwrap()[0].r#type.as_ref().unwrap(),
-            "work"
-        );
-        assert_eq!(user.phone_numbers.as_ref().unwrap().len(), 2);
-        assert_eq!(
-            user.phone_numbers.as_ref().unwrap()[0].value,
+            user.phone_numbers[0].value,
             Some("555-555-5555".to_string())
         );
-        assert_eq!(user.ims.as_ref().unwrap().len(), 1);
+        assert_eq!(user.ims.len(), 1);
+        assert_eq!(user.ims[0].value, Some("someaimhandle".to_string()));
+        assert_eq!(user.groups.len(), 3);
         assert_eq!(
-            user.ims.as_ref().unwrap()[0].value,
-            Some("someaimhandle".to_string())
-        );
-        assert_eq!(user.groups.as_ref().unwrap().len(), 3);
-        assert_eq!(
-            user.groups.as_ref().unwrap()[0].value,
+            user.groups[0].value,
             Some("e9e30dba-f08f-4109-8486-d5c6a331660a".to_string())
         );
-        assert_eq!(user.x509_certificates.as_ref().unwrap().len(), 1);
-        assert_eq!(user.x509_certificates.as_ref().unwrap()[0].value, Some("MIIDQzCCAqygAwIBAgICEAAwDQYJKoZIhvcNAQEFBQAwTjELMAkGA1UEBhMCVVMxEzARBgNVBAgMCkNhbGlmb3JuaWExFDASBgNVBAoMC2V4YW1wbGUuY29tMRQwEgYDVQQDDAtleGFtcGxlLmNvbTAeFw0xMTEwMjIwNjI0MzFaFw0xMjEwMDQwNjI0MzFaMH8xCzAJBgNVBAYTAlVTMRMwEQYDVQQIDApDYWxpZm9ybmlhMRQwEgYDVQQKDAtleGFtcGxlLmNvbTEhMB8GA1UEAwwYTXMuIEJhcmJhcmEgSiBKZW5zZW4gSUlJMSIwIAYJKoZIhvcNAQkBFhNiamVuc2VuQGV4YW1wbGUuY29tMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA7Kr+Dcds/JQ5GwejJFcBIP682X3xpjis56AK02bc1FLgzdLI8auoR+cC9/Vrh5t66HkQIOdA4unHh0AaZ4xL5PhVbXIPMB5vAPKpzz5iPSi8xO8SL7I7SDhcBVJhqVqr3HgllEG6UClDdHO7nkLuwXq8HcISKkbT5WFTVfFZzidPl8HZ7DhXkZIRtJwBweq4bvm3hM1Os7UQH05ZS6cVDgweKNwdLLrT51ikSQG3DYrl+ft781UQRIqxgwqCfXEuDiinPh0kkvIi5jivVu1Z9QiwlYEdRbLJ4zJQBmDrSGTMYn4lRc2HgHO4DqB/bnMVorHB0CC6AV1QoFK4GPe1LwIDAQABo3sweTAJBgNVHRMEAjAAMCwGCWCGSAGG+EIBDQQfFh1PcGVuU1NMIEdlbmVyYXRlZCBDZXJ0aWZpY2F0ZTAdBgNVHQ4EFgQU8pD0U0vsZIsaA16lL8En8bx0F/gwHwYDVR0jBBgwFoAUdGeKitcaF7gnzsNwDx708kqaVt0wDQYJKoZIhvcNAQEFBQADgYEAA81SsFnOdYJtNg5Tcq+/ByEDrBgnusx0jloUhByPMEVkoMZ3J7j1ZgI8rAbOkNngX8+pKfTiDz1RC4+dx8oU6Za+4NJXUjlL5CvV6BEYb1+QAEJwitTVvxB/A67g42/vzgAtoRUeDov1+GFiBZ+GNF/cAYKcMtGcrs2i97ZkJMo=".to_string()), "x509_certificates[0].value did not match expected value");
+        assert_eq!(user.x509_certificates.len(), 1);
+        assert_eq!(user.x509_certificates[0].value, Some("MIIDQzCCAqygAwIBAgICEAAwDQYJKoZIhvcNAQEFBQAwTjELMAkGA1UEBhMCVVMxEzARBgNVBAgMCkNhbGlmb3JuaWExFDASBgNVBAoMC2V4YW1wbGUuY29tMRQwEgYDVQQDDAtleGFtcGxlLmNvbTAeFw0xMTEwMjIwNjI0MzFaFw0xMjEwMDQwNjI0MzFaMH8xCzAJBgNVBAYTAlVTMRMwEQYDVQQIDApDYWxpZm9ybmlhMRQwEgYDVQQKDAtleGFtcGxlLmNvbTEhMB8GA1UEAwwYTXMuIEJhcmJhcmEgSiBKZW5zZW4gSUlJMSIwIAYJKoZIhvcNAQkBFhNiamVuc2VuQGV4YW1wbGUuY29tMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA7Kr+Dcds/JQ5GwejJFcBIP682X3xpjis56AK02bc1FLgzdLI8auoR+cC9/Vrh5t66HkQIOdA4unHh0AaZ4xL5PhVbXIPMB5vAPKpzz5iPSi8xO8SL7I7SDhcBVJhqVqr3HgllEG6UClDdHO7nkLuwXq8HcISKkbT5WFTVfFZzidPl8HZ7DhXkZIRtJwBweq4bvm3hM1Os7UQH05ZS6cVDgweKNwdLLrT51ikSQG3DYrl+ft781UQRIqxgwqCfXEuDiinPh0kkvIi5jivVu1Z9QiwlYEdRbLJ4zJQBmDrSGTMYn4lRc2HgHO4DqB/bnMVorHB0CC6AV1QoFK4GPe1LwIDAQABo3sweTAJBgNVHRMEAjAAMCwGCWCGSAGG+EIBDQQfFh1PcGVuU1NMIEdlbmVyYXRlZCBDZXJ0aWZpY2F0ZTAdBgNVHQ4EFgQU8pD0U0vsZIsaA16lL8En8bx0F/gwHwYDVR0jBBgwFoAUdGeKitcaF7gnzsNwDx708kqaVt0wDQYJKoZIhvcNAQEFBQADgYEAA81SsFnOdYJtNg5Tcq+/ByEDrBgnusx0jloUhByPMEVkoMZ3J7j1ZgI8rAbOkNngX8+pKfTiDz1RC4+dx8oU6Za+4NJXUjlL5CvV6BEYb1+QAEJwitTVvxB/A67g42/vzgAtoRUeDov1+GFiBZ+GNF/cAYKcMtGcrs2i97ZkJMo=".to_string()), "x509_certificates[0].value did not match expected value");
         let meta = user.meta.unwrap();
         assert_eq!(meta.resource_type, Some("User".to_string()));
         assert_eq!(meta.created, Some("2010-01-23T04:56:22Z".to_string()));
@@ -729,12 +756,96 @@ mod tests {
         assert_eq!(list.resources.len(), 2);
     }
 
+    /// RFC 7643 §2.5 makes an absent attribute, an explicit `null`, and an
+    /// empty array equivalent in state. Multi-valued attributes are modelled
+    /// as `Vec<T>` rather than `Option<Vec<T>>` precisely so those three wire
+    /// forms cannot produce three distinct in-memory states.
+    #[test]
+    fn multi_valued_attributes_treat_absent_null_and_empty_alike() {
+        let urn = crate::schema_urns::USER;
+        let absent = format!(r#"{{"schemas":["{urn}"],"userName":"bjensen"}}"#);
+        let null =
+            format!(r#"{{"schemas":["{urn}"],"userName":"bjensen","roles":null,"emails":null}}"#);
+        let empty =
+            format!(r#"{{"schemas":["{urn}"],"userName":"bjensen","roles":[],"emails":[]}}"#);
+
+        for (label, raw) in [("absent", &absent), ("null", &null), ("empty", &empty)] {
+            let user: User = serde_json::from_str(raw)
+                .unwrap_or_else(|e| panic!("{label} form must deserialize: {e}"));
+            assert!(user.roles.is_empty(), "{label}: roles");
+            assert!(user.emails.is_empty(), "{label}: emails");
+        }
+    }
+
+    /// An unassigned multi-valued attribute is omitted on the way out, the
+    /// "MAY be omitted for compactness" of §2.5 — never emitted as `null` or
+    /// as an empty array.
+    #[test]
+    fn unassigned_multi_valued_attributes_are_omitted_on_serialize() {
+        let user = User::<String> {
+            schemas: vec![crate::schema_urns::USER.to_string()],
+            user_name: "bjensen".to_string(),
+            ..Default::default()
+        };
+        let json = serde_json::to_value(&user).unwrap();
+        let obj = json.as_object().unwrap();
+        for attr in [
+            "emails",
+            "addresses",
+            "phoneNumbers",
+            "ims",
+            "photos",
+            "groups",
+            "entitlements",
+            "roles",
+            "x509Certificates",
+        ] {
+            assert!(
+                !obj.contains_key(attr),
+                "{attr} must be omitted when unassigned"
+            );
+        }
+        assert!(
+            !json.to_string().contains("null"),
+            "no attribute may be null: {json}"
+        );
+    }
+
     /// Verbatim `User` payloads from RFC 7644. Each is parsed into `User`
     /// and then round-tripped (serialize, re-parse as `serde_json::Value`)
     /// to confirm no modelled field is dropped on the way back out.
     mod rfc7644_samples {
         use super::*;
         use pretty_assertions::assert_eq;
+
+        /// Drop every unassigned attribute, recursively.
+        ///
+        /// RFC 7643 §2.5: "Unassigned attributes, the null value, or an empty
+        /// array ... SHALL be considered to be equivalent in state", and such
+        /// attributes "MAY be omitted for compactness". So a payload carrying
+        /// `"roles": []` and one omitting `roles` describe the same resource,
+        /// and this crate emits the compact form. Comparing raw bytes would
+        /// make the round-trip assertion a test of that formatting choice
+        /// rather than of fidelity, so both sides are reduced to assigned
+        /// attributes first.
+        ///
+        /// This removes only `null` and `[]`. Every attribute carrying real
+        /// data survives on both sides, which is what the assertion is for.
+        fn drop_unassigned(v: serde_json::Value) -> serde_json::Value {
+            use serde_json::Value;
+            match v {
+                Value::Object(map) => Value::Object(
+                    map.into_iter()
+                        .filter(|(_, val)| !val.is_null() && val.as_array() != Some(&vec![]))
+                        .map(|(k, val)| (k, drop_unassigned(val)))
+                        .collect(),
+                ),
+                Value::Array(items) => {
+                    Value::Array(items.into_iter().map(drop_unassigned).collect())
+                }
+                other => other,
+            }
+        }
 
         fn assert_user_round_trips(raw: &str) {
             let user: User =
@@ -744,8 +855,9 @@ mod tests {
                     .unwrap();
             let original: serde_json::Value = serde_json::from_str(raw).unwrap();
             assert_eq!(
-                reserialized, original,
-                "round-tripped User JSON must equal the original RFC payload"
+                drop_unassigned(reserialized),
+                drop_unassigned(original),
+                "round-tripped User must carry every assigned attribute of the original RFC payload"
             );
         }
 
@@ -790,14 +902,8 @@ mod tests {
             let raw = include_str!("../test_data/rfc7644/s3.4.1_user_retrieval_response.json");
             assert_user_round_trips(raw);
             let user: User = serde_json::from_str(raw).unwrap();
-            assert_eq!(
-                user.emails.as_ref().unwrap()[0].value.as_deref(),
-                Some("bjensen@example.com")
-            );
-            assert_eq!(
-                user.phone_numbers.as_ref().unwrap()[0].r#type.as_deref(),
-                Some("work")
-            );
+            assert_eq!(user.emails[0].value.as_deref(), Some("bjensen@example.com"));
+            assert_eq!(user.phone_numbers[0].r#type.as_deref(), Some("work"));
         }
 
         /// RFC 7644 §3.5.1 — unnumbered example following "a successful PUT
@@ -809,12 +915,12 @@ mod tests {
             let raw = include_str!("../test_data/rfc7644/s3.5.1_user_put_request.json");
             assert_user_round_trips(raw);
             let user: User = serde_json::from_str(raw).unwrap();
-            assert_eq!(user.roles.as_ref().map(Vec::len), Some(0));
+            assert!(user.roles.is_empty());
             assert_eq!(
                 user.name.as_ref().unwrap().middle_name.as_deref(),
                 Some("Jane")
             );
-            assert_eq!(user.emails.as_ref().unwrap().len(), 2);
+            assert_eq!(user.emails.len(), 2);
         }
 
         /// RFC 7644 §3.5.1 — unnumbered example, "The service responds with the
@@ -825,7 +931,7 @@ mod tests {
             let raw = include_str!("../test_data/rfc7644/s3.5.1_user_put_response.json");
             assert_user_round_trips(raw);
             let user: User = serde_json::from_str(raw).unwrap();
-            assert!(user.roles.is_none());
+            assert!(user.roles.is_empty());
             assert_eq!(
                 user.meta.as_ref().unwrap().last_modified.as_deref(),
                 Some("2011-08-08T08:00:12Z")

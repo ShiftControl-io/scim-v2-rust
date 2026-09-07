@@ -19,8 +19,13 @@ pub struct ResourceType {
     pub description: Option<String>,
     pub endpoint: String,
     pub schema: String,
-    #[serde(rename = "schemaExtensions", skip_serializing_if = "Option::is_none")]
-    pub schema_extensions: Option<Vec<SchemaExtension>>,
+    #[serde(
+        rename = "schemaExtensions",
+        default = "Vec::new",
+        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub schema_extensions: Vec<SchemaExtension>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
 }
@@ -34,7 +39,7 @@ impl Default for ResourceType {
             description: None,
             endpoint: "".to_string(),
             schema: "".to_string(),
-            schema_extensions: None,
+            schema_extensions: Vec::new(),
             meta: None,
         }
     }
@@ -105,13 +110,13 @@ pub fn get_resource_types(
                     description: Some("User Account".to_string()),
                     schema: "urn:ietf:params:scim:schemas:core:2.0:User".to_string(),
                     schema_extensions: if has_enterprise_user {
-                        Some(vec![SchemaExtension {
+                        vec![SchemaExtension {
                             schema: "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User"
                                 .to_string(),
                             required: true,
-                        }])
+                        }]
                     } else {
-                        None
+                        Vec::new()
                     },
                     meta: Some(Meta {
                         location: Some("https://example.com/v2/ResourceTypes/User".to_string()),
@@ -131,7 +136,7 @@ pub fn get_resource_types(
                     endpoint: "/Groups".to_string(),
                     description: Some("Group".to_string()),
                     schema: "urn:ietf:params:scim:schemas:core:2.0:Group".to_string(),
-                    schema_extensions: None,
+                    schema_extensions: Vec::new(),
                     meta: Some(Meta {
                         location: Some("https://example.com/v2/ResourceTypes/Group".to_string()),
                         resource_type: Some("ResourceType".to_string()),
@@ -270,7 +275,7 @@ mod tests {
             resource_type.schema,
             "urn:ietf:params:scim:schemas:core:2.0:User"
         );
-        let schema_extensions = resource_type.schema_extensions.unwrap();
+        let schema_extensions = &resource_type.schema_extensions;
         assert_eq!(schema_extensions.len(), 1);
         let schema_extension = &schema_extensions[0];
         assert_eq!(
@@ -333,7 +338,7 @@ mod tests {
             user_resource_type.schema,
             "urn:ietf:params:scim:schemas:core:2.0:User"
         );
-        assert!(user_resource_type.schema_extensions.is_some());
+        assert!(!user_resource_type.schema_extensions.is_empty());
 
         let group_resource_type = &resource_types[1];
         assert_eq!(group_resource_type.name, "Group");
@@ -342,6 +347,6 @@ mod tests {
             group_resource_type.schema,
             "urn:ietf:params:scim:schemas:core:2.0:Group"
         );
-        assert!(group_resource_type.schema_extensions.is_none());
+        assert!(group_resource_type.schema_extensions.is_empty());
     }
 }

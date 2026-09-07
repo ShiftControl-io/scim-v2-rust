@@ -41,8 +41,13 @@ pub struct Attributes {
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub required: Option<bool>,
-    #[serde(rename = "canonicalValues", skip_serializing_if = "Option::is_none")]
-    pub canonical_values: Option<Vec<String>>,
+    #[serde(
+        rename = "canonicalValues",
+        default = "Vec::new",
+        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub canonical_values: Vec<String>,
     #[serde(rename = "caseExact", skip_serializing_if = "Option::is_none")]
     pub case_exact: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -51,10 +56,20 @@ pub struct Attributes {
     pub returned: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub uniqueness: Option<String>,
-    #[serde(rename = "subAttributes", skip_serializing_if = "Option::is_none")]
-    pub sub_attributes: Option<Vec<SubAttributes>>,
-    #[serde(rename = "referenceTypes", skip_serializing_if = "Option::is_none")]
-    pub reference_types: Option<Vec<String>>,
+    #[serde(
+        rename = "subAttributes",
+        default = "Vec::new",
+        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub sub_attributes: Vec<SubAttributes>,
+    #[serde(
+        rename = "referenceTypes",
+        default = "Vec::new",
+        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub reference_types: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -67,8 +82,13 @@ pub struct SubAttributes {
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub required: Option<bool>,
-    #[serde(rename = "canonicalValues", skip_serializing_if = "Option::is_none")]
-    pub canonical_values: Option<Vec<String>>,
+    #[serde(
+        rename = "canonicalValues",
+        default = "Vec::new",
+        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub canonical_values: Vec<String>,
     #[serde(rename = "caseExact", skip_serializing_if = "Option::is_none")]
     pub case_exact: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -77,8 +97,13 @@ pub struct SubAttributes {
     pub returned: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub uniqueness: Option<String>,
-    #[serde(rename = "referenceTypes", skip_serializing_if = "Option::is_none")]
-    pub reference_types: Option<Vec<String>>,
+    #[serde(
+        rename = "referenceTypes",
+        default = "Vec::new",
+        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub reference_types: Vec<String>,
 }
 
 /// Retrieves a list of `Schema` instances based on the provided schema names.

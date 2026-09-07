@@ -1,4 +1,22 @@
-use serde::Deserializer;
+use serde::{Deserialize, Deserializer};
+
+/// Deserializes a multi-valued attribute, collapsing an explicit `null` to an
+/// empty `Vec`.
+///
+/// RFC 7643 §2.5: "Unassigned attributes, the null value, or an empty array
+/// (in the case of a multi-valued attribute) SHALL be considered to be
+/// equivalent in state." `#[serde(default)]` alone covers only the *absent*
+/// case and rejects `"roles": null` with `invalid type: null, expected a
+/// sequence`, which real providers do send. Pair this with
+/// `#[serde(default = "Vec::new")]` so all three wire forms land on the same
+/// in-memory value.
+pub(crate) fn deserialize_null_as_empty_vec<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Ok(Option::<Vec<T>>::deserialize(deserializer)?.unwrap_or_default())
+}
 
 /// Deserializes to a boolean from either a boolean, string representation of boolean, or null.
 ///

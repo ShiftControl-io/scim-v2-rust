@@ -12,8 +12,12 @@ pub struct Group<T = String> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub external_id: Option<String>,
     pub display_name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub members: Option<Vec<Member<T>>>,
+    #[serde(
+        default = "Vec::new",
+        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub members: Vec<Member<T>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
 }
@@ -55,6 +59,38 @@ impl<T> Validate for Group<T> {
 
 #[cfg(test)]
 mod tests {
+    /// RFC 7643 §2.5 equivalence for `Group.members`: absent, `null` and `[]`
+    /// all mean unassigned, and unassigned is omitted on the way out.
+    /// Guards the `deserialize_null_as_empty_vec` wiring, which
+    /// `#[serde(default)]` alone does not provide.
+    #[test]
+    fn members_treat_absent_null_and_empty_alike() {
+        let urn = crate::schema_urns::GROUP;
+        for (label, raw) in [
+            (
+                "absent",
+                format!(r#"{{"schemas":["{urn}"],"displayName":"Tour Guides"}}"#),
+            ),
+            (
+                "null",
+                format!(r#"{{"schemas":["{urn}"],"displayName":"Tour Guides","members":null}}"#),
+            ),
+            (
+                "empty",
+                format!(r#"{{"schemas":["{urn}"],"displayName":"Tour Guides","members":[]}}"#),
+            ),
+        ] {
+            let group: Group = serde_json::from_str(&raw)
+                .unwrap_or_else(|e| panic!("{label} form must deserialize: {e}"));
+            assert!(group.members.is_empty(), "{label}: members");
+            let out = serde_json::to_value(&group).unwrap();
+            assert!(
+                !out.as_object().unwrap().contains_key("members"),
+                "{label}: unassigned members must be omitted"
+            );
+        }
+    }
+
     use pretty_assertions::assert_eq;
 
     use super::*;
@@ -107,21 +143,18 @@ mod tests {
         assert_eq!(group.display_name, "Tour Guides");
 
         // Check members
-        assert_eq!(group.members.as_ref().unwrap().len(), 2);
+        assert_eq!(group.members.len(), 2);
         assert_eq!(
-            group.members.as_ref().unwrap()[0].value,
+            group.members[0].value,
             Some("2819c223-7f76-453a-919d-413861904646".to_string())
         );
+        assert_eq!(group.members[0].display, Some("Babs Jensen".to_string()));
         assert_eq!(
-            group.members.as_ref().unwrap()[0].display,
-            Some("Babs Jensen".to_string())
-        );
-        assert_eq!(
-            group.members.as_ref().unwrap()[1].value,
+            group.members[1].value,
             Some("902c246b-6245-4190-8e05-00816be7344a".to_string())
         );
         assert_eq!(
-            group.members.as_ref().unwrap()[1].display,
+            group.members[1].display,
             Some("Mandy Pepperidge".to_string())
         );
 
@@ -211,7 +244,7 @@ mod tests {
             Some("e9e30dba-f08f-4109-8486-d5c6a331660a".into())
         );
         assert_eq!(group.display_name, "Tour Guides");
-        assert!(group.members.is_none());
+        assert!(group.members.is_empty());
         assert!(group.meta.is_none());
     }
 }

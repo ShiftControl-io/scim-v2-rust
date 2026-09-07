@@ -98,10 +98,18 @@ impl SearchRequest<MaybeFilter> {
 #[serde(rename_all = "camelCase")]
 pub struct SearchRequest<F = Filter> {
     pub schemas: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub attributes: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    excluded_attributes: Option<Vec<String>>,
+    #[serde(
+        default = "Vec::new",
+        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub attributes: Vec<String>,
+    #[serde(
+        default = "Vec::new",
+        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub excluded_attributes: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filter: Option<F>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -114,8 +122,8 @@ impl<F> Default for SearchRequest<F> {
     fn default() -> Self {
         SearchRequest {
             schemas: vec![schema_urns::SEARCH_REQUEST.to_string()],
-            attributes: None,
-            excluded_attributes: None,
+            attributes: Vec::new(),
+            excluded_attributes: Vec::new(),
             filter: None,
             start_index: Some(1),
             count: Some(100),
@@ -699,8 +707,8 @@ mod tests {
         assert_eq!(req.start_index, Some(1));
         assert_eq!(req.count, Some(10));
         assert_eq!(
-            req.attributes.as_deref(),
-            Some(&["displayName".to_string(), "userName".to_string()][..])
+            req.attributes,
+            vec!["displayName".to_string(), "userName".to_string()]
         );
         assert!(req.filter.is_some());
 
@@ -1238,8 +1246,8 @@ mod tests {
         let req: StrictSearchRequest =
             serde_json::from_str(json).expect("minimal SearchRequest must deserialize");
         assert_eq!(req.schemas, vec![schema_urns::SEARCH_REQUEST.to_string()]);
-        assert!(req.attributes.is_none());
-        assert!(req.excluded_attributes.is_none());
+        assert!(req.attributes.is_empty());
+        assert!(req.excluded_attributes.is_empty());
         assert!(req.filter.is_none());
         assert!(req.start_index.is_none());
         assert!(req.count.is_none());
@@ -1264,8 +1272,8 @@ mod tests {
         // sent `null`s or defaulted pagination values the caller never chose.
         let req = SearchRequest::<Filter> {
             schemas: vec![schema_urns::SEARCH_REQUEST.to_string()],
-            attributes: None,
-            excluded_attributes: None,
+            attributes: Vec::new(),
+            excluded_attributes: Vec::new(),
             filter: None,
             start_index: None,
             count: None,
@@ -1321,8 +1329,8 @@ mod tests {
         }"#;
         let req: StrictSearchRequest =
             serde_json::from_str(json).expect("full SearchRequest must deserialize");
-        assert_eq!(req.attributes, Some(vec!["userName".to_string()]));
-        assert_eq!(req.excluded_attributes, Some(vec!["password".to_string()]));
+        assert_eq!(req.attributes, vec!["userName".to_string()]);
+        assert_eq!(req.excluded_attributes, vec!["password".to_string()]);
         assert!(matches!(req.filter, Some(Filter::Attr(_))));
         assert_eq!(req.start_index, Some(5));
         assert_eq!(req.count, Some(20));
@@ -1600,7 +1608,7 @@ mod tests {
                 id: Some("g-1".to_string()),
                 external_id: None,
                 display_name: "Admins".to_string(),
-                members: None,
+                members: Vec::new(),
                 meta: None,
             };
             let r = Resource::Group(Box::new(g));
