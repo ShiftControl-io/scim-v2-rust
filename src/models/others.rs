@@ -167,6 +167,10 @@ impl<F> Default for ListQuery<F> {
 /// the `endpoint` + `schema` fields (ResourceType). Payloads that do not
 /// carry a recognized discriminator are rejected rather than silently
 /// classified, to prevent type confusion.
+/// `#[non_exhaustive]`: RFC 7643 §6 lets a server define resource types
+/// beyond the four this crate models, so variants will be added in minor
+/// releases. Match with a trailing `_ =>` arm.
+#[non_exhaustive]
 #[derive(Serialize, Debug)]
 #[serde(untagged)]
 pub enum Resource<T> {

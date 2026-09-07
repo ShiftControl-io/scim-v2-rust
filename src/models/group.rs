@@ -22,13 +22,47 @@ pub struct Group<T = String> {
     pub meta: Option<Meta>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
+/// RFC 7643 §4.2.1 `members.type`.
+///
+/// `#[non_exhaustive]`, with an [`Other`](MemberType::Other) catch-all.
+/// §2.2 defines `canonicalValues` as "a collection of **suggested** canonical
+/// values that **MAY** be used", and the Group schema describes this
+/// sub-attribute as "the type of resource, e.g., 'User' or 'Group'". So a
+/// provider may legitimately send another label, and before 1.0 that failed
+/// deserialization of the entire enclosing payload. Unknown labels now land in
+/// `Other` and round-trip unchanged.
+#[non_exhaustive]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(from = "String", into = "String")]
 pub enum MemberType {
-    #[serde(rename = "User", alias = "USER", alias = "user")]
     User,
-    #[serde(rename = "Group", alias = "GROUP", alias = "group")]
     Group,
+    /// A label outside the RFC's suggested set, preserved verbatim.
+    Other(String),
+}
+
+impl From<String> for MemberType {
+    fn from(s: String) -> Self {
+        // §2.2: `caseExact` defaults to false, so the comparison is
+        // case-insensitive; the original spelling survives in `Other`.
+        if s.eq_ignore_ascii_case("user") {
+            MemberType::User
+        } else if s.eq_ignore_ascii_case("group") {
+            MemberType::Group
+        } else {
+            MemberType::Other(s)
+        }
+    }
+}
+
+impl From<MemberType> for String {
+    fn from(m: MemberType) -> Self {
+        match m {
+            MemberType::User => "User".to_string(),
+            MemberType::Group => "Group".to_string(),
+            MemberType::Other(s) => s,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]
@@ -59,6 +93,38 @@ impl<T> Validate for Group<T> {
 
 #[cfg(test)]
 mod tests {
+
+    /// RFC 7643 §2.2 makes `canonicalValues` *suggestions*, so a provider may
+    /// send a `members.type` outside {User, Group}. Before 1.0 that failed the
+    /// whole Group payload; it now lands in `Other` and round-trips.
+    #[test]
+    fn unknown_member_type_round_trips_instead_of_failing() {
+        let urn = crate::schema_urns::GROUP;
+        let raw = format!(
+            r#"{{"schemas":["{urn}"],"displayName":"Tour Guides","members":[
+                 {{"value":"a","type":"User"}},
+                 {{"value":"b","type":"GROUP"}},
+                 {{"value":"c","type":"ServiceAccount"}}]}}"#
+        );
+        let group: Group =
+            serde_json::from_str(&raw).expect("unknown type must not fail the payload");
+        assert_eq!(group.members[0].r#type, Some(MemberType::User));
+        // §2.2: caseExact defaults to false, so "GROUP" is the Group label.
+        assert_eq!(group.members[1].r#type, Some(MemberType::Group));
+        assert_eq!(
+            group.members[2].r#type,
+            Some(MemberType::Other("ServiceAccount".to_string()))
+        );
+
+        let back = serde_json::to_value(&group).unwrap();
+        let types: Vec<&str> = back["members"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m["type"].as_str().unwrap())
+            .collect();
+        assert_eq!(types, ["User", "Group", "ServiceAccount"]);
+    }
     /// RFC 7643 §2.5 equivalence for `Group.members`: absent, `null` and `[]`
     /// all mean unassigned, and unassigned is omitted on the way out.
     /// Guards the `deserialize_null_as_empty_vec` wiring, which

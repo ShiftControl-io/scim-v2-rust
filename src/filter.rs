@@ -108,6 +108,9 @@ pub const MAX_FILTER_DEPTH: usize = 64;
 
 /// Error produced by fallible grammar actions (`=>?` rules in the LALRPOP grammar)
 /// and by post-parse validation.
+/// `#[non_exhaustive]`: further grammar and depth diagnostics will be added
+/// in minor releases.
+#[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum FilterActionError {
     /// An `attrPath` token contained more than one sub-attribute segment.
