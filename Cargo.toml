@@ -10,11 +10,23 @@ repository = "https://github.com/ShiftControl-io/scim-v2-rust"
 rust-version = "1.85"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+default = ["filter", "models", "schemas"]
+# RFC 7644 §3.4.2.2 filter and §3.5.2 PATCH-path parsing. Turning this off
+# drops eight crates: lalrpop-util, fluent-uri, regex-automata, regex-syntax,
+# aho-corasick, borrow-or-share, ref-cast and ref-cast-impl.
+filter = ["dep:lalrpop-util", "dep:fluent-uri"]
+# The RFC 7643 resource models and RFC 7644 protocol messages.
+models = []
+# The embedded RFC 7643 schema definitions and the lookups over them. Implies
+# `models`, since `get_schemas` and `get_resource_types` return model types.
+schemas = ["models"]
+
 [dependencies]
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
-lalrpop-util = { version = "0.23.1", features = ["lexer"] }
-fluent-uri = "0.4.1"
+lalrpop-util = { version = "0.23.1", features = ["lexer"], optional = true }
+fluent-uri = { version = "0.4.1", optional = true }
 thiserror = "2.0.18"
 
 [dev-dependencies]
@@ -26,5 +38,6 @@ uuid = { version = "1.22.0", features = ["serde"]}
 doc-scrape-examples = true
 
 [package.metadata.docs.rs]
+all-features = true
 targets = ["x86_64-unknown-linux-gnu"]
 rustdoc-args = ["--cfg", "docsrs", "--generate-link-to-definition"]

@@ -2,6 +2,7 @@ use serde::de::{DeserializeOwned, Deserializer};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+#[cfg(feature = "filter")]
 use crate::filter::{Filter, InvalidFilterError, MaybeFilter, PatchPath};
 use crate::models::group::Group;
 use crate::models::resource_types::ResourceType;
@@ -10,27 +11,32 @@ use crate::models::user::User;
 use crate::schema_urns;
 use crate::utils::validation::{Validate, ValidationError};
 
+#[cfg(feature = "filter")]
 /// Server-side variant of [`ListQuery`] that tolerates malformed filter
 /// expressions so the handler can produce an RFC 7644 §3.12 `invalidFilter`
 /// error response instead of aborting deserialization of the whole query.
 pub type TolerantListQuery = ListQuery<MaybeFilter>;
 
+#[cfg(feature = "filter")]
 /// Server-side variant of [`SearchRequest`] with the same tolerant filter
 /// behavior as [`TolerantListQuery`].
 pub type TolerantSearchRequest = SearchRequest<MaybeFilter>;
 
+#[cfg(feature = "filter")]
 /// [`ListQuery`] with a fully-parsed [`Filter`]. Equivalent to `ListQuery` with
 /// its default type parameter; provided as a named alias for symmetry with
 /// [`TolerantListQuery`] and as the `Ok` type of
 /// [`ListQuery::<MaybeFilter>::into_strict`].
 pub type StrictListQuery = ListQuery<Filter>;
 
+#[cfg(feature = "filter")]
 /// [`SearchRequest`] with a fully-parsed [`Filter`]. Equivalent to
 /// `SearchRequest` with its default type parameter; provided as a named alias
 /// for symmetry with [`TolerantSearchRequest`] and as the `Ok` type of
 /// [`SearchRequest::<MaybeFilter>::into_strict`].
 pub type StrictSearchRequest = SearchRequest<Filter>;
 
+#[cfg(feature = "filter")]
 impl TryFrom<TolerantListQuery> for StrictListQuery {
     type Error = InvalidFilterError;
 
@@ -50,6 +56,7 @@ impl TryFrom<TolerantListQuery> for StrictListQuery {
     }
 }
 
+#[cfg(feature = "filter")]
 impl TryFrom<TolerantSearchRequest> for StrictSearchRequest {
     type Error = InvalidFilterError;
 
@@ -70,6 +77,7 @@ impl TryFrom<TolerantSearchRequest> for StrictSearchRequest {
     }
 }
 
+#[cfg(feature = "filter")]
 impl ListQuery<MaybeFilter> {
     /// Convert a [`TolerantListQuery`] into a [`StrictListQuery`], failing if
     /// the embedded filter is [`MaybeFilter::Invalid`].
@@ -82,6 +90,7 @@ impl ListQuery<MaybeFilter> {
     }
 }
 
+#[cfg(feature = "filter")]
 impl SearchRequest<MaybeFilter> {
     /// Convert a [`TolerantSearchRequest`] into a [`StrictSearchRequest`],
     /// failing if the embedded filter is [`MaybeFilter::Invalid`].
@@ -94,6 +103,7 @@ impl SearchRequest<MaybeFilter> {
     }
 }
 
+#[cfg(feature = "filter")]
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchRequest<F = Filter> {
@@ -118,6 +128,7 @@ pub struct SearchRequest<F = Filter> {
     pub count: Option<i64>,
 }
 
+#[cfg(feature = "filter")]
 impl<F> Default for SearchRequest<F> {
     fn default() -> Self {
         SearchRequest {
@@ -131,6 +142,7 @@ impl<F> Default for SearchRequest<F> {
     }
 }
 
+#[cfg(feature = "filter")]
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct ListQuery<F = Filter> {
@@ -146,6 +158,7 @@ pub struct ListQuery<F = Filter> {
     pub excluded_attributes: Option<String>,
 }
 
+#[cfg(feature = "filter")]
 impl<F> Default for ListQuery<F> {
     fn default() -> Self {
         ListQuery {
@@ -497,6 +510,7 @@ impl<R: ScimResource> Validate for ListResponse<R> {
     }
 }
 
+#[cfg(feature = "filter")]
 #[derive(Serialize, Deserialize, Debug)]
 pub struct PatchOp {
     pub schemas: Vec<String>,
@@ -504,6 +518,7 @@ pub struct PatchOp {
     pub operations: Vec<PatchOperation>,
 }
 
+#[cfg(feature = "filter")]
 #[derive(Serialize, Debug)]
 #[serde(untagged)]
 #[expect(clippy::large_enum_variant)]
@@ -517,6 +532,7 @@ pub enum OperationTarget {
     },
 }
 
+#[cfg(feature = "filter")]
 impl<'de> Deserialize<'de> for OperationTarget {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -548,6 +564,7 @@ impl<'de> Deserialize<'de> for OperationTarget {
     }
 }
 
+#[cfg(feature = "filter")]
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "op")]
 pub enum PatchOperation {
@@ -563,8 +580,14 @@ pub enum PatchOperation {
     Replace(OperationTarget),
 }
 
+/// Tests for the parts of this module that do not depend on the `filter`
+/// feature — [`Resource`], [`ListResponse`] and [`ScimResource`] — so they
+/// still run under `--no-default-features --features models`.
 #[cfg(test)]
-mod tests {
+mod resource_tests {
+    use super::*;
+    use crate::models::user::User;
+    use crate::schema_urns;
 
     /// The headline of the 1.0 `ListResponse` change: a homogeneous page
     /// deserializes into the concrete resource, so a caller that already knows
@@ -636,6 +659,10 @@ mod tests {
             "a Group payload must not deserialize as ListResponse<User>"
         );
     }
+}
+
+#[cfg(all(test, feature = "filter"))]
+mod tests {
     use super::*;
     use crate::filter::{
         AttrExp, AttrPath, CompValue, CompareOp, PatchPath, PatchValuePath, ValFilter,

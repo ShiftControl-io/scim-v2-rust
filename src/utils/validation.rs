@@ -10,7 +10,9 @@
 
 use thiserror::Error;
 
+#[cfg(feature = "models")]
 use crate::models::errors::ScimHttpError;
+#[cfg(feature = "models")]
 use crate::schema_urns;
 
 /// Why a resource failed validation.
@@ -83,6 +85,9 @@ impl ValidationError {
 
     /// Build the RFC 7644 §3.12 error body a server should return, at the
     /// given HTTP status (`"400"` for every current variant).
+    ///
+    /// Requires the `models` feature, which supplies [`ScimHttpError`].
+    #[cfg(feature = "models")]
     pub fn to_http_error(&self, status: impl Into<String>) -> ScimHttpError {
         ScimHttpError {
             schemas: vec![schema_urns::ERROR.to_string()],

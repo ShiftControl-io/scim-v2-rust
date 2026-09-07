@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::utils::error::SCIMError;
+#[cfg(feature = "schemas")]
 use crate::{ENTERPRISE_USER_SCHEMA, GROUP_SCHEMA, USER_SCHEMA};
 
 #[derive(Serialize, Deserialize, Debug, Default)]
@@ -106,6 +107,7 @@ pub struct SubAttributes {
     pub reference_types: Vec<String>,
 }
 
+#[cfg(feature = "schemas")]
 /// Retrieves a list of `Schema` instances based on the provided schema names.
 ///
 /// This function takes a vector of schema names as input and attempts to retrieve the corresponding `Schema` instances.
@@ -294,6 +296,7 @@ impl TryFrom<&str> for Schema {
 mod tests {
     use super::*;
 
+    #[cfg(feature = "schemas")]
     #[test]
     fn get_schemas_returns_correct_schemas_for_valid_input() {
         let schemas = get_schemas(vec!["user"]).unwrap();
@@ -312,12 +315,14 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "schemas")]
     #[test]
     fn get_schemas_returns_error_for_invalid_input() {
         let result = get_schemas(vec!["invalid"]);
         assert!(result.is_err());
     }
 
+    #[cfg(feature = "schemas")]
     #[test]
     fn get_schemas_returns_error_for_missing_file() {
         let result = get_schemas(vec!["missing"]);
