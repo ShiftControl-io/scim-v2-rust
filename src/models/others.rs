@@ -103,8 +103,10 @@ pub struct SearchRequest<F = Filter> {
     excluded_attributes: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filter: Option<F>,
-    pub start_index: i64,
-    pub count: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_index: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub count: Option<i64>,
 }
 
 impl<F> Default for SearchRequest<F> {
@@ -114,8 +116,8 @@ impl<F> Default for SearchRequest<F> {
             attributes: None,
             excluded_attributes: None,
             filter: None,
-            start_index: 1,
-            count: 100,
+            start_index: Some(1),
+            count: Some(100),
         }
     }
 }
@@ -796,8 +798,8 @@ mod tests {
         }"#;
         let req: TolerantSearchRequest =
             serde_json::from_str(json).expect("tolerant deserialization must succeed");
-        assert_eq!(req.start_index, 3);
-        assert_eq!(req.count, 25);
+        assert_eq!(req.start_index, Some(3));
+        assert_eq!(req.count, Some(25));
         assert!(matches!(req.filter, Some(MaybeFilter::Invalid(_))));
     }
 
@@ -860,6 +862,117 @@ mod tests {
         let round: ListQuery = serde_json::from_str(&json).expect("round-trip");
         assert_eq!(round.count, Some(10));
         assert!(matches!(round.filter, Some(Filter::Attr(_))));
+    }
+
+    // ---- SearchRequest: every field except `schemas` is optional ----
+
+    #[test]
+    fn test_search_request_deserializes_with_only_schemas() {
+        // A payload carrying nothing but the mandatory `schemas` member must
+        // deserialize, leaving all of `attributes`, `excludedAttributes`,
+        // `filter`, `startIndex` and `count` unset (RFC 7644 §3.4.3 lists them
+        // all as optional).
+        let json = r#"{
+            "schemas": ["urn:ietf:params:scim:api:messages:2.0:SearchRequest"]
+        }"#;
+        let req: StrictSearchRequest =
+            serde_json::from_str(json).expect("minimal SearchRequest must deserialize");
+        assert_eq!(req.schemas, vec![schema_urns::SEARCH_REQUEST.to_string()]);
+        assert!(req.attributes.is_none());
+        assert!(req.excluded_attributes.is_none());
+        assert!(req.filter.is_none());
+        assert!(req.start_index.is_none());
+        assert!(req.count.is_none());
+    }
+
+    #[test]
+    fn test_search_request_tolerant_deserializes_with_only_schemas() {
+        let json = r#"{
+            "schemas": ["urn:ietf:params:scim:api:messages:2.0:SearchRequest"]
+        }"#;
+        let req: TolerantSearchRequest =
+            serde_json::from_str(json).expect("minimal tolerant SearchRequest must deserialize");
+        assert!(req.filter.is_none());
+        assert!(req.start_index.is_none());
+        assert!(req.count.is_none());
+    }
+
+    #[test]
+    fn test_search_request_omits_unset_optional_fields_when_serialized() {
+        // Mirror image of the deserialization case: a request with only
+        // `schemas` set must serialize to just that key, so servers are not
+        // sent `null`s or defaulted pagination values the caller never chose.
+        let req = SearchRequest::<Filter> {
+            schemas: vec![schema_urns::SEARCH_REQUEST.to_string()],
+            attributes: None,
+            excluded_attributes: None,
+            filter: None,
+            start_index: None,
+            count: None,
+        };
+        let json = serde_json::to_value(&req).expect("serialize SearchRequest");
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "schemas": ["urn:ietf:params:scim:api:messages:2.0:SearchRequest"]
+            })
+        );
+    }
+
+    #[test]
+    fn test_search_request_partial_pagination_fields() {
+        // `startIndex` and `count` are independently optional: supplying one
+        // must not force the other to be present.
+        let json = r#"{
+            "schemas": ["urn:ietf:params:scim:api:messages:2.0:SearchRequest"],
+            "count": 10
+        }"#;
+        let req: StrictSearchRequest =
+            serde_json::from_str(json).expect("SearchRequest with only `count` must deserialize");
+        assert!(req.start_index.is_none());
+        assert_eq!(req.count, Some(10));
+    }
+
+    #[test]
+    fn test_into_strict_search_request_with_only_schemas() {
+        // The tolerant -> strict conversion must pass through cleanly when no
+        // filter is present, regardless of the pagination fields being unset.
+        let json = r#"{
+            "schemas": ["urn:ietf:params:scim:api:messages:2.0:SearchRequest"]
+        }"#;
+        let tolerant: TolerantSearchRequest = serde_json::from_str(json).unwrap();
+        let strict = tolerant
+            .into_strict()
+            .expect("no filter must convert without error");
+        assert!(strict.filter.is_none());
+        assert!(strict.start_index.is_none());
+        assert!(strict.count.is_none());
+    }
+
+    #[test]
+    fn test_search_request_all_fields_round_trip() {
+        let json = r#"{
+            "schemas": ["urn:ietf:params:scim:api:messages:2.0:SearchRequest"],
+            "attributes": ["userName"],
+            "excludedAttributes": ["password"],
+            "filter": "userName eq \"alice\"",
+            "startIndex": 5,
+            "count": 20
+        }"#;
+        let req: StrictSearchRequest =
+            serde_json::from_str(json).expect("full SearchRequest must deserialize");
+        assert_eq!(req.attributes, Some(vec!["userName".to_string()]));
+        assert_eq!(req.excluded_attributes, Some(vec!["password".to_string()]));
+        assert!(matches!(req.filter, Some(Filter::Attr(_))));
+        assert_eq!(req.start_index, Some(5));
+        assert_eq!(req.count, Some(20));
+
+        let round: StrictSearchRequest = serde_json::from_str(
+            &serde_json::to_string(&req).expect("serialize full SearchRequest"),
+        )
+        .expect("round-trip");
+        assert_eq!(round.start_index, Some(5));
+        assert_eq!(round.count, Some(20));
     }
 
     // ---- Resource<T> URN-based dispatch (RFC 7643 §§3-4) ----
