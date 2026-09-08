@@ -660,17 +660,14 @@ impl<R: ScimResource> Validate for ListResponse<R> {
         // result". A present-but-nonsensical marker is worth catching, and
         // this is the only place it can be: the fields deliberately keep a
         // wire `0` distinct from an omitted field, so serde will not reject it.
-        if let Some(start) = self.start_index
-            && start < 1
-        {
+        // No `let` chains: they stabilised in Rust 1.88 and the MSRV is 1.86.
+        if let Some(start) = self.start_index.filter(|s| *s < 1) {
             return Err(ValidationError::invalid_value(
                 "startIndex",
                 format!("is 1-based, got {start}"),
             ));
         }
-        if let Some(per_page) = self.items_per_page
-            && per_page < 0
-        {
+        if let Some(per_page) = self.items_per_page.filter(|p| *p < 0) {
             return Err(ValidationError::invalid_value(
                 "itemsPerPage",
                 format!("must not be negative, got {per_page}"),
@@ -764,9 +761,7 @@ impl<F> Validate for SearchRequest<F> {
                 "present without sortBy; RFC 7644 §3.4.2.3 defines it as the order in which sortBy is applied",
             ));
         }
-        if let Some(count) = self.count
-            && count < 0
-        {
+        if let Some(count) = self.count.filter(|c| *c < 0) {
             return Err(ValidationError::invalid_value(
                 "count",
                 format!("must not be negative, got {count}"),
