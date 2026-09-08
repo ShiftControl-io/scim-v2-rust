@@ -69,9 +69,9 @@ pub Filter: Filter = {
     #[precedence(level="0")]
     FilterAtom,
     #[precedence(level="1")] #[assoc(side="left")]
-    <l:Filter> "and" <r:Filter> => Filter::And(Box::new(l), Box::new(r)),
+    <l:Filter> "and" <r:Filter> => Filter::and(l, r),
     #[precedence(level="2")] #[assoc(side="left")]
-    <l:Filter> "or" <r:Filter> => Filter::Or(Box::new(l), Box::new(r)),
+    <l:Filter> "or" <r:Filter> => Filter::or(l, r),
 };
 
 // Atom-level filter: attribute expression, value path, not, or parenthesised group.
@@ -117,9 +117,9 @@ pub ValFilter: ValFilter = {
     #[precedence(level="0")]
     ValFilterAtom,
     #[precedence(level="1")] #[assoc(side="left")]
-    <l:ValFilter> "and" <r:ValFilter> => ValFilter::And(Box::new(l), Box::new(r)),
+    <l:ValFilter> "and" <r:ValFilter> => ValFilter::and(l, r),
     #[precedence(level="2")] #[assoc(side="left")]
-    <l:ValFilter> "or" <r:ValFilter> => ValFilter::Or(Box::new(l), Box::new(r)),
+    <l:ValFilter> "or" <r:ValFilter> => ValFilter::or(l, r),
 };
 
 ValFilterAtom: ValFilter = {

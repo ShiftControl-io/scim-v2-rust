@@ -227,8 +227,9 @@ use scim_v2::filter::Filter;
 
 let filter: Filter = r#"userName eq "bjensen" and title pr"#.parse()?;
 
-// The AST is yours to walk. Rendering it back gives an equivalent filter.
-assert!(matches!(filter, Filter::And(_, _)));
+// The AST is yours to walk; `and`/`or` are n-ary, so a chain is one node.
+// Rendering it back gives an equivalent filter.
+assert!(matches!(&filter, Filter::And(items) if items.len() == 2));
 println!("{filter}");
 
 // A malformed filter is an error, not a panic.
@@ -241,11 +242,14 @@ job**. That split is deliberate — the grammar is the fiddly, spec-bound part,
 and how a filter maps onto SQL, LDAP or an in-memory index is specific to your
 server. What this crate saves you is the grammar.
 
-Filters are rejected if their AST exceeds `filter::MAX_FILTER_DEPTH` (64),
-whether they arrive via `.parse()` or deserialization. Without that bound,
-pathologically nested input like `not (not (… (title pr) …))` builds an AST
-that overflows the stack on the *next* `Display`, `==`, `{:?}`, serialize or
-drop — a remote DoS with no bad allocation in sight.
+Filters are rejected if their AST nests deeper than `filter::MAX_FILTER_DEPTH`
+(64) or holds more than `filter::MAX_FILTER_TERMS` (1024) attribute
+expressions, whether they arrive via `.parse()` or deserialization. Without the
+depth bound, pathologically nested input like `not (not (… (title pr) …))`
+builds an AST that overflows the stack on the *next* `Display`, `==`, `{:?}`,
+serialize or drop — a remote DoS with no bad allocation in sight. `and`/`or`
+are n-ary (`Filter::And(Vec<Filter>)`), so a long flat chain such as a
+hundred-id `or` lookup is depth 2 and parses; only the term bound applies to it.
 
 ## For SCIM servers
 

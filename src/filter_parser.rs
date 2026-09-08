@@ -1,5 +1,5 @@
 // auto-generated: "lalrpop 0.23.1"
-// sha3: 06392606ce7ae52c0157f0e98022c2ca81a253110c1a2db5a39b398fccc215b7
+// sha3: dab8476ef33c7caa0b749b5fd57c3a09a29b7f2a15b3e809b271b845a50b14b7
 use crate::filter::{
     AttrExp, AttrPath, CompareOp, CompValue, Filter, FilterActionError,
     PatchPath, PatchValuePath, ValFilter, ValuePath, parse_attr_path,
@@ -13221,7 +13221,7 @@ fn __action8<
     (_, r, _): (usize, Filter, usize),
 ) -> Filter
 {
-    Filter::And(Box::new(l), Box::new(r))
+    Filter::and(l, r)
 }
 
 #[allow(unused_variables)]
@@ -13247,7 +13247,7 @@ fn __action10<
     (_, r, _): (usize, Filter, usize),
 ) -> Filter
 {
-    Filter::Or(Box::new(l), Box::new(r))
+    Filter::or(l, r)
 }
 
 #[allow(unused_variables)]
@@ -13407,7 +13407,7 @@ fn __action22<
     (_, r, _): (usize, ValFilter, usize),
 ) -> ValFilter
 {
-    ValFilter::And(Box::new(l), Box::new(r))
+    ValFilter::and(l, r)
 }
 
 #[allow(unused_variables)]
@@ -13433,7 +13433,7 @@ fn __action24<
     (_, r, _): (usize, ValFilter, usize),
 ) -> ValFilter
 {
-    ValFilter::Or(Box::new(l), Box::new(r))
+    ValFilter::or(l, r)
 }
 
 #[allow(unused_variables)]

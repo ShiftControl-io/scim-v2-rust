@@ -36,8 +36,8 @@
 //!         {
 //!             user_name == v
 //!         }
-//!         Filter::And(lhs, rhs) => matches_user(lhs, user_name) && matches_user(rhs, user_name),
-//!         Filter::Or(lhs, rhs) => matches_user(lhs, user_name) || matches_user(rhs, user_name),
+//!         Filter::And(items) => items.iter().all(|f| matches_user(f, user_name)),
+//!         Filter::Or(items) => items.iter().any(|f| matches_user(f, user_name)),
 //!         Filter::Not(inner) => !matches_user(inner, user_name),
 //!         _ => false,
 //!     }
@@ -48,17 +48,26 @@
 //! assert!(!matches_user(&filter, "jsmith"));
 //! ```
 //!
-//! # Depth limit
+//! # Depth and size limits
 //!
 //! [`Filter::from_str`](std::str::FromStr::from_str) and [`PatchPath::from_str`](std::str::FromStr::from_str) (and the corresponding
 //! [`Deserialize`] impls, which delegate to
 //! [`FromStr`](std::str::FromStr)) reject any input whose parsed AST would exceed
-//! [`MAX_FILTER_DEPTH`]. This bounds the call stack used by the crate's own
-//! recursive [`Display`], derived [`PartialEq`] / [`Debug`], serialization, and
-//! `Drop` impls, so a hostile `?filter=` value with thousands of chained
-//! `not`/`and`/`or` operators cannot crash the server after the filter has
-//! been accepted. Hand-constructed [`Filter`] values bypass this check and are
-//! the caller's responsibility.
+//! [`MAX_FILTER_DEPTH`] levels of nesting or [`MAX_FILTER_TERMS`] attribute
+//! expressions. The depth bound is what keeps the crate's own recursive
+//! [`Display`], derived [`PartialEq`] / [`Debug`], serialization, and `Drop`
+//! impls off the end of the stack, so a hostile `?filter=` value with
+//! thousands of nested `not (…)` cannot crash the server after the filter has
+//! been accepted. The term bound is memory hygiene for the other axis.
+//!
+//! The two are independent because `and`/`or` are n-ary: `a or b or c …` is
+//! one [`Filter::Or`] however many operands it has, so a hundred-id batch
+//! lookup has depth 2 and parses, while the same hundred terms would have
+//! been depth 100 in a binary tree. Depth counts only genuine nesting —
+//! `not`, grouping that changes the operator, a value path's inner filter.
+//! Hand-constructed [`Filter`] values bypass both checks and are the caller's
+//! responsibility; build them with [`Filter::and`] / [`Filter::or`] to keep
+//! the shape the parser would produce.
 //!
 //! # SCIM client: building a filter to send in a request
 //!
@@ -72,15 +81,20 @@
 //!
 //! ```
 //! # use scim_v2::filter::*;
-//! let filter = Filter::And(
-//!     Box::new(Filter::Attr(AttrExp::Present(AttrPath::with_name("title")))),
-//!     Box::new(Filter::Attr(AttrExp::Comparison(
+//! let filter = Filter::and(
+//!     Filter::Attr(AttrExp::Present(AttrPath::with_name("title"))),
+//!     Filter::Attr(AttrExp::Comparison(
 //!         AttrPath::with_name("userType"),
 //!         CompareOp::Eq,
 //!         "Employee".into(),
-//!     ))),
+//!     )),
 //! );
 //! assert_eq!(filter.to_string(), r#"title pr and userType eq "Employee""#);
+//!
+//! // `and`/`or` are n-ary: chaining flattens rather than nesting.
+//! let three = Filter::and(filter, Filter::Attr(AttrExp::Present(AttrPath::with_name("active"))));
+//! assert!(matches!(&three, Filter::And(items) if items.len() == 3));
+//! assert_eq!(three.to_string(), r#"title pr and userType eq "Employee" and active pr"#);
 //! ```
 
 use fluent_uri::Uri;
@@ -106,6 +120,22 @@ use thiserror::Error;
 /// filters within this limit.
 pub const MAX_FILTER_DEPTH: usize = 64;
 
+/// Maximum number of attribute expressions (terms) in one filter or PATCH
+/// path, across every `and`/`or` chain and value path.
+///
+/// Distinct from [`MAX_FILTER_DEPTH`] on purpose. Since the AST is n-ary, a
+/// flat `a or b or … ` chain has depth 2 however long it is, so depth no
+/// longer bounds the *size* of an accepted filter; this does. It is generous
+/// — a client resolving a batch of a hundred ids in one `or` chain is an
+/// ordinary request and parses — while still keeping a hostile `?filter=`
+/// from allocating without limit. RFC 7644 §3.4.2.2 sets no term limit and
+/// `ServiceProviderConfig.filter.maxResults` bounds results, not terms, so
+/// this is the crate's own hygiene bound.
+///
+/// Exceeding it is [`FilterActionError::TooManyTerms`], which a server should
+/// answer with RFC 7644 §3.12 `tooMany` or `invalidFilter`.
+pub const MAX_FILTER_TERMS: usize = 1024;
+
 /// Error produced by fallible grammar actions (`=>?` rules in the LALRPOP grammar)
 /// and by post-parse validation.
 /// `#[non_exhaustive]`: further grammar and depth diagnostics will be added
@@ -122,8 +152,17 @@ pub enum FilterActionError {
     /// The parsed filter's nesting depth exceeded [`MAX_FILTER_DEPTH`].
     ///
     /// The wrapped value is the depth at which the limit was first breached.
+    /// Nesting means `not (…)`, a value path's inner filter, or an operator
+    /// change such as an `or` inside an `and` — never the length of a
+    /// same-operator chain, which is bounded by
+    /// [`TooManyTerms`](FilterActionError::TooManyTerms) instead.
     #[error("filter nesting depth exceeds maximum of {MAX_FILTER_DEPTH} (at depth {0})")]
     DepthExceeded(usize),
+    /// The filter contains more attribute expressions than [`MAX_FILTER_TERMS`].
+    ///
+    /// The wrapped value is the count that breached the limit.
+    #[error("filter has too many terms: {0} exceeds the maximum of {MAX_FILTER_TERMS}")]
+    TooManyTerms(usize),
 }
 
 /// Error returned by [`Filter::from_str`](std::str::FromStr::from_str) and [`PatchPath::from_str`](std::str::FromStr::from_str) when the
@@ -206,14 +245,83 @@ pub enum Filter {
     /// Logical conjunction — both operands must match.
     ///
     /// Binds more tightly than [`Or`](Filter::Or).
-    And(Box<Filter>, Box<Filter>),
+    ///
+    /// N-ary: `a and b and c` is one `And` with three operands, not two nested
+    /// pairs. The grammar flattens same-operator chains on the way in, so the
+    /// tree's depth reflects genuine nesting (`not`, grouping, a value path, an
+    /// `or` inside an `and`) and never the length of a chain. That is what lets
+    /// a 100-term batch lookup parse while [`MAX_FILTER_DEPTH`] still bounds the
+    /// recursion of the derived impls. Always has at least two operands when
+    /// produced by the parser.
+    And(Vec<Filter>),
 
     /// Logical disjunction — at least one operand must match.
     ///
     /// Lowest precedence operator. When an `Or` expression appears as a
     /// direct child of an `And`, [`Display`] wraps it in parentheses to
     /// preserve the original precedence on round-trip.
-    Or(Box<Filter>, Box<Filter>),
+    ///
+    /// N-ary, as [`And`](Filter::And).
+    Or(Vec<Filter>),
+}
+
+impl Filter {
+    /// `lhs and rhs`, flattening: an `And` operand contributes its operands
+    /// rather than nesting, since `and` is associative. This is the
+    /// constructor the parser uses, and the one to use when building filters
+    /// programmatically so the tree keeps the shape the parser would produce.
+    pub fn and(lhs: Filter, rhs: Filter) -> Filter {
+        let mut items = match lhs {
+            Filter::And(items) => items,
+            other => vec![other],
+        };
+        match rhs {
+            Filter::And(more) => items.extend(more),
+            other => items.push(other),
+        }
+        Filter::And(items)
+    }
+
+    /// `lhs or rhs`, flattening as [`Filter::and`] does.
+    pub fn or(lhs: Filter, rhs: Filter) -> Filter {
+        let mut items = match lhs {
+            Filter::Or(items) => items,
+            other => vec![other],
+        };
+        match rhs {
+            Filter::Or(more) => items.extend(more),
+            other => items.push(other),
+        }
+        Filter::Or(items)
+    }
+}
+
+impl ValFilter {
+    /// `lhs and rhs`, flattening as [`Filter::and`].
+    pub fn and(lhs: ValFilter, rhs: ValFilter) -> ValFilter {
+        let mut items = match lhs {
+            ValFilter::And(items) => items,
+            other => vec![other],
+        };
+        match rhs {
+            ValFilter::And(more) => items.extend(more),
+            other => items.push(other),
+        }
+        ValFilter::And(items)
+    }
+
+    /// `lhs or rhs`, flattening as [`Filter::or`].
+    pub fn or(lhs: ValFilter, rhs: ValFilter) -> ValFilter {
+        let mut items = match lhs {
+            ValFilter::Or(items) => items,
+            other => vec![other],
+        };
+        match rhs {
+            ValFilter::Or(more) => items.extend(more),
+            other => items.push(other),
+        }
+        ValFilter::Or(items)
+    }
 }
 
 impl Display for Filter {
@@ -222,18 +330,30 @@ impl Display for Filter {
             Filter::Attr(e) => write!(f, "{e}"),
             Filter::ValuePath(vp) => write!(f, "{}[{}]", vp.attr, vp.filter),
             Filter::Not(inner) => write!(f, "not ({inner})"),
-            Filter::And(lhs, rhs) => {
-                fmt_and_operand_filter(lhs, f)?;
-                write!(f, " and ")?;
-                fmt_and_operand_filter(rhs, f)
+            Filter::And(items) => {
+                for (i, item) in items.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, " and ")?;
+                    }
+                    fmt_and_operand_filter(item, f)?;
+                }
+                Ok(())
             }
-            Filter::Or(lhs, rhs) => write!(f, "{lhs} or {rhs}"),
+            Filter::Or(items) => {
+                for (i, item) in items.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, " or ")?;
+                    }
+                    write!(f, "{item}")?;
+                }
+                Ok(())
+            }
         }
     }
 }
 
 fn fmt_and_operand_filter(operand: &Filter, f: &mut Formatter<'_>) -> std::fmt::Result {
-    if matches!(operand, Filter::Or(_, _)) {
+    if matches!(operand, Filter::Or(_)) {
         write!(f, "({operand})")
     } else {
         write!(f, "{operand}")
@@ -308,6 +428,12 @@ impl std::str::FromStr for Filter {
                 error: FilterActionError::DepthExceeded(depth),
             });
         }
+        if let Some(terms) = filter_terms_exceed(&parsed, MAX_FILTER_TERMS) {
+            drop_filter_iteratively(parsed);
+            return Err(LalrParseError::User {
+                error: FilterActionError::TooManyTerms(terms),
+            });
+        }
         Ok(parsed)
     }
 }
@@ -351,9 +477,11 @@ pub enum ValFilter {
     /// Logical negation. Serializes as `not (<inner>)`.
     Not(Box<ValFilter>),
     /// Logical conjunction — both operands must match.
-    And(Box<ValFilter>, Box<ValFilter>),
+    /// N-ary, as [`Filter::And`].
+    And(Vec<ValFilter>),
     /// Logical disjunction — at least one operand must match.
-    Or(Box<ValFilter>, Box<ValFilter>),
+    /// N-ary, as [`Filter::Or`].
+    Or(Vec<ValFilter>),
 }
 
 /// An atomic filter expression: a presence test or an attribute comparison.
@@ -684,18 +812,30 @@ impl Display for ValFilter {
         match self {
             ValFilter::Attr(e) => write!(f, "{e}"),
             ValFilter::Not(inner) => write!(f, "not ({inner})"),
-            ValFilter::And(lhs, rhs) => {
-                fmt_and_operand_val_filter(lhs, f)?;
-                write!(f, " and ")?;
-                fmt_and_operand_val_filter(rhs, f)
+            ValFilter::And(items) => {
+                for (i, item) in items.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, " and ")?;
+                    }
+                    fmt_and_operand_val_filter(item, f)?;
+                }
+                Ok(())
             }
-            ValFilter::Or(lhs, rhs) => write!(f, "{lhs} or {rhs}"),
+            ValFilter::Or(items) => {
+                for (i, item) in items.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, " or ")?;
+                    }
+                    write!(f, "{item}")?;
+                }
+                Ok(())
+            }
         }
     }
 }
 
 fn fmt_and_operand_val_filter(operand: &ValFilter, f: &mut Formatter<'_>) -> std::fmt::Result {
-    if matches!(operand, ValFilter::Or(_, _)) {
+    if matches!(operand, ValFilter::Or(_)) {
         write!(f, "({operand})")
     } else {
         write!(f, "{operand}")
@@ -746,15 +886,21 @@ impl std::str::FromStr for PatchPath {
             .map_err(|e| e.map_token(|t| t.to_string()))?;
         match parsed {
             PatchPath::Attr(a) => Ok(PatchPath::Attr(a)),
-            PatchPath::Value(vp) => match val_filter_depth_exceeds(&vp.filter, MAX_FILTER_DEPTH) {
-                Some(depth) => {
+            PatchPath::Value(vp) => {
+                if let Some(depth) = val_filter_depth_exceeds(&vp.filter, MAX_FILTER_DEPTH) {
                     drop_val_filter_iteratively(vp.filter);
-                    Err(LalrParseError::User {
+                    return Err(LalrParseError::User {
                         error: FilterActionError::DepthExceeded(depth),
-                    })
+                    });
                 }
-                None => Ok(PatchPath::Value(vp)),
-            },
+                if let Some(terms) = val_filter_terms_exceed(&vp.filter, MAX_FILTER_TERMS) {
+                    drop_val_filter_iteratively(vp.filter);
+                    return Err(LalrParseError::User {
+                        error: FilterActionError::TooManyTerms(terms),
+                    });
+                }
+                Ok(PatchPath::Value(vp))
+            }
         }
     }
 }
@@ -781,10 +927,54 @@ fn filter_depth_exceeds(root: &Filter, limit: usize) -> Option<usize> {
                 }
             }
             Filter::Not(inner) => worklist.push((inner, depth + 1)),
-            Filter::And(lhs, rhs) | Filter::Or(lhs, rhs) => {
-                worklist.push((lhs, depth + 1));
-                worklist.push((rhs, depth + 1));
+            Filter::And(items) | Filter::Or(items) => {
+                worklist.extend(items.iter().map(|item| (item, depth + 1)));
             }
+        }
+    }
+    None
+}
+
+/// Count the attribute expressions (terms) in a filter, iteratively, stopping
+/// as soon as `limit` is exceeded.
+fn filter_terms_exceed(root: &Filter, limit: usize) -> Option<usize> {
+    let mut count = 0usize;
+    let mut worklist: Vec<&Filter> = vec![root];
+    while let Some(node) = worklist.pop() {
+        match node {
+            Filter::Attr(_) => count += 1,
+            Filter::ValuePath(vp) => {
+                let mut inner: Vec<&ValFilter> = vec![&vp.filter];
+                while let Some(v) = inner.pop() {
+                    match v {
+                        ValFilter::Attr(_) => count += 1,
+                        ValFilter::Not(x) => inner.push(x),
+                        ValFilter::And(items) | ValFilter::Or(items) => inner.extend(items),
+                    }
+                }
+            }
+            Filter::Not(inner) => worklist.push(inner),
+            Filter::And(items) | Filter::Or(items) => worklist.extend(items),
+        }
+        if count > limit {
+            return Some(count);
+        }
+    }
+    None
+}
+
+/// `ValFilter` mirror of [`filter_terms_exceed`].
+fn val_filter_terms_exceed(root: &ValFilter, limit: usize) -> Option<usize> {
+    let mut count = 0usize;
+    let mut worklist: Vec<&ValFilter> = vec![root];
+    while let Some(node) = worklist.pop() {
+        match node {
+            ValFilter::Attr(_) => count += 1,
+            ValFilter::Not(inner) => worklist.push(inner),
+            ValFilter::And(items) | ValFilter::Or(items) => worklist.extend(items),
+        }
+        if count > limit {
+            return Some(count);
         }
     }
     None
@@ -800,9 +990,8 @@ fn val_filter_depth_exceeds(root: &ValFilter, limit: usize) -> Option<usize> {
         match node {
             ValFilter::Attr(_) => {}
             ValFilter::Not(inner) => worklist.push((inner, depth + 1)),
-            ValFilter::And(lhs, rhs) | ValFilter::Or(lhs, rhs) => {
-                worklist.push((lhs, depth + 1));
-                worklist.push((rhs, depth + 1));
+            ValFilter::And(items) | ValFilter::Or(items) => {
+                worklist.extend(items.iter().map(|item| (item, depth + 1)));
             }
         }
     }
@@ -818,10 +1007,7 @@ fn drop_filter_iteratively(root: Filter) {
             Filter::Attr(_) => {}
             Filter::ValuePath(vp) => drop_val_filter_iteratively(*vp.filter),
             Filter::Not(inner) => stack.push(*inner),
-            Filter::And(lhs, rhs) | Filter::Or(lhs, rhs) => {
-                stack.push(*lhs);
-                stack.push(*rhs);
-            }
+            Filter::And(items) | Filter::Or(items) => stack.extend(items),
         }
     }
 }
@@ -833,10 +1019,7 @@ fn drop_val_filter_iteratively(root: ValFilter) {
         match node {
             ValFilter::Attr(_) => {}
             ValFilter::Not(inner) => stack.push(*inner),
-            ValFilter::And(lhs, rhs) | ValFilter::Or(lhs, rhs) => {
-                stack.push(*lhs);
-                stack.push(*rhs);
-            }
+            ValFilter::And(items) | ValFilter::Or(items) => stack.extend(items),
         }
     }
 }
@@ -1121,13 +1304,13 @@ mod tests {
             .unwrap();
         assert_eq!(
             f,
-            Filter::And(
-                Box::new(Filter::Attr(AttrExp::Present(AttrPath {
+            Filter::And(vec![
+                Filter::Attr(AttrExp::Present(AttrPath {
                     uri: None,
                     name: "title".into(),
                     sub_attr: None,
-                }))),
-                Box::new(Filter::Attr(AttrExp::Comparison(
+                })),
+                Filter::Attr(AttrExp::Comparison(
                     AttrPath {
                         uri: None,
                         name: "userType".into(),
@@ -1135,8 +1318,8 @@ mod tests {
                     },
                     CompareOp::Eq,
                     CompValue::Str("Employee".into()),
-                ))),
-            )
+                )),
+            ])
         );
     }
 
@@ -1147,13 +1330,13 @@ mod tests {
             .unwrap();
         assert_eq!(
             f,
-            Filter::Or(
-                Box::new(Filter::Attr(AttrExp::Present(AttrPath {
+            Filter::Or(vec![
+                Filter::Attr(AttrExp::Present(AttrPath {
                     uri: None,
                     name: "title".into(),
                     sub_attr: None,
-                }))),
-                Box::new(Filter::Attr(AttrExp::Comparison(
+                })),
+                Filter::Attr(AttrExp::Comparison(
                     AttrPath {
                         uri: None,
                         name: "userType".into(),
@@ -1161,8 +1344,8 @@ mod tests {
                     },
                     CompareOp::Eq,
                     CompValue::Str("Intern".into()),
-                ))),
-            )
+                )),
+            ])
         );
     }
 
@@ -1173,10 +1356,12 @@ mod tests {
             .parse(r#"title pr and userType eq "Employee" or emails pr"#)
             .unwrap();
 
-        assert!(matches!(f, Filter::Or(_, _)));
-        if let Filter::Or(left, _) = f {
-            assert!(matches!(*left, Filter::And(_, _)));
-        }
+        let Filter::Or(items) = f else {
+            panic!("expected Or, got {f:?}");
+        };
+        assert_eq!(items.len(), 2);
+        assert!(matches!(&items[0], Filter::And(inner) if inner.len() == 2));
+        assert!(matches!(&items[1], Filter::Attr(_)));
     }
 
     #[test]
@@ -1193,7 +1378,11 @@ mod tests {
         let f = crate::filter_parser::FilterParser::new()
             .parse(r#"userType eq "Employee" and (emails co "example.com" or emails.value co "example.org")"#)
             .unwrap();
-        assert!(matches!(f, Filter::And(_, _)));
+        let Filter::And(items) = f else {
+            panic!("expected And, got {f:?}");
+        };
+        assert_eq!(items.len(), 2);
+        assert!(matches!(&items[1], Filter::Or(inner) if inner.len() == 2));
     }
 
     #[test]
@@ -1204,7 +1393,7 @@ mod tests {
         assert!(matches!(f, Filter::ValuePath(_)));
         if let Filter::ValuePath(vp) = f {
             assert_eq!(vp.attr.name, "emails");
-            assert!(matches!(*vp.filter, ValFilter::And(_, _)));
+            assert!(matches!(&*vp.filter, ValFilter::And(items) if items.len() == 2));
         }
     }
 
@@ -1345,9 +1534,10 @@ mod tests {
         let PatchPath::Value(vp) = p else {
             panic!("expected PatchPath::Value");
         };
-        let ValFilter::And(_, _) = vp.filter else {
+        let ValFilter::And(items) = &vp.filter else {
             panic!("expected ValFilter::And, got {:?}", vp.filter);
         };
+        assert_eq!(items.len(), 2);
         assert_eq!(vp.sub_attr.as_deref(), Some("value"));
     }
 
@@ -1359,7 +1549,7 @@ mod tests {
             .unwrap();
         assert!(matches!(f, Filter::ValuePath(_)));
         if let Filter::ValuePath(vp) = f {
-            assert!(matches!(*vp.filter, ValFilter::And(_, _)));
+            assert!(matches!(&*vp.filter, ValFilter::And(items) if items.len() == 2));
         }
     }
 
@@ -1433,7 +1623,7 @@ mod tests {
     }
 
     // ---------------------------------------------------------------------------
-    // Depth-limit enforcement (DoS hardening against deeply nested filters)
+    // Depth- and term-limit enforcement (DoS hardening against pathological filters)
     // ---------------------------------------------------------------------------
 
     fn assert_depth_exceeded<T: std::fmt::Debug>(res: Result<T, ParseError>) {
@@ -1479,37 +1669,229 @@ mod tests {
         assert_depth_exceeded(s.parse::<Filter>());
     }
 
-    #[test]
-    fn and_chain_within_limit_parses() {
-        // `a and b and c` is left-associative, so N leaves produce a depth-N AST
-        // (N-1 And nodes on the left spine + 1 leaf).
-        let n = MAX_FILTER_DEPTH;
+    fn chain(op: &str, terms: usize) -> String {
+        assert!(terms >= 1);
         let mut s = String::from("title pr");
-        for _ in 0..n - 1 {
-            s.push_str(" and title pr");
+        for _ in 1..terms {
+            s.push(' ');
+            s.push_str(op);
+            s.push_str(" title pr");
         }
-        s.parse::<Filter>()
-            .unwrap_or_else(|e| panic!("expected success with {n} leaves: {e:?}"));
+        s
+    }
+
+    fn assert_too_many_terms<T: std::fmt::Debug>(res: Result<T, ParseError>, expected: usize) {
+        match res {
+            Err(LalrParseError::User {
+                error: FilterActionError::TooManyTerms(n),
+            }) => assert_eq!(n, expected, "reported term count"),
+            Err(other) => panic!("expected ParseError::User(TooManyTerms), got {other:?}"),
+            Ok(ok) => panic!("expected rejection, but parse succeeded: {ok:?}"),
+        }
+    }
+
+    // A same-operator chain is one n-ary node: its depth is 2 regardless of
+    // length, so the depth cap never fires on it and the term cap is what
+    // bounds it.
+    #[test_case("and" ; "and_chain")]
+    #[test_case("or" ; "or_chain")]
+    fn chain_at_term_limit_parses_flat(op: &str) {
+        let f: Filter = chain(op, MAX_FILTER_TERMS)
+            .parse()
+            .unwrap_or_else(|e| panic!("expected success with {MAX_FILTER_TERMS} terms: {e:?}"));
+        let items = match &f {
+            Filter::And(items) | Filter::Or(items) => items,
+            other => panic!("expected a chain node, got {other:?}"),
+        };
+        assert_eq!(items.len(), MAX_FILTER_TERMS);
+        assert!(
+            filter_depth_exceeds(&f, 2).is_none(),
+            "flat chain must have depth 2"
+        );
+        assert_eq!(filter_depth_exceeds(&f, 1), Some(2));
+    }
+
+    #[test_case("and" ; "and_chain")]
+    #[test_case("or" ; "or_chain")]
+    fn chain_exceeding_term_limit_rejected(op: &str) {
+        let n = MAX_FILTER_TERMS + 1;
+        assert_too_many_terms(chain(op, n).parse::<Filter>(), n);
+    }
+
+    // R2-I1: the case that motivated the n-ary AST. A client resolving a
+    // batch of ids in one `or` chain is an ordinary request; 100 terms is
+    // well past the old depth cap of 64 and must parse.
+    #[test]
+    fn hundred_term_or_chain_parses_and_round_trips() {
+        let s = (0..100)
+            .map(|i| format!(r#"id eq "{i:032x}""#))
+            .collect::<Vec<_>>()
+            .join(" or ");
+        let f: Filter = s.parse().expect("100-term or chain parses");
+        let Filter::Or(items) = &f else {
+            panic!("expected Or, got {f:?}");
+        };
+        assert_eq!(items.len(), 100);
+        assert!(items.iter().all(|i| matches!(i, Filter::Attr(_))));
+        assert_eq!(f.to_string(), s);
+        let reparsed: Filter = f.to_string().parse().unwrap();
+        assert_eq!(f, reparsed);
+    }
+
+    // Same-operator grouping flattens: `and`/`or` are associative, so the
+    // parenthesised and unparenthesised forms produce identical trees.
+    #[test_case("a pr and (b pr and c pr)", "a pr and b pr and c pr" ; "and_right_grouped")]
+    #[test_case("(a pr and b pr) and c pr", "a pr and b pr and c pr" ; "and_left_grouped")]
+    #[test_case("a pr or (b pr or c pr)", "a pr or b pr or c pr" ; "or_right_grouped")]
+    #[test_case("(a pr or b pr) or c pr", "a pr or b pr or c pr" ; "or_left_grouped")]
+    #[test_case("(a pr and b pr) and (c pr and d pr)", "a pr and b pr and c pr and d pr" ; "and_both_grouped")]
+    fn same_operator_grouping_flattens(grouped: &str, flat: &str) {
+        let g: Filter = grouped.parse().unwrap();
+        let f: Filter = flat.parse().unwrap();
+        assert_eq!(g, f);
+        let (Filter::And(items) | Filter::Or(items)) = &g else {
+            panic!("expected a chain node, got {g:?}");
+        };
+        assert_eq!(items.len(), flat.matches(" pr").count());
+        assert_eq!(g.to_string(), flat);
+    }
+
+    // Mixed operators keep their structure: an `or` under an `and` is real
+    // nesting, and Display puts the parens back so the string round-trips.
+    #[test_case("(a pr or b pr) and c pr", &["Or", "Attr"] ; "or_under_and_keeps_parens")]
+    #[test_case("a pr and b pr or c pr", &["And", "Attr"] ; "and_under_or_no_parens_needed")]
+    #[test_case("a pr and (b pr or c pr) and d pr", &["Attr", "Or", "Attr"] ; "or_in_middle_of_and")]
+    fn mixed_operator_structure_preserved(src: &str, shape: &[&str]) {
+        let f: Filter = src.parse().unwrap();
+        let (Filter::And(items) | Filter::Or(items)) = &f else {
+            panic!("expected a chain node, got {f:?}");
+        };
+        let got: Vec<&str> = items
+            .iter()
+            .map(|i| match i {
+                Filter::Attr(_) => "Attr",
+                Filter::And(_) => "And",
+                Filter::Or(_) => "Or",
+                Filter::Not(_) => "Not",
+                Filter::ValuePath(_) => "ValuePath",
+            })
+            .collect();
+        assert_eq!(got, shape);
+        assert_eq!(f.to_string(), src);
+        assert_eq!(f.to_string().parse::<Filter>().unwrap(), f);
     }
 
     #[test]
-    fn and_chain_exceeding_limit_rejected() {
-        let n = MAX_FILTER_DEPTH + 10;
-        let mut s = String::from("title pr");
-        for _ in 0..n - 1 {
-            s.push_str(" and title pr");
-        }
-        assert_depth_exceeded(s.parse::<Filter>());
+    fn programmatic_constructors_flatten_like_the_parser() {
+        let leaf = |n: &str| {
+            Filter::Attr(AttrExp::Present(AttrPath {
+                uri: None,
+                name: n.into(),
+                sub_attr: None,
+            }))
+        };
+        let a = Filter::and(Filter::and(leaf("a"), leaf("b")), leaf("c"));
+        let b = Filter::and(leaf("a"), Filter::and(leaf("b"), leaf("c")));
+        let parsed: Filter = "a pr and b pr and c pr".parse().unwrap();
+        assert_eq!(a, parsed);
+        assert_eq!(b, parsed);
+
+        let mixed = Filter::and(Filter::or(leaf("a"), leaf("b")), leaf("c"));
+        let parsed: Filter = "(a pr or b pr) and c pr".parse().unwrap();
+        assert_eq!(mixed, parsed);
+
+        let v = |n: &str| {
+            ValFilter::Attr(AttrExp::Present(AttrPath {
+                uri: None,
+                name: n.into(),
+                sub_attr: None,
+            }))
+        };
+        let va = ValFilter::or(ValFilter::or(v("a"), v("b")), ValFilter::or(v("c"), v("d")));
+        let parsed: Filter = "emails[a pr or b pr or c pr or d pr]".parse().unwrap();
+        let Filter::ValuePath(vp) = parsed else {
+            panic!("expected ValuePath");
+        };
+        assert_eq!(*vp.filter, va);
+    }
+
+    // The term count spans value-path inner filters too, since every
+    // attribute expression costs the same to hold.
+    #[test]
+    fn term_count_includes_value_path_terms() {
+        let f: Filter = r#"emails[type eq "work" or type eq "home"] and title pr and not (x pr)"#
+            .parse()
+            .unwrap();
+        assert_eq!(filter_terms_exceed(&f, 3), Some(4));
+        assert!(filter_terms_exceed(&f, 4).is_none());
     }
 
     #[test]
-    fn or_chain_exceeding_limit_rejected() {
-        let n = MAX_FILTER_DEPTH + 10;
-        let mut s = String::from("title pr");
-        for _ in 0..n - 1 {
-            s.push_str(" or title pr");
-        }
-        assert_depth_exceeded(s.parse::<Filter>());
+    fn value_path_chain_exceeding_term_limit_rejected() {
+        let n = MAX_FILTER_TERMS + 1;
+        let inner = chain("or", n);
+        assert_too_many_terms(format!("emails[{inner}]").parse::<Filter>(), n);
+        assert_too_many_terms(format!("emails[{inner}].value").parse::<PatchPath>(), n);
+    }
+
+    #[test]
+    fn value_path_chain_at_term_limit_parses() {
+        let inner = chain("or", MAX_FILTER_TERMS);
+        let f: Filter = format!("emails[{inner}]").parse().unwrap();
+        let Filter::ValuePath(vp) = &f else {
+            panic!("expected ValuePath");
+        };
+        assert!(matches!(&*vp.filter, ValFilter::Or(items) if items.len() == MAX_FILTER_TERMS));
+        let p: PatchPath = format!("emails[{inner}].value").parse().unwrap();
+        assert!(matches!(p, PatchPath::Value(_)));
+    }
+
+    // The point of the n-ary shape: every recursive impl runs in depth-2
+    // recursion on a flat chain, so a chain at the term limit is safe on a
+    // stack far smaller than the test harness default (2 MiB), where the old
+    // binary tree overflowed `Display`/`PartialEq` in debug builds between
+    // 1_024 and 4_096 terms.
+    #[test]
+    fn flat_chain_at_term_limit_is_safe_on_a_small_stack() {
+        std::thread::Builder::new()
+            .stack_size(256 * 1024)
+            .spawn(|| {
+                let s = chain("or", MAX_FILTER_TERMS);
+                let f: Filter = s.parse().unwrap();
+                assert_eq!(f.to_string(), s);
+                let reparsed: Filter = f.to_string().parse().unwrap();
+                assert_eq!(f, reparsed);
+                let _ = format!("{f:?}");
+                let json = serde_json::to_string(&f).unwrap();
+                let back: Filter = serde_json::from_str(&json).unwrap();
+                assert_eq!(back, f);
+                drop(f);
+                drop(reparsed);
+                drop(back);
+            })
+            .unwrap()
+            .join()
+            .expect("flat chain at the term limit must not overflow a 256 KiB stack");
+    }
+
+    // Regression for R2-I1's hygiene half: a 100_000-term chain is rejected
+    // with the term error rather than parsed, and neither the parse, the
+    // count, nor the drop of the rejected AST recurses over the chain.
+    #[test]
+    fn extremely_long_chain_rejected_without_panic() {
+        let n = 100_000;
+        assert_too_many_terms(chain("or", n).parse::<Filter>(), MAX_FILTER_TERMS + 1);
+    }
+
+    #[test]
+    fn deserialize_rejects_too_many_terms() {
+        let raw = chain("and", MAX_FILTER_TERMS + 1);
+        let json = serde_json::to_string(&raw).unwrap();
+        let err = serde_json::from_str::<Filter>(&json).unwrap_err();
+        assert!(
+            err.to_string().contains("too many terms"),
+            "expected term error, got: {err}"
+        );
     }
 
     #[test]

@@ -10,6 +10,20 @@ so is free, and every break is listed below.
 
 ### Breaking Changes
 
+- **`Filter::And`/`Or` and `ValFilter::And`/`Or` are n-ary: `And(Vec<Filter>)`,
+  not `And(Box<Filter>, Box<Filter>)`.** `and` and `or` are associative, so
+  the parser now flattens same-operator chains into one node: `a and b and c`
+  is `And([a, b, c])`, and `a and (b and c)` parses to the identical tree.
+  Depth therefore measures genuine nesting (`not`, an `or` under an `and`, a
+  value path's inner filter) and never chain length, which is what let the
+  R2-I1 fix below land without loosening the depth cap. Patterns on these
+  variants change from `And(lhs, rhs)` to `And(items)`; evaluators that
+  recursed on two children now fold over `items` (`items.iter().all(…)` /
+  `.any(…)`). Build filters programmatically with the new `Filter::and` /
+  `Filter::or` (and `ValFilter` equivalents), which flatten the way the parser
+  does, so a hand-built tree compares equal to its parsed `Display` output.
+  The parser never produces an `And`/`Or` with fewer than two operands.
+
 - **Multi-valued attributes are `Vec<T>`, not `Option<Vec<T>>`** — all 18 of
   them: `User`'s `emails`, `addresses`, `phoneNumbers`, `ims`, `photos`,
   `groups`, `entitlements`, `roles` and `x509Certificates`; `Group.members`;
@@ -109,6 +123,18 @@ so is free, and every break is listed below.
   caller could set it.
 
 ### Added
+
+- `filter::MAX_FILTER_TERMS` (1024) and `FilterActionError::TooManyTerms(usize)`:
+  a size bound on the number of attribute expressions in one filter or PATCH
+  path, counted across `and`/`or` chains and value-path inner filters,
+  enforced at the same two entry points as the depth cap (`Filter::from_str`,
+  `PatchPath::from_str`, and the `Deserialize` impls that delegate to them).
+  Independent of `MAX_FILTER_DEPTH` by design: with an n-ary AST depth no
+  longer bounds size. Generous on purpose — a hundred-id batch lookup is an
+  ordinary request — while keeping a hostile `?filter=` from allocating
+  without limit. Map it to RFC 7644 §3.12 `tooMany` or `invalidFilter`.
+- `Filter::and` / `Filter::or` and `ValFilter::and` / `ValFilter::or`:
+  flattening constructors that produce the shape the parser would.
 
 - **Feature flags `filter`, `models` and `schemas`, all on by default**, so an
   existing consumer sees no change. Turning off `filter` drops eight crates —
@@ -211,10 +237,13 @@ so is free, and every break is listed below.
   exercised: six rows were reductions and the other two both enabled the
   non-default compact posture.
 
-Deferred with reason: R2-I1, `MAX_FILTER_DEPTH` counting terms in a flat
-`or` chain as nesting. Pre-existing, and `FilterActionError` is
-`#[non_exhaustive]`, so a distinct too-many-terms variant can land in 1.x;
-the constant's *value* is the only thing 1.0 freezes.
+- **R2-I1 — a flat `or` chain of more than 64 terms was rejected as "too
+  deep".** The AST was a binary tree, so `a or b or c …` nested one level per
+  term and `MAX_FILTER_DEPTH` (64) capped a batch lookup at 64 ids. Fixed by
+  making the AST n-ary (see Breaking Changes): a same-operator chain is one
+  node of depth 2 however long it is, and a separate `MAX_FILTER_TERMS` (1024)
+  bounds size. A 100-term `or` chain now parses; a 100 000-term one is
+  rejected with `TooManyTerms` without touching the stack.
 
 ### Added (resilience and conformance pass)
 

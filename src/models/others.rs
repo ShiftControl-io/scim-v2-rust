@@ -1516,12 +1516,15 @@ mod tests {
                                 name: attr_name,
                                 sub_attr: None,
                             },
-                        filter: ValFilter::And(left, right),
+                        filter: ValFilter::And(items),
                         sub_attr: None,
                     }),
                 value: None,
             } if attr_name == "emails" => {
-                match left.as_ref() {
+                let [left, right] = items.as_slice() else {
+                    panic!("expected two And operands, got {items:?}");
+                };
+                match left {
                     ValFilter::Attr(AttrExp::Comparison(
                         AttrPath {
                             uri: None,
@@ -1533,7 +1536,7 @@ mod tests {
                     )) if n == "type" && v == "work" => {}
                     other => panic!("unexpected left filter: {other:?}"),
                 }
-                match right.as_ref() {
+                match right {
                     ValFilter::Attr(AttrExp::Comparison(
                         AttrPath {
                             uri: None,
