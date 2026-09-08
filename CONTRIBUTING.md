@@ -105,6 +105,26 @@ Line coverage is measured on every push to `main` and is currently ~96%
 cargo llvm-cov --all-features --ignore-filename-regex 'filter_parser\.rs'
 ```
 
+## Dependencies
+
+Requirements in `Cargo.toml` are caret requirements at major.minor:
+`serde = "1.0"`, `thiserror = "2.0"`, `lalrpop-util = "0.23"`. Every form Cargo
+accepts there is a caret requirement — `"1.0.228"` means `>=1.0.228, <2.0.0`,
+not a pin — and Cargo always resolves to the newest compatible release, so a
+patch digit changes nothing about what a consumer gets. All it sets is the
+floor, and a floor is a claim about the oldest API this crate compiles against;
+stating it at major.minor keeps that claim honest and generous. A library
+cannot pin in any case: `=1.0.228` would refuse to unify with any other crate
+in the graph wanting a different patch, and a library's `Cargo.lock` is ignored
+by its consumers, which is why none is committed here.
+
+Because consumers get whatever is newest on the day they build, no PR can
+exercise that. The `Weekly drift` workflow (`.github/workflows/weekly.yml`)
+resolves fresh with no cache, runs the suite and feature matrix on stable and
+beta, re-checks the MSRV, re-runs the advisory audit, and files an issue on
+failure. When it does, the fix is usually a floor bump here plus a CHANGELOG
+line.
+
 ## Releases
 
 `cargo-semver-checks` runs on every PR, so an accidental breaking change is

@@ -8,6 +8,100 @@
 //! It performs no I/O, evaluates no filters against storage, and does not wrap
 //! `serde` — use `serde_json` directly for that.
 //!
+//! ## Quick start
+//!
+//! A SCIM server receiving `POST /Users`. [`Strict`] deserializes the body and
+//! validates it for the direction it is travelling in one step, so a
+//! non-conformant request never becomes a [`User`](models::user::User) at all;
+//! the error names the offending attribute by its wire path and carries the
+//! RFC 7644 §3.12 `scimType`, ready for a `400`.
+//!
+//! ```rust
+//! # #[cfg(feature = "models")] {
+//! use scim_v2::{Context, CreateRequest, Strict, Valid};
+//! use scim_v2::models::{scim_schema::Meta, user::User};
+//!
+//! let body = r#"{
+//!   "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+//!   "userName": "bjensen@example.com",
+//!   "name": {"givenName": "Barbara", "familyName": "Jensen"},
+//!   "emails": [{"value": "bjensen@example.com", "type": "work", "primary": true}]
+//! }"#;
+//!
+//! // Deserialize and validate as a create request. RFC 7643 §3.1 forbids `id`
+//! // here; a blank `userName` or a second `primary: true` email would fail too.
+//! let request: Valid<User<String>> =
+//!     match serde_json::from_str::<Strict<User<String>, CreateRequest>>(body) {
+//!         Ok(strict) => strict.into_valid(),
+//!         Err(e) => return Err(e.into()), // answer 400 with `e.to_string()`
+//!     };
+//! assert_eq!(request.user_name, "bjensen@example.com");
+//!
+//! // Store it, then build the representation to return. A response MUST carry
+//! // `id` (§3.1) and MUST NOT carry `password` (§4.1); `Context::Response`
+//! // checks both, and `Valid` is the proof that it did.
+//! let mut user = request.into_inner();
+//! user.id = Some("2819c223-7f76-453a-919d-413861904646".to_string());
+//! user.meta = Some(Meta {
+//!     resource_type: Some("User".to_string()),
+//!     location: Some("https://example.com/v2/Users/2819c223-7f76-453a-919d-413861904646".to_string()),
+//!     ..Default::default()
+//! });
+//! let response = Valid::new(user, Context::Response)?;
+//! let json = serde_json::to_string(&response)?;
+//! assert!(json.contains(r#""id":"2819c223-7f76-453a-919d-413861904646""#));
+//! # }
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+//!
+//! A SCIM client reading `GET /Users`. A page deserializes straight into the
+//! resource type, the lenient parsers absorb what real providers send (here
+//! Entra's `"active": "True"`), and `validate()` checks the envelope.
+//!
+//! ```rust
+//! # #[cfg(feature = "models")] {
+//! use scim_v2::{Validate, models::{others::ListResponse, user::User}};
+//!
+//! let page = r#"{
+//!   "schemas": ["urn:ietf:params:scim:api:messages:2.0:ListResponse"],
+//!   "totalResults": 1, "startIndex": 1, "itemsPerPage": 1,
+//!   "Resources": [{
+//!     "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+//!     "id": "2819c223-7f76-453a-919d-413861904646",
+//!     "userName": "bjensen@example.com",
+//!     "active": "True"
+//!   }]
+//! }"#;
+//!
+//! let page: ListResponse<User<String>> = serde_json::from_str(page)?;
+//! page.validate()?;
+//! assert_eq!(page.resources[0].active, Some(true));
+//! # }
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+//!
+//! And the query side: a `?filter=` parameter parses into an AST for you to
+//! map onto your storage. A malformed filter is an error to answer with
+//! `invalidFilter`, never a panic.
+//!
+//! ```rust
+//! # #[cfg(feature = "filter")] {
+//! use scim_v2::filter::{AttrExp, CompValue, CompareOp, Filter};
+//!
+//! let filter: Filter = r#"userName eq "bjensen@example.com""#.parse()?;
+//! let Filter::Attr(AttrExp::Comparison(path, CompareOp::Eq, CompValue::Str(value))) = &filter
+//! else {
+//!     unreachable!()
+//! };
+//! assert_eq!((path.name.as_str(), value.as_str()), ("userName", "bjensen@example.com"));
+//! assert!("userName garbage".parse::<Filter>().is_err());
+//! # }
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+//!
+//! For the parsed shape, precedence rules and the `invalidFilter` error path,
+//! see the `filter` module docs.
+//!
 //! ## What is here
 //!
 //! - **Resources** — `User`, `Group`,
@@ -25,45 +119,36 @@
 //! - **Validation** — the [`Validate`] trait, reporting failures by SCIM wire
 //!   path so a server can echo them in an RFC 7644 §3.12 response.
 //!
-//! ## Feature flags
+//! ## Validation — deserializing does not validate
 //!
-//! All four are on by default and all four are additive: a feature only ever
-//! compiles more. Wire-behaviour choices are wrapper types, because Cargo
-//! unifies features across the dependency graph and a transitive crate could
-//! otherwise flip them for everyone.
+//! Every model is a plain `serde` type, and deserializing one enforces nothing
+//! beyond JSON shape: `serde_json::from_str::<User>(..)` will return a `User`
+//! with an empty `userName`, two `primary: true` emails, or an `id` on a create
+//! request. Store that and you will later emit a non-conformant response, or
+//! echo a `password` back.
 //!
-//! | Feature | Provides |
-//! |---------|----------|
-//! | `filter` | `filter` and its parser. Off: eight fewer crates (`lalrpop-util`, `fluent-uri`, `regex-automata`, `regex-syntax`, `aho-corasick`, `borrow-or-share`, `ref-cast`, `ref-cast-impl`) |
-//! | `models` | every resource and protocol message |
-//! | `schemas` | the embedded RFC 7643 schema definitions and the `get_schemas` lookup; ~48 KB of `include_str!` |
-//! | `case-insensitive` | `utils::case`, which canonicalises attribute-name case before deserializing (RFC 7643 §2.1) |
-//!
-//! Dropping `filter` takes the dependency tree from 22 crates to 14, and the
-//! total compile work from 35s to 14s measured serially (`-j1`, release). On a
-//! parallel build the saving is smaller, because the crates it drops overlap
-//! with `syn` on the critical path — the point is the smaller supply-chain
-//! surface, which now excludes a regex engine.
-//!
-//! `SearchRequest`, `ListQuery` and `PatchOp` need both `models` and `filter`,
-//! since each carries a parsed filter or PATCH path. A filter-only consumer
-//! wants:
-//!
-//! ```toml
-//! scim_v2 = { version = "1", default-features = false, features = ["filter"] }
-//! ```
-//!
-//! ## Deserializing a resource
-//!
-//! Use `serde_json` directly. Every model is a plain `serde` type.
+//! [`Validate`] holds the RFC's REQUIRED rules and names the offending
+//! attribute by its **wire** path. It is direction-aware:
+//! [`validate_as`](Validate::validate_as) takes a [`Context`], because RFC 7643
+//! §3.1 forbids `id` on a create and requires it on a response. [`Valid<T>`]
+//! is a value the type system knows has passed, and [`Strict<T, M>`] runs the
+//! check inside deserialization so a bad body never becomes a `T` at all. A
+//! server should take `Strict<User, CreateRequest>` in its handlers, as in the
+//! quick start; a client can usually stop at `validate()`.
 //!
 //! ```rust
 //! # #[cfg(feature = "models")] {
-//! use scim_v2::models::user::User;
+//! use scim_v2::{Validate, models::user::User};
 //!
-//! let json = r#"{"schemas":["urn:ietf:params:scim:schemas:core:2.0:User"],"userName":"jdoe@example.com"}"#;
-//! let user: User<String> = serde_json::from_str(json).unwrap();
-//! assert_eq!(user.user_name, "jdoe@example.com");
+//! let user = User::<String> {
+//!     schemas: vec!["urn:ietf:params:scim:schemas:core:2.0:User".to_string()],
+//!     user_name: String::new(),
+//!     ..Default::default()
+//! };
+//!
+//! let err = user.validate().unwrap_err();
+//! assert_eq!(err.path(), "userName");
+//! assert_eq!(err.scim_type_str(), "invalidValue");
 //! # }
 //! ```
 //!
@@ -83,52 +168,32 @@
 //! | a `members.type` or `scimType` outside the RFC's list | preserved verbatim | RFC 7643 §7: canonical values are *suggested* |
 //! | attribute names in any case, via `utils::case` (`case-insensitive` feature) | canonical camelCase | RFC 7643 §2.1: "Attribute names are case insensitive" |
 //!
-//! ## Validation — deserializing does not validate
+//! ## Feature flags
 //!
-//! None of the leniency above is where conformance is enforced, and neither is
-//! deserialization: `serde_json::from_str::<User>(..)` will return a `User`
-//! with an empty `userName`, two `primary: true` emails, or an `id` on a create
-//! request. Store that and you will later emit a non-conformant response, or
-//! echo a `password` back.
+//! All four are on by default and all four are additive: a feature only ever
+//! compiles more. Wire-behaviour choices are wrapper types, because Cargo
+//! unifies features across the dependency graph and a transitive crate could
+//! otherwise flip them for everyone.
 //!
-//! [`Validate`] holds the RFC's REQUIRED rules and names the offending
-//! attribute by its **wire** path. It is direction-aware:
-//! [`validate_as`](Validate::validate_as) takes a [`Context`], because RFC 7643
-//! §3.1 forbids `id` on a create and requires it on a response. [`Valid<T>`]
-//! is a value the type system knows has passed, and [`Strict<T, M>`] runs the
-//! check inside deserialization so a bad body never becomes a `T` at all. A
-//! server should take `Strict<User, CreateRequest>` in its handlers; a client
-//! can usually stop at `validate()`.
+//! | Feature | Provides |
+//! |---------|----------|
+//! | `filter` | `filter` and its parser. Off: eight fewer crates (`lalrpop-util`, `fluent-uri`, `regex-automata`, `regex-syntax`, `aho-corasick`, `borrow-or-share`, `ref-cast`, `ref-cast-impl`) |
+//! | `models` | every resource and protocol message |
+//! | `schemas` | the embedded RFC 7643 schema definitions and the `get_schemas` lookup; ~48 KB of `include_str!` |
+//! | `case-insensitive` | `utils::case`, which canonicalises attribute-name case before deserializing (RFC 7643 §2.1) |
 //!
-//! ```rust
-//! # #[cfg(feature = "models")] {
-//! use scim_v2::{Validate, models::user::User};
+//! Dropping `filter` takes the dependency tree from 22 crates to 14 and removes
+//! a regex engine from the supply chain, which is the point; it also shortens
+//! the build, more on a serial build than a parallel one, since the crates it
+//! drops overlap with `syn` on the critical path.
 //!
-//! let user = User::<String> {
-//!     schemas: vec!["urn:ietf:params:scim:schemas:core:2.0:User".to_string()],
-//!     user_name: String::new(),
-//!     ..Default::default()
-//! };
+//! `SearchRequest`, `ListQuery` and `PatchOp` need both `models` and `filter`,
+//! since each carries a parsed filter or PATCH path. A filter-only consumer
+//! wants:
 //!
-//! let err = user.validate().unwrap_err();
-//! assert_eq!(err.path(), "userName");
-//! assert_eq!(err.scim_type_str(), "invalidValue");
-//! # }
+//! ```toml
+//! scim_v2 = { version = "1", default-features = false, features = ["filter"] }
 //! ```
-//!
-//! ## Parsing a filter
-//!
-//! ```rust
-//! # #[cfg(feature = "filter")] {
-//! use scim_v2::filter::Filter;
-//!
-//! let filter: Filter = r#"userName eq "bjensen" and title pr"#.parse().unwrap();
-//! println!("{filter}");
-//! # }
-//! ```
-//!
-//! For the parsed shape, precedence rules and the `invalidFilter` error path,
-//! see the `filter` module docs.
 
 /// Every `rust` block in README.md is compiled and run as a doctest, so the
 /// front page cannot drift from the API. Costs nothing at build time —

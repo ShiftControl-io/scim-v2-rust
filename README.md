@@ -12,6 +12,52 @@ Management (SCIM) 2.0 protocol — [RFC 7642](https://www.rfc-editor.org/rfc/rfc
 [RFC 7643](https://www.rfc-editor.org/rfc/rfc7643) and
 [RFC 7644](https://www.rfc-editor.org/rfc/rfc7644).
 
+## Quick start
+
+A SCIM server receiving `POST /Users`. `Strict` deserializes the body and
+validates it for the direction it is travelling in one step, so a
+non-conformant request never becomes a `User` at all; the error names the
+offending attribute by its wire path and carries the RFC 7644 §3.12 `scimType`,
+ready for a `400`. `Valid` is the type-level proof that a value passed, and
+`Context::Response` checks the rules that apply on the way back out.
+
+```rust
+use scim_v2::{Context, CreateRequest, Strict, Valid};
+use scim_v2::models::{scim_schema::Meta, user::User};
+
+let body = r#"{
+  "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+  "userName": "bjensen@example.com",
+  "name": {"givenName": "Barbara", "familyName": "Jensen"},
+  "emails": [{"value": "bjensen@example.com", "type": "work", "primary": true}]
+}"#;
+
+// Deserialize and validate as a create request. RFC 7643 §3.1 forbids `id`
+// here; a blank `userName` or a second `primary: true` email would fail too.
+let request: Valid<User<String>> =
+    match serde_json::from_str::<Strict<User<String>, CreateRequest>>(body) {
+        Ok(strict) => strict.into_valid(),
+        Err(e) => return Err(e.into()), // answer 400 with `e.to_string()`
+    };
+
+// Store it, then build the representation to return. A response MUST carry
+// `id` (§3.1) and MUST NOT carry `password` (§4.1); `Context::Response` checks both.
+let mut user = request.into_inner();
+user.id = Some("2819c223-7f76-453a-919d-413861904646".to_string());
+user.meta = Some(Meta {
+    resource_type: Some("User".to_string()),
+    location: Some("https://example.com/v2/Users/2819c223-7f76-453a-919d-413861904646".to_string()),
+    ..Default::default()
+});
+let response = Valid::new(user, Context::Response)?;
+let json = serde_json::to_string(&response)?;
+assert!(json.contains(r#""id":"2819c223-7f76-453a-919d-413861904646""#));
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+Reading a list response, parsing a filter, handling a PATCH and the rest are
+under [Usage](#usage) and [For SCIM servers](#for-scim-servers) below.
+
 ## Scope
 
 This crate is deliberately narrow. It models the wire format, parses the two
