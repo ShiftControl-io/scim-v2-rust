@@ -29,5 +29,5 @@ pub enum SCIMError {
     #[error("Schema not found: {0}")]
     SchemaNotFound(String),
     #[error("Serialization error: {0}")]
-    SerializationError(serde_json::Error),
+    SerializationError(#[source] serde_json::Error),
 }

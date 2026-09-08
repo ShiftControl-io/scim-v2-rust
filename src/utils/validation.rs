@@ -95,19 +95,19 @@ impl ValidationError {
 
     /// Build the RFC 7644 §3.12 error body a server should return.
     ///
-    /// `status` is a numeric HTTP code, which §3.12 requires be *rendered* as
-    /// a JSON string — the formatting is done here so a caller cannot pass
-    /// something that is not a status code. `400` is correct for every current
-    /// [`ValidationErrorKind`].
+    /// Every current [`ValidationErrorKind`] is a `400 Bad Request`, so the
+    /// status is fixed here rather than taken as a parameter a caller could
+    /// get wrong; a body needing another status is built as a
+    /// [`ScimHttpError`] directly and checked with its own `Validate`.
     ///
     /// Requires the `models` feature, which supplies [`ScimHttpError`].
     #[cfg(feature = "models")]
-    pub fn to_http_error(&self, status: u16) -> ScimHttpError {
+    pub fn to_http_error(&self) -> ScimHttpError {
         ScimHttpError {
             schemas: vec![schema_urns::ERROR.to_string()],
             scim_type: Some(self.scim_type()),
             detail: Some(self.to_string()),
-            status: status.to_string(),
+            status: "400".to_string(),
         }
     }
 }
@@ -430,7 +430,7 @@ mod tests {
     #[test]
     fn to_http_error_builds_the_rfc_error_body() {
         let err = ValidationError::missing_required("userName");
-        let body = err.to_http_error(400);
+        let body = err.to_http_error();
 
         assert_eq!(body.schemas, vec![crate::schema_urns::ERROR]);
         assert_eq!(body.scim_type, Some(ScimType::InvalidValue));

@@ -46,8 +46,7 @@ pub struct Attributes {
     #[serde(
         rename = "canonicalValues",
         default = "Vec::new",
-        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
-        skip_serializing_if = "crate::utils::serde::skip_multi_valued"
+        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec"
     )]
     pub canonical_values: Vec<String>,
     #[serde(rename = "caseExact", skip_serializing_if = "Option::is_none")]
@@ -61,15 +60,13 @@ pub struct Attributes {
     #[serde(
         rename = "subAttributes",
         default = "Vec::new",
-        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
-        skip_serializing_if = "crate::utils::serde::skip_multi_valued"
+        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec"
     )]
     pub sub_attributes: Vec<SubAttributes>,
     #[serde(
         rename = "referenceTypes",
         default = "Vec::new",
-        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
-        skip_serializing_if = "crate::utils::serde::skip_multi_valued"
+        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec"
     )]
     pub reference_types: Vec<String>,
 }
@@ -87,8 +84,7 @@ pub struct SubAttributes {
     #[serde(
         rename = "canonicalValues",
         default = "Vec::new",
-        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
-        skip_serializing_if = "crate::utils::serde::skip_multi_valued"
+        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec"
     )]
     pub canonical_values: Vec<String>,
     #[serde(rename = "caseExact", skip_serializing_if = "Option::is_none")]
@@ -102,8 +98,7 @@ pub struct SubAttributes {
     #[serde(
         rename = "referenceTypes",
         default = "Vec::new",
-        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
-        skip_serializing_if = "crate::utils::serde::skip_multi_valued"
+        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec"
     )]
     pub reference_types: Vec<String>,
 }
@@ -315,6 +310,56 @@ impl Validate for Schema {
 mod schema_tests {
     use super::*;
 
+    /// R2-L4: RFC 7643 §7 — `id` MUST be specified; `schemas`, when present,
+    /// must name this resource type; absent `schemas` is legal (§§6-7).
+    #[test]
+    fn validate_requires_id_and_checks_the_urn() {
+        use crate::Validate;
+        let base = Schema {
+            schemas: Vec::new(),
+            id: "urn:ietf:params:scim:schemas:core:2.0:User".to_string(),
+            name: "User".to_string(),
+            description: String::new(),
+            attributes: Vec::new(),
+            meta: Meta {
+                resource_type: None,
+                created: None,
+                last_modified: None,
+                version: None,
+                location: None,
+            },
+        };
+        assert!(base.validate().is_ok(), "absent schemas is legal");
+        assert_eq!(
+            Schema {
+                id: String::new(),
+                ..base.clone()
+            }
+            .validate()
+            .expect_err("id")
+            .path(),
+            "id"
+        );
+        assert_eq!(
+            Schema {
+                schemas: vec![crate::schema_urns::GROUP.to_string()],
+                ..base.clone()
+            }
+            .validate()
+            .expect_err("wrong URN")
+            .path(),
+            "schemas"
+        );
+        assert!(
+            Schema {
+                schemas: vec![crate::schema_urns::SCHEMA.to_string()],
+                ..base
+            }
+            .validate()
+            .is_ok()
+        );
+    }
+
     /// The `schemas` attribute is modelled from 1.0 on. RFC 7643 §7 lets a
     /// schema resource be served without it, so absence must be legal, but a
     /// present value has to round-trip rather than being dropped.
@@ -342,7 +387,6 @@ mod schema_tests {
     /// `canonicalValues`, `subAttributes` and `referenceTypes` are
     /// multi-valued, so RFC 7643 §2.5 applies: absent, `null` and `[]` are one
     /// state, and unassigned is omitted on the way out.
-    #[cfg(not(feature = "compact-multi-valued"))]
     #[test]
     fn multi_valued_sub_attributes_treat_absent_null_and_empty_alike() {
         for raw in [

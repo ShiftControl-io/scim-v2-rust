@@ -39,21 +39,21 @@ scim_v2 = "1"
 
 ### Feature flags
 
-Three features select *what is compiled*; three select *how strictly the wire
-is read*. Defaults are marked.
+All four are on by default, and all four are additive — a feature only ever
+compiles more, never changes what an existing call does.
 
-| Feature | Default | What it does |
-|---------|---------|--------------|
-| `filter` | on | the filter and PATCH-path parsers |
-| `models` | on | every resource and protocol message |
-| `schemas` | on | the embedded RFC 7643 schema definitions and `get_schemas` |
-| `lenient-booleans` | on | accept `"true"` / `"True"` where the RFC says a JSON boolean; Entra sends this. Off, it is a deserialization error |
-| `case-insensitive` | on | `utils::case`: canonicalise attribute-name case before deserializing, per RFC 7643 §2.1. Off, the module is not compiled |
-| `compact-multi-valued` | **off** | omit an empty multi-valued attribute on serialize instead of emitting `[]`. Off by default because RFC 7644 §3.5.1 gives `[]` clear-all meaning that omission lacks |
+| Feature | What it does |
+|---------|--------------|
+| `filter` | the filter and PATCH-path parsers |
+| `models` | every resource and protocol message |
+| `schemas` | the embedded RFC 7643 schema definitions and `get_schemas` |
+| `case-insensitive` | `utils::case`: canonicalise attribute-name case before deserializing, per RFC 7643 §2.1 |
 
-The three postures exist because real providers deviate from the RFC in the
-same few ways, and a deployment should get to decide whether to meet them
-halfway. Each is documented at the point in the code where it applies.
+Wire-behaviour choices — lenient booleans, compact output, case folding — are
+**types**, not features: `Compact<&T>`, `CaseInsensitive<T>`, `Strict<T, M>`.
+Cargo unifies features across the whole dependency graph, so a feature switch
+would let any transitive crate change what every other consumer puts on the
+wire; a wrapper type is a decision the caller makes at the call site.
 
 Turning off `filter` drops eight crates — `lalrpop-util`, `fluent-uri`,
 `regex-automata`, `regex-syntax`, `aho-corasick`, `borrow-or-share`,
@@ -132,7 +132,7 @@ assert_eq!(err.path(), "userName");
 assert_eq!(err.scim_type_str(), "invalidValue");
 
 // And the RFC 7644 §3.12 body to return:
-let body = err.to_http_error(400);
+let body = err.to_http_error();
 assert_eq!(body.scim_type, Some(ScimType::InvalidValue));
 ```
 
@@ -198,9 +198,11 @@ omission. That is deliberate: RFC 7644 §3.5.1 says a client "MAY specify … an
 empty array `[]` for a multi-valued attribute, to clear all values", while an
 omitted attribute is merely "not asserted" and the server may keep or default
 it. Since these models are request bodies as well as representations, `[]` is
-what keeps a conformant clear-all expressible. If you would rather have
-compact output and do not need clear-all, enable the `compact-multi-valued`
-feature.
+what keeps a conformant clear-all expressible. A server serializing a response
+that wants the compact form wraps the value in `utils::compact::Compact(&user)`
+— a wrapper rather than a feature, because Cargo features unify across the
+dependency graph and a transitive crate could otherwise change what you put on
+the wire.
 
 ```rust
 use scim_v2::models::user::User;

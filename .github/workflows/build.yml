@@ -78,10 +78,11 @@ jobs:
           - --no-default-features --features models
           - --no-default-features --features schemas
           - --no-default-features --features filter,models
-          # Strict postures: no lenient booleans, no case folding.
-          - --no-default-features --features filter,models,schemas
-          # Compact output posture.
-          - --features compact-multi-valued
+          # The shipped default set, exactly as a consumer gets it. Every other
+          # row is a reduced or widened configuration, and a `cfg` interaction
+          # that only shows in the default combination would otherwise be the
+          # one nobody checks.
+          - ""
           - --all-features
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1

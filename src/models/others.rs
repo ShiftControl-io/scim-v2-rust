@@ -384,18 +384,28 @@ mod sealed {
 /// renamed module, a moved re-export — and `compile_fail` would still pass
 /// while the bound it is guarding had been relaxed.
 ///
-/// ```compile_fail,E0277
+/// Doctest error-code annotations are inert on stable, so each snippet below is
+/// kept to the single statement whose failure it is meant to prove, and names
+/// the mutation it catches.
+///
+/// Catches: relaxing `R: ScimResource` on `ListResponse`.
+///
+/// ```compile_fail
 /// // `String` is not a SCIM resource, so this does not compile.
 /// let _list: scim_v2::models::others::ListResponse<String> = unimplemented!();
 /// ```
 ///
-/// The sealing is why no downstream crate can widen that set:
+/// The sealing is why no downstream crate can widen that set. Catches:
+/// removing `: sealed::Sealed` from the trait. The impl is complete on purpose
+/// — with `declared_schemas` missing it failed for that reason instead and
+/// proved nothing about the seal.
 ///
-/// ```compile_fail,E0277
+/// ```compile_fail
 /// struct MyResource;
 /// // `sealed::Sealed` is private to scim_v2, so this cannot be satisfied.
 /// impl scim_v2::models::others::ScimResource for MyResource {
 ///     fn schema_urn(&self) -> &'static str { "urn:example" }
+///     fn declared_schemas(&self) -> &[String] { &[] }
 /// }
 /// ```
 ///
@@ -405,7 +415,9 @@ mod sealed {
 /// unsealing the trait: this snippet starts compiling, and therefore starts
 /// failing, the moment the module is public.
 ///
-/// ```compile_fail,E0603
+/// Catches: `pub mod sealed`.
+///
+/// ```compile_fail
 /// struct MyResource;
 /// impl scim_v2::models::others::sealed::Sealed for MyResource {}
 /// ```
@@ -522,8 +534,7 @@ pub struct ListResponse<R: ScimResource = Resource<String>> {
     #[serde(
         rename = "Resources",
         default = "Vec::new",
-        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
-        skip_serializing_if = "crate::utils::serde::skip_multi_valued"
+        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec"
     )]
     pub resources: Vec<R>,
 }
@@ -935,6 +946,52 @@ mod resource_tests {
 mod tests {
     use super::*;
     use test_case::test_case;
+
+    /// R2-M3: the four bounds added to `validate` in round 1, each pinned
+    /// with the wire path it reports.
+    #[test_case(-5, 0, Some(1), Some(1), "totalResults" ; "negative_total")]
+    #[test_case(1, 2, Some(1), Some(2), "totalResults" ; "more_returned_than_total")]
+    #[test_case(3, 1, Some(0), Some(1), "startIndex" ; "zero_based_start_index")]
+    #[test_case(3, 1, Some(1), Some(-1), "itemsPerPage" ; "negative_items_per_page")]
+    fn validate_rejects_impossible_pagination(
+        total: i64,
+        returned: usize,
+        start: Option<i64>,
+        per_page: Option<i64>,
+        path: &str,
+    ) {
+        let user = || {
+            Resource::User(Box::new(User::<String> {
+                schemas: vec![schema_urns::USER.to_string()],
+                user_name: "u".to_string(),
+                id: Some("1".to_string()),
+                ..Default::default()
+            }))
+        };
+        let list = ListResponse::<Resource<String>> {
+            schemas: vec![schema_urns::LIST_RESPONSE.to_string()],
+            total_results: total,
+            start_index: start,
+            items_per_page: per_page,
+            resources: (0..returned).map(|_| user()).collect(),
+        };
+        assert_eq!(list.validate().expect_err(path).path(), path);
+    }
+
+    /// R2-M6: an explicit `"Resources": null` is a form providers send, and it
+    /// must land as an empty page *with the envelope intact*, not as an error
+    /// or a silently defaulted struct.
+    #[test]
+    fn resources_null_collapses_to_an_empty_page_and_keeps_total_results() {
+        let body = format!(
+            r#"{{"schemas":["{}"],"totalResults":7,"startIndex":1,"itemsPerPage":0,"Resources":null}}"#,
+            schema_urns::LIST_RESPONSE
+        );
+        let list: ListResponse<User<String>> = serde_json::from_str(&body).expect("null Resources");
+        assert!(list.resources.is_empty());
+        assert_eq!(list.total_results, 7);
+        assert_eq!(list.items_per_page, Some(0));
+    }
 
     /// RFC 7644 §3.5.2 spells the ops lowercase; Entra and others send them
     /// capitalised. Each accepted spelling must map to the same variant.

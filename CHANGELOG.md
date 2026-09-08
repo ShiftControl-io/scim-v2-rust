@@ -164,6 +164,58 @@ so is free, and every break is listed below.
   anything and is not conditional on feature selection, so 1.86 gates every
   configuration. Cargo cannot express a per-feature MSRV.
 
+### Fixed (red-team round 2)
+
+- **`utils::case` corrupted correctly-cased payloads.** `WIRE_NAMES` listed
+  both `Resources` and `resources`, and both `Operations` and `operations`;
+  the lowercase entries were Rust field names that had leaked into a table of
+  wire names. Keyed by lowercase, the pairs collapsed and the lowercase
+  spelling won, so the case-insensitive path rewrote the RFC's own
+  `"Resources"` to `"resources"` — every page came back **empty with no
+  error**, because the field has a default — and `"Operations"` to
+  `"operations"`, so a PATCH body byte-identical to RFC 7644's example failed
+  to parse. The two entries are gone and a test asserts the table is
+  injective under case folding, which the membership test could never catch.
+- **Colliding keys were resolved last-write-wins**, with the winner decided
+  by `serde_json::Map`'s byte order rather than document order — so
+  `{"userName":"alice","USERNAME":"admin"}` and its reverse gave different
+  answers, and an attacker could pick the spelling that wins. RFC 7643 §2.1
+  makes them one attribute asserted twice with no precedence rule. It is now
+  an `AmbiguousKey` error, surfaced through every entry point.
+- **Canonicalisation reached into extension namespaces the crate does not
+  own.** Keys like `Value` or `TITLE` inside `urn:example:…` were rewritten
+  to this crate's spelling, although that namespace is not governed by §2.1
+  and its vendor may be case-sensitive; the module doc had claimed nothing
+  was lost. A subtree under an unknown URN is now left byte-identical.
+- `SerializationError` gained the `#[source]` its sibling already had, so the
+  `serde_json` error is reachable through the standard chain walk.
+- `to_http_error` takes no status: every `ValidationErrorKind` is a 400, and
+  the `u16` parameter accepted `0` or `65535` while the crate's own
+  `ScimHttpError::validate` rejected them. A body needing another status is
+  built directly and validated.
+- The seal's second `compile_fail` guard had been failing for an unrelated
+  reason — its impl omitted `declared_schemas` — and so proved nothing about
+  the seal; it is complete now, and the inert-on-stable error codes are
+  dropped in favour of a comment naming the mutation each snippet catches.
+- Pinned, all previously unguarded: the four `ListResponse::validate` bounds,
+  every `validate_context` branch on `User` and `Group` including the
+  `password` one, `Valid` and `Strict` as unit tests, the three null-collapse
+  sites, `at_most_one_primary` on all eight attributes, `Schema::validate`,
+  and `MemberType`'s case-insensitive `PartialEq` together with its `Hash`
+  through a real `HashSet`. The fixture-inventory check strips block comments
+  and matches the `include_str!` invocation rather than a bare path. The
+  property strategy now generates all nine multi-valued attributes, and the
+  casing property covers `ListResponse` and `PatchOp` — the case that would
+  have caught the collision at authoring time.
+- CI's matrix now includes the shipped default feature set, which no row had
+  exercised: six rows were reductions and the other two both enabled the
+  non-default compact posture.
+
+Deferred with reason: R2-I1, `MAX_FILTER_DEPTH` counting terms in a flat
+`or` chain as nesting. Pre-existing, and `FilterActionError` is
+`#[non_exhaustive]`, so a distinct too-many-terms variant can land in 1.x;
+the constant's *value* is the only thing 1.0 freezes.
+
 ### Added (resilience and conformance pass)
 
 - **Direction-aware validation.** `Validate` gains `validate_as(Context)` on
@@ -190,13 +242,18 @@ so is free, and every break is listed below.
   unknown keys untouched. The Java SCIM SDK gets the same effect from
   Jackson's `ACCEPT_CASE_INSENSITIVE_PROPERTIES`; scim2-models lowercases
   every key citing §2.1. Behind the `case-insensitive` feature, on by default.
-- **Three posture features**, each a documented deviation from a strict
-  reading made because real providers send it, switchable so a deployment
-  can choose: `lenient-booleans` (default on; off, a `"True"` string is a
-  deserialization error per §2.3.2), `case-insensitive` (default on), and
-  `compact-multi-valued` (default **off**: emitting `[]` keeps RFC 7644
-  §3.5.1's clear-all expressible; on, unassigned multi-valued attributes are
-  omitted per §2.5's "MAY be omitted for compactness").
+- **Wire-behaviour choices are types, not features.** An earlier revision of
+  this branch exposed lenient booleans and compact output as Cargo features.
+  The second red-team round pointed out what that meant: Cargo unifies
+  features across the whole dependency graph, so any transitive crate
+  enabling `compact-multi-valued` for its own logging would silently stop
+  every other consumer's RFC 7644 §3.5.1 clear-all from reaching the wire,
+  with no way for them to opt out. Both were removed. Lenient boolean parsing
+  is simply always on — it only widens what is accepted. Compact output is
+  `utils::compact::Compact(&value)`, a serialize wrapper the caller chooses at
+  the call site, on the same pattern as `CaseInsensitive<T>` and
+  `Strict<T, M>`. `case-insensitive` stays a feature because it is genuinely
+  additive: it only compiles an opt-in module.
 - Every model derives `Clone` and `PartialEq`, and `tests/roundtrip_proptest.rs`
   generates resources and asserts serialize-then-deserialize is the identity.
   Each asymmetry this release fixed by hand was a round-trip failure of the
@@ -358,8 +415,9 @@ so is free, and every break is listed below.
   to the newest compatible release either way, so the patch digit only set a
   floor — a claim about the oldest API this crate compiles against — and a
   needlessly precise floor forced consumers to upgrade for no reason.
-- Line coverage 88.25% → 95.78%, functions 81.15% → 90.72%, excluding the
-  generated parser. `tests/fixtures.rs` now enforces that every fixture is
+- Line coverage 88.25% → 95.99%, functions 81.15% → 90.02%, excluding the
+  generated parser and measured with CI's exact `cargo llvm-cov` recipe
+  (unit and integration tests; doctests are not instrumented on stable). `tests/fixtures.rs` now enforces that every fixture is
   documented and read by a test, which found three dead JumpCloud fixtures
   that now have round-trip tests.
 ## 0.5.0

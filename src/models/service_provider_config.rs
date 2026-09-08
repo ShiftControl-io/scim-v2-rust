@@ -26,8 +26,7 @@ pub struct ServiceProviderConfig {
     #[serde(
         rename = "authenticationSchemes",
         default = "Vec::new",
-        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
-        skip_serializing_if = "crate::utils::serde::skip_multi_valued"
+        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec"
     )]
     pub authentication_schemes: Vec<AuthenticationScheme>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -271,7 +270,6 @@ mod tests {
     /// lenient deserializer while this one did not, so a provider stringifying
     /// booleans made the *entire* discovery document unparseable — the one call
     /// a client makes before it knows any of the provider's quirks.
-    #[cfg(feature = "lenient-booleans")]
     #[test]
     fn authentication_scheme_primary_accepts_a_stringified_boolean() {
         for raw in [
@@ -365,6 +363,24 @@ mod tests {
         config.authentication_schemes.push(second);
         assert_eq!(
             config.validate().expect_err("two primaries").path(),
+            "authenticationSchemes"
+        );
+    }
+
+    /// R2-M6: `"authenticationSchemes": null` must reach `validate` as an
+    /// empty list, so the caller gets the wire-path error rather than a raw
+    /// serde message.
+    #[test]
+    fn authentication_schemes_null_collapses_and_reaches_validate() {
+        let json = RFC_S5_EXAMPLE.replace(
+            r#""authenticationSchemes": [{"#,
+            r#""authenticationSchemes": null, "x": [{"#,
+        );
+        let config = ServiceProviderConfig::try_from(json.as_str())
+            .expect("null authenticationSchemes must deserialize");
+        assert!(config.authentication_schemes.is_empty());
+        assert_eq!(
+            config.validate().expect_err("REQUIRED").path(),
             "authenticationSchemes"
         );
     }

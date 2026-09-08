@@ -27,17 +27,17 @@
 //!
 //! ## Feature flags
 //!
-//! Three features select what is compiled; three select how strictly the wire
-//! is read.
+//! All four are on by default and all four are additive: a feature only ever
+//! compiles more. Wire-behaviour choices are wrapper types, because Cargo
+//! unifies features across the dependency graph and a transitive crate could
+//! otherwise flip them for everyone.
 //!
-//! | Feature | Default | Provides / changes |
-//! |---------|---------|--------------------|
-//! | `filter` | on | `filter` and its parser. Off: eight fewer crates (`lalrpop-util`, `fluent-uri`, `regex-automata`, `regex-syntax`, `aho-corasick`, `borrow-or-share`, `ref-cast`, `ref-cast-impl`) |
-//! | `models` | on | every resource and protocol message |
-//! | `schemas` | on | the embedded RFC 7643 schema definitions and the `get_schemas` lookup; ~48 KB of `include_str!` |
-//! | `lenient-booleans` | on | accept `"true"`/`"True"` strings where RFC 7643 §2.3.2 says a JSON boolean. Entra sends this. Off: a deserialization error |
-//! | `case-insensitive` | on | `utils::case`, which canonicalises attribute-name case before deserializing (RFC 7643 §2.1). Off: not compiled |
-//! | `compact-multi-valued` | **off** | omit an empty multi-valued attribute on serialize instead of emitting `[]`. Off by default because RFC 7644 §3.5.1 gives `[]` clear-all meaning that omission lacks |
+//! | Feature | Provides |
+//! |---------|----------|
+//! | `filter` | `filter` and its parser. Off: eight fewer crates (`lalrpop-util`, `fluent-uri`, `regex-automata`, `regex-syntax`, `aho-corasick`, `borrow-or-share`, `ref-cast`, `ref-cast-impl`) |
+//! | `models` | every resource and protocol message |
+//! | `schemas` | the embedded RFC 7643 schema definitions and the `get_schemas` lookup; ~48 KB of `include_str!` |
+//! | `case-insensitive` | `utils::case`, which canonicalises attribute-name case before deserializing (RFC 7643 §2.1) |
 //!
 //! Dropping `filter` takes the dependency tree from 22 crates to 14, and the
 //! total compile work from 35s to 14s measured serially (`-j1`, release). On a
@@ -76,8 +76,8 @@
 //!
 //! | Accepted on input | Emitted | Why |
 //! |---|---|---|
-//! | `"true"` / `"True"` for a boolean (`lenient-booleans`) | `true` | Entra; RFC 7643 §2.3.2 defines the JSON literal |
-//! | `null`, `[]` or absence for a multi-valued attribute | `[]` | RFC 7643 §2.5 equivalence; RFC 7644 §3.5.1 gives `[]` clear-all meaning |
+//! | `"true"` / `"True"` for a boolean | `true` | Entra; RFC 7643 §2.3.2 defines the JSON literal |
+//! | `null`, `[]` or absence for a multi-valued attribute | `[]` (or omitted via `utils::compact::Compact`) | RFC 7643 §2.5 equivalence; RFC 7644 §3.5.1 gives `[]` clear-all meaning |
 //! | `Add` / `ADD` for a PATCH `op` | `add` | RFC 7644 §3.5.2 spells it lowercase; Entra does not |
 //! | `Ascending`, `GROUP` for `sortOrder` / `members.type` | `ascending`, `Group` | schema `caseExact: false` |
 //! | a `members.type` or `scimType` outside the RFC's list | preserved verbatim | RFC 7643 §7: canonical values are *suggested* |
@@ -180,6 +180,7 @@ pub use utils::validation::{
 pub mod utils {
     #[cfg(feature = "case-insensitive")]
     pub mod case;
+    pub mod compact;
     pub mod error;
     #[cfg(feature = "models")]
     pub(crate) mod serde;

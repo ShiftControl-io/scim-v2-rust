@@ -22,8 +22,7 @@ pub struct ResourceType {
     #[serde(
         rename = "schemaExtensions",
         default = "Vec::new",
-        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
-        skip_serializing_if = "crate::utils::serde::skip_multi_valued"
+        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec"
     )]
     pub schema_extensions: Vec<SchemaExtension>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -231,6 +230,15 @@ impl Validate for ResourceType {
 
 #[cfg(test)]
 mod tests {
+
+    /// R2-M6: `"schemaExtensions": null` is the third `Vec` field the
+    /// null-collapse sweep covers; nothing had pinned it.
+    #[test]
+    fn schema_extensions_null_collapses_to_empty() {
+        let raw = r#"{"name":"User","endpoint":"/Users","schema":"urn:x","schemaExtensions":null}"#;
+        let rt: ResourceType = serde_json::from_str(raw).expect("null schemaExtensions");
+        assert!(rt.schema_extensions.is_empty());
+    }
 
     /// RFC 7643 §6 marks `name`, `endpoint` and `schema` REQUIRED, and each is
     /// reported by its wire name so a server can echo it.

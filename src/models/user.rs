@@ -47,56 +47,47 @@ pub struct User<T = String> {
     pub password: Option<String>,
     #[serde(
         default = "Vec::new",
-        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
-        skip_serializing_if = "crate::utils::serde::skip_multi_valued"
+        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec"
     )]
     pub emails: Vec<Email>,
     #[serde(
         default = "Vec::new",
-        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
-        skip_serializing_if = "crate::utils::serde::skip_multi_valued"
+        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec"
     )]
     pub addresses: Vec<Address>,
     #[serde(
         default = "Vec::new",
-        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
-        skip_serializing_if = "crate::utils::serde::skip_multi_valued"
+        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec"
     )]
     pub phone_numbers: Vec<PhoneNumber>,
     #[serde(
         default = "Vec::new",
-        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
-        skip_serializing_if = "crate::utils::serde::skip_multi_valued"
+        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec"
     )]
     pub ims: Vec<Im>,
     #[serde(
         default = "Vec::new",
-        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
-        skip_serializing_if = "crate::utils::serde::skip_multi_valued"
+        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec"
     )]
     pub photos: Vec<Photo>,
     #[serde(
         default = "Vec::new",
-        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
-        skip_serializing_if = "crate::utils::serde::skip_multi_valued"
+        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec"
     )]
     pub groups: Vec<Group>,
     #[serde(
         default = "Vec::new",
-        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
-        skip_serializing_if = "crate::utils::serde::skip_multi_valued"
+        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec"
     )]
     pub entitlements: Vec<Entitlement>,
     #[serde(
         default = "Vec::new",
-        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
-        skip_serializing_if = "crate::utils::serde::skip_multi_valued"
+        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec"
     )]
     pub roles: Vec<Role>,
     #[serde(
         default = "Vec::new",
-        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
-        skip_serializing_if = "crate::utils::serde::skip_multi_valued"
+        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec"
     )]
     pub x509_certificates: Vec<X509Certificate>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -388,8 +379,112 @@ impl<T> Validate for User<T> {
 mod tests {
     // Import everything from the outer module
     use pretty_assertions::assert_eq;
+    use test_case::test_case;
 
     use super::*;
+
+    fn base_user() -> User<String> {
+        User {
+            schemas: vec![crate::schema_urns::USER.to_string()],
+            user_name: "bjensen".to_string(),
+            ..Default::default()
+        }
+    }
+
+    /// R2-M4: every branch of `validate_context`, as unit tests rather than
+    /// doctests, including the `password` branch that had no coverage at all.
+    #[test]
+    fn validate_context_enforces_direction_rules() {
+        // CreateRequest: id MUST NOT be present (RFC 7643 §3.1).
+        let with_id = User {
+            id: Some("7".to_string()),
+            ..base_user()
+        };
+        assert_eq!(
+            with_id
+                .validate_as(Context::CreateRequest)
+                .expect_err("id on create")
+                .path(),
+            "id"
+        );
+        assert!(base_user().validate_as(Context::CreateRequest).is_ok());
+
+        // ReplaceRequest tolerates id (RFC 7644 §3.5.1 ignores readOnly; its
+        // PUT example carries one) and a password.
+        let replace = User {
+            password: Some("s3cret".to_string()),
+            ..with_id.clone()
+        };
+        assert!(replace.validate_as(Context::ReplaceRequest).is_ok());
+
+        // Response: id REQUIRED, password (returned: never) forbidden.
+        assert_eq!(
+            base_user()
+                .validate_as(Context::Response)
+                .expect_err("no id")
+                .path(),
+            "id"
+        );
+        assert_eq!(
+            replace
+                .validate_as(Context::Response)
+                .expect_err("password")
+                .path(),
+            "password"
+        );
+        assert!(with_id.validate_as(Context::Response).is_ok());
+    }
+
+    /// `Valid` and `Strict` as unit tests: the wrapper is obtainable only by
+    /// passing, dereferences, and hands the value back.
+    #[test]
+    fn valid_and_strict_wrappers() {
+        use crate::utils::validation::{CreateRequest, Strict, Valid};
+
+        let valid = Valid::new(base_user(), Context::CreateRequest).expect("conformant");
+        assert_eq!(valid.context(), Context::CreateRequest);
+        assert_eq!(valid.user_name, "bjensen");
+        let inner = valid.into_inner();
+        assert!(
+            Valid::new(inner, Context::Response).is_err(),
+            "a response needs an id"
+        );
+
+        let body = serde_json::to_string(&base_user()).unwrap();
+        let strict: Strict<User<String>, CreateRequest> = serde_json::from_str(&body).unwrap();
+        assert_eq!(strict.into_valid().user_name, "bjensen");
+
+        let with_id = serde_json::to_string(&User {
+            id: Some("7".to_string()),
+            ..base_user()
+        })
+        .unwrap();
+        let err =
+            serde_json::from_str::<Strict<User<String>, CreateRequest>>(&with_id).unwrap_err();
+        assert!(err.to_string().contains("id"), "{err}");
+    }
+
+    /// R2-L4: RFC 7643 §2.4's at-most-one-primary rule on every attribute that
+    /// carries `primary`, not only `emails`.
+    #[test_case("emails" ; "emails")]
+    #[test_case("phoneNumbers" ; "phone_numbers")]
+    #[test_case("ims" ; "ims")]
+    #[test_case("photos" ; "photos")]
+    #[test_case("addresses" ; "addresses")]
+    #[test_case("entitlements" ; "entitlements")]
+    #[test_case("roles" ; "roles")]
+    #[test_case("x509Certificates" ; "x509_certificates")]
+    fn validate_rejects_a_second_primary_on(attr: &str) {
+        let urn = crate::schema_urns::USER;
+        let two = r#"[{"value":"a","primary":true},{"value":"b","primary":true}]"#;
+        let raw = format!(r#"{{"schemas":["{urn}"],"userName":"u","{attr}":{two}}}"#);
+        let user: User<String> = serde_json::from_str(&raw).unwrap();
+        let err = user.validate().expect_err("two primaries");
+        assert_eq!(err.path(), attr);
+        let one = raw.replace(r#"{"value":"b","primary":true}"#, r#"{"value":"b"}"#);
+        let user: User<String> = serde_json::from_str(&one).unwrap();
+        assert!(user.validate().is_ok());
+    }
 
     /// Minimal reproduction: the bug is isolated entirely to `Role`
     /// deserialization, independent of the surrounding `User`/`ListResponse`
@@ -832,7 +927,6 @@ mod tests {
     // deserializer exists. That normalisation is itself the most useful thing
     // this fixture pins: it is the only real provider payload in the suite
     // that exercises a stringified boolean end to end.
-    #[cfg(feature = "lenient-booleans")]
     #[test]
     fn deserialize_entra_user() {
         let raw = include_str!("../test_data/provider_samples/entra_user_creation_test.json");
@@ -970,7 +1064,6 @@ mod tests {
 
     /// `active` tolerates the stringified booleans some providers send, the
     /// same way every `primary` does.
-    #[cfg(feature = "lenient-booleans")]
     #[test]
     fn active_accepts_a_stringified_boolean() {
         let urn = crate::schema_urns::USER;
@@ -991,42 +1084,6 @@ mod tests {
         ] {
             let u: User = serde_json::from_str(&raw).unwrap_or_else(|e| panic!("{raw}: {e}"));
             assert_eq!(u.active, want, "{raw}");
-        }
-    }
-
-    /// With `lenient-booleans` off, RFC 7643 §2.3.2 is applied literally: a
-    /// stringified boolean is a deserialization error, not a coercion.
-    #[cfg(not(feature = "lenient-booleans"))]
-    #[test]
-    fn stringified_booleans_are_rejected_when_lenience_is_off() {
-        let urn = crate::schema_urns::USER;
-        let raw = format!(r#"{{"schemas":["{urn}"],"userName":"a","active":"True"}}"#);
-        assert!(serde_json::from_str::<User<String>>(&raw).is_err());
-        let ok = format!(r#"{{"schemas":["{urn}"],"userName":"a","active":true}}"#);
-        assert_eq!(
-            serde_json::from_str::<User<String>>(&ok).unwrap().active,
-            Some(true)
-        );
-    }
-
-    /// With `compact-multi-valued` on, an unassigned multi-valued attribute is
-    /// omitted rather than sent as `[]` — RFC 7643 §2.5's "MAY be omitted for
-    /// compactness", at the cost of RFC 7644 §3.5.1's clear-all.
-    #[cfg(feature = "compact-multi-valued")]
-    #[test]
-    fn unassigned_multi_valued_attributes_are_omitted_when_compact() {
-        let user = User::<String> {
-            schemas: vec![crate::schema_urns::USER.to_string()],
-            user_name: "bjensen".to_string(),
-            ..Default::default()
-        };
-        let json = serde_json::to_value(&user).unwrap();
-        let obj = json.as_object().unwrap();
-        for attr in ["emails", "roles", "groups", "x509Certificates"] {
-            assert!(
-                !obj.contains_key(attr),
-                "{attr} must be omitted under compact-multi-valued"
-            );
         }
     }
 
@@ -1067,7 +1124,6 @@ mod tests {
     /// §2.4 defines `primary` as a boolean, but providers stringify it. The
     /// lenient deserializer covers every carrier; this pins it through the
     /// real model types rather than through a synthetic struct.
-    #[cfg(feature = "lenient-booleans")]
     #[test]
     fn primary_accepts_a_stringified_boolean_on_every_carrier() {
         macro_rules! assert_lenient {
@@ -1128,7 +1184,6 @@ mod tests {
     /// clear it *or* substitute a default. Since these models serve as request
     /// bodies as well as representations, emitting `[]` is what keeps a
     /// conformant clear-all expressible.
-    #[cfg(not(feature = "compact-multi-valued"))]
     #[test]
     fn unassigned_multi_valued_attributes_serialize_as_empty_arrays() {
         let user = User::<String> {
@@ -1164,7 +1219,6 @@ mod tests {
     /// The RFC 7644 §3.5.1 clear-all idiom, end to end: a client that empties a
     /// multi-valued attribute produces a body carrying `[]` for it, which is
     /// the form the RFC says clears existing values on the server.
-    #[cfg(not(feature = "compact-multi-valued"))]
     #[test]
     fn a_cleared_attribute_reaches_the_wire_as_an_empty_array() {
         let user = User::<String> {
@@ -1218,7 +1272,6 @@ mod tests {
         /// makes `deserialize_null_as_empty_vec` load-bearing rather than
         /// theoretical: with `#[serde(default)]` alone, modelling `emails` as
         /// `Vec<Email>` would reject this real provider response outright.
-        #[cfg(not(feature = "compact-multi-valued"))]
         #[test]
         fn jumpcloud_put_user_minimal_accepts_explicit_null_emails() {
             let raw = include_str!("../test_data/provider_samples/jumpcloud_put_user_minimal.json");

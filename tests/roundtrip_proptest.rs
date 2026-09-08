@@ -12,8 +12,12 @@ use proptest::prelude::*;
 use scim_v2::models::enterprise_user::{EnterpriseUser, Manager};
 use scim_v2::models::group::{Group, Member, MemberType};
 use scim_v2::models::others::{ListResponse, Resource};
+use scim_v2::models::others::{OperationTarget, PatchOp, PatchOperation};
 use scim_v2::models::scim_schema::Meta;
-use scim_v2::models::user::{Address, Email, Name, PhoneNumber, Role, User};
+use scim_v2::models::user::{
+    Address, Email, Entitlement, Group as UserGroup, Im, Name, PhoneNumber, Photo, Role, User,
+    X509Certificate,
+};
 use scim_v2::schema_urns;
 
 fn opt_str() -> impl Strategy<Value = Option<String>> {
@@ -43,6 +47,31 @@ prop_compose! {
 prop_compose! {
     fn role()(value in opt_str(), display in opt_str(), t in opt_str(), primary in opt_bool()) -> Role {
         Role { value, display, r#type: t, primary }
+    }
+}
+prop_compose! {
+    fn im()(value in opt_str(), display in opt_str(), t in opt_str(), primary in opt_bool()) -> Im {
+        Im { value, display, r#type: t, primary }
+    }
+}
+prop_compose! {
+    fn photo()(value in opt_str(), display in opt_str(), t in opt_str(), primary in opt_bool()) -> Photo {
+        Photo { value, display, r#type: t, primary }
+    }
+}
+prop_compose! {
+    fn entitlement()(value in opt_str(), display in opt_str(), t in opt_str(), primary in opt_bool()) -> Entitlement {
+        Entitlement { value, display, r#type: t, primary }
+    }
+}
+prop_compose! {
+    fn cert()(value in opt_str(), display in opt_str(), t in opt_str(), primary in opt_bool()) -> X509Certificate {
+        X509Certificate { value, display, r#type: t, primary }
+    }
+}
+prop_compose! {
+    fn user_group()(value in opt_str(), r in opt_str(), display in opt_str(), t in opt_str()) -> UserGroup {
+        UserGroup { value, r#ref: r, display, r#type: t }
     }
 }
 prop_compose! {
@@ -78,13 +107,19 @@ prop_compose! {
               phone_numbers in proptest::collection::vec(phone(), 0..3),
               addresses in proptest::collection::vec(address(), 0..2),
               roles in proptest::collection::vec(role(), 0..2),
+              ims in proptest::collection::vec(im(), 0..2),
+              photos in proptest::collection::vec(photo(), 0..2),
+              groups in proptest::collection::vec(user_group(), 0..2),
+              entitlements in proptest::collection::vec(entitlement(), 0..2),
+              x509_certificates in proptest::collection::vec(cert(), 0..2),
               meta in proptest::option::of(meta()),
               enterprise_user in proptest::option::of(enterprise())) -> User<String> {
         User {
             schemas: vec![schema_urns::USER.to_string()],
             id, external_id, user_name, name, display_name, nick_name, title, user_type,
             preferred_language, locale, timezone, active, password,
-            emails, phone_numbers, addresses, roles, meta, enterprise_user,
+            emails, phone_numbers, addresses, roles, ims, photos, groups, entitlements,
+            x509_certificates, meta, enterprise_user,
             ..Default::default()
         }
     }
@@ -212,11 +247,39 @@ fn any_key_casing_deserializes_identically() {
         }
     }
     on_big_stack(|| {
-        proptest!(config(), |(u in user(), upper in any::<bool>())| {
+        proptest!(config(), |(users in proptest::collection::vec(user(), 1..3), upper in any::<bool>())| {
+            // A resource.
+            let u = users[0].clone();
             let canonical = serde_json::to_value(&u).unwrap();
             let back: User<String> = scim_v2::utils::case::from_value(recase(&canonical, upper))
-                .expect("recased payload must deserialize");
+                .expect("recased User must deserialize");
             prop_assert_eq!(back, u);
+
+            // A list envelope — `Resources` is the capitalised member whose
+            // collision in the table shipped round 1 green (R2-C1).
+            let total = users.len() as i64;
+            let list = ListResponse::<User<String>> {
+                schemas: vec![schema_urns::LIST_RESPONSE.to_string()],
+                total_results: total, start_index: Some(1), items_per_page: Some(total),
+                resources: users,
+            };
+            let canonical = serde_json::to_value(&list).unwrap();
+            let back: ListResponse<User<String>> =
+                scim_v2::utils::case::from_value(recase(&canonical, upper)).expect("recased ListResponse");
+            prop_assert_eq!(back.resources.len(), list.resources.len());
+            prop_assert_eq!(back, list);
+
+            // A PATCH envelope — `Operations` is the other one.
+            let patch = PatchOp {
+                schemas: vec![schema_urns::PATCH_OP.to_string()],
+                operations: vec![PatchOperation::Replace(OperationTarget::WithPath {
+                    path: "nickName".parse().unwrap(),
+                    value: serde_json::json!("x"),
+                })],
+            };
+            let canonical = serde_json::to_value(&patch).unwrap();
+            let back: PatchOp = scim_v2::utils::case::from_value(recase(&canonical, upper)).expect("recased PatchOp");
+            prop_assert_eq!(back.operations.len(), 1);
         })
     });
 }

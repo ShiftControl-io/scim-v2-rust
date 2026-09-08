@@ -14,8 +14,7 @@ pub struct Group<T = String> {
     pub display_name: String,
     #[serde(
         default = "Vec::new",
-        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
-        skip_serializing_if = "crate::utils::serde::skip_multi_valued"
+        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec"
     )]
     pub members: Vec<Member<T>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -140,6 +139,83 @@ impl<T> Validate for Group<T> {
 #[cfg(test)]
 mod tests {
 
+    /// R2-M4: `Group::validate` and every branch of its `validate_context`.
+    #[test]
+    fn validate_and_validate_context() {
+        let base = Group::<String> {
+            schemas: vec![crate::schema_urns::GROUP.to_string()],
+            id: None,
+            external_id: None,
+            display_name: "Tour Guides".to_string(),
+            members: Vec::new(),
+            meta: None,
+        };
+        assert!(base.validate().is_ok());
+        assert_eq!(
+            Group {
+                display_name: String::new(),
+                ..base.clone()
+            }
+            .validate()
+            .expect_err("displayName")
+            .path(),
+            "displayName"
+        );
+        assert_eq!(
+            Group {
+                schemas: vec![crate::schema_urns::USER.to_string()],
+                ..base.clone()
+            }
+            .validate()
+            .expect_err("wrong URN")
+            .path(),
+            "schemas"
+        );
+
+        let with_id = Group {
+            id: Some("g1".to_string()),
+            ..base.clone()
+        };
+        assert_eq!(
+            with_id
+                .validate_as(Context::CreateRequest)
+                .expect_err("id on create")
+                .path(),
+            "id"
+        );
+        assert!(base.validate_as(Context::CreateRequest).is_ok());
+        assert!(with_id.validate_as(Context::ReplaceRequest).is_ok());
+        assert_eq!(
+            base.validate_as(Context::Response)
+                .expect_err("no id")
+                .path(),
+            "id"
+        );
+        assert!(with_id.validate_as(Context::Response).is_ok());
+    }
+
+    /// R2-L3: the hand-written `PartialEq` is case-insensitive and `Hash`
+    /// agrees with it, exercised through a real container.
+    #[test]
+    fn member_type_equality_and_hash_are_case_insensitive() {
+        use std::collections::HashSet;
+        assert_eq!(
+            MemberType::Other("serviceaccount".into()),
+            MemberType::Other("ServiceAccount".into())
+        );
+        assert_eq!(MemberType::from("USER".to_string()), MemberType::User);
+        assert_eq!(
+            MemberType::Other("User".into()),
+            MemberType::User,
+            "wire-identical values are equal"
+        );
+        let mut set = HashSet::new();
+        set.insert(MemberType::Other("ServiceAccount".into()));
+        assert!(set.contains(&MemberType::Other("serviceaccount".into())));
+        set.insert(MemberType::User);
+        assert!(set.contains(&MemberType::Other("USER".into())));
+    }
+
     /// RFC 7643 §7 makes `canonicalValues` *suggestions*, so a provider may
     /// send a `members.type` outside {User, Group}. Before 1.0 that failed the
     /// whole Group payload; it now lands in `Other` and round-trips.
@@ -175,7 +251,6 @@ mod tests {
     /// all mean unassigned, and unassigned is omitted on the way out.
     /// Guards the `deserialize_null_as_empty_vec` wiring, which
     /// `#[serde(default)]` alone does not provide.
-    #[cfg(not(feature = "compact-multi-valued"))]
     #[test]
     fn members_treat_absent_null_and_empty_alike() {
         let urn = crate::schema_urns::GROUP;

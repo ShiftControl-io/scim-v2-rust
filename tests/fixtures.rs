@@ -39,14 +39,28 @@ fn all_sources() -> String {
                 walk(&path, out);
             } else if path.extension().is_some_and(|e| e == "rs") {
                 let text = fs::read_to_string(&path).expect("readable source file");
-                for line in text.lines() {
-                    // Keep the code before any `//`, so a mention inside a
-                    // comment does not count as a reference. Crude against a
-                    // `//` inside a string literal, which is fine here: the
-                    // effect is to under-count references, never over-count.
+                // Drop block comments first, then line comments, so a fixture
+                // path mentioned in either kind of comment cannot satisfy the
+                // "a test reads this" claim. Crude against comment markers
+                // inside string literals, which only ever under-counts.
+                let mut rest = text.as_str();
+                let mut no_blocks = String::with_capacity(text.len());
+                while let Some(start) = rest.find("/*") {
+                    no_blocks.push_str(&rest[..start]);
+                    match rest[start + 2..].find("*/") {
+                        Some(end) => rest = &rest[start + 2 + end + 2..],
+                        None => {
+                            rest = "";
+                        }
+                    }
+                }
+                no_blocks.push_str(rest);
+                for line in no_blocks.lines() {
                     let code = line.split_once("//").map_or(line, |(before, _)| before);
-                    out.push_str(code);
-                    out.push('\n');
+                    // rustfmt wraps a long `include_str!("…")` across lines, so
+                    // drop all whitespace: the match below is about the macro
+                    // invocation, not its layout.
+                    out.extend(code.chars().filter(|c| !c.is_whitespace()));
                 }
             }
         }
@@ -123,7 +137,10 @@ fn the_support_column_matches_actual_include_str_usage() {
             panic!("README documents `{name}`, which is in neither fixture directory");
         };
         let claimed_supported = line.contains("| SUPPORTED |");
-        let actually_used = sources.contains(&format!("../test_data/{dir}/{name}"));
+        // The `include_str!` invocation itself, so a bare path in a string
+        // literal or a `format!` cannot satisfy the claim.
+        let actually_used =
+            sources.contains(&format!(r#"include_str!("../test_data/{dir}/{name}")"#));
 
         assert_eq!(
             claimed_supported,
@@ -150,7 +167,9 @@ fn every_provider_sample_is_exercised_by_a_test() {
     let sources = all_sources();
     for name in fixture_names("provider_samples") {
         assert!(
-            sources.contains(&format!("../test_data/provider_samples/{name}")),
+            sources.contains(&format!(
+                r#"include_str!("../test_data/provider_samples/{name}")"#
+            )),
             "provider sample `{name}` is not read by any test"
         );
     }

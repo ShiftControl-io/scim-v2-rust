@@ -89,7 +89,7 @@ fn validation_error_surface_is_usable_downstream() {
     assert_eq!(err.path(), "userName");
     assert_eq!(err.scim_type_str(), "invalidValue");
 
-    let body = err.to_http_error(400);
+    let body = err.to_http_error();
     assert_eq!(body.status, "400", "§3.12 renders status as a JSON string");
     assert_eq!(body.scim_type, Some(ScimType::InvalidValue));
 }
@@ -97,7 +97,6 @@ fn validation_error_surface_is_usable_downstream() {
 /// RFC 7644 §3.5.1's clear-all idiom, from outside the crate: an emptied
 /// multi-valued attribute has to reach the wire as `[]`, because omission
 /// means "not asserted" and the server may then keep or default the values.
-#[cfg(not(feature = "compact-multi-valued"))]
 #[test]
 fn a_cleared_multi_valued_attribute_reaches_the_wire_downstream() {
     let user = User::<String> {
