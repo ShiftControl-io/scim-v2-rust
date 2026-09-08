@@ -9,9 +9,10 @@ use crate::utils::error::SCIMError;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct ServiceProviderConfig {
-    /// RFC 7643: the schema URN(s) this resource conforms to.
-    /// `#[serde(default)]` because RFC 7643 §§6-7 allow the discovery
-    /// resources to be served without it; a present value round-trips.
+    /// RFC 7643 §3: the schema URN(s) this resource conforms to, REQUIRED and
+    /// carried by the RFC's §8.5 example. `#[serde(default)]` so a
+    /// non-conformant provider's payload can still be read; `validate()`
+    /// reports the omission.
     #[serde(default)]
     pub schemas: Vec<String>,
     #[serde(rename = "documentationUri", skip_serializing_if = "Option::is_none")]
@@ -214,11 +215,11 @@ impl Validate for ServiceProviderConfig {
     /// server that does not implement bulk correctly advertises
     /// `"bulk": {"supported": false}`.
     fn validate(&self) -> Result<(), ValidationError> {
-        // §5: "id is not required"; `schemas` may be absent per §§6-7 practice,
-        // but when present it must name this resource.
-        if !self.schemas.is_empty() {
-            require_schema_urn(&self.schemas, schema_urns::SERVICE_PROVIDER_CONFIG)?;
-        }
+        // §5: "id is not required". `schemas` is: RFC 7643 §3 says "all
+        // representations of SCIM schemas MUST include a non-empty array", and
+        // the §8.5 example carries it. Deserialization still tolerates absence
+        // so a non-conformant provider's config can be read; this reports it.
+        require_schema_urn(&self.schemas, schema_urns::SERVICE_PROVIDER_CONFIG)?;
         if self.authentication_schemes.is_empty() {
             return Err(ValidationError::missing_required("authenticationSchemes"));
         }
@@ -401,10 +402,12 @@ mod tests {
         );
     }
 
-    /// RFC 7643 §§6-7 let a discovery resource arrive without `schemas`, so
-    /// absence must not be an error; `#[serde(default)]` leaves it empty.
+    /// Deserialization tolerates a missing `schemas` so a non-conformant
+    /// provider's config can still be read; `validate()` reports it, because
+    /// RFC 7643 §3 makes the attribute REQUIRED on every representation and
+    /// the §8.5 example carries it. (Devin review on #49, BUG-2.)
     #[test]
-    fn missing_schemas_is_tolerated() {
+    fn missing_schemas_deserializes_but_does_not_validate() {
         let json = RFC_S5_EXAMPLE.replace(
             r#""schemas": ["urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"],"#,
             "",
@@ -412,6 +415,11 @@ mod tests {
         let config = ServiceProviderConfig::try_from(json.as_str())
             .expect("a config without `schemas` must still deserialize");
         assert!(config.schemas.is_empty());
+        let err = config
+            .validate()
+            .expect_err("absent schemas must not validate");
+        assert_eq!(err.path(), "schemas");
+        assert_eq!(err.scim_type_str(), "invalidValue");
     }
 
     /// RFC 7643 §5 marks `authenticationSchemes` REQUIRED, and it is the only

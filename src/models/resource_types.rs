@@ -7,9 +7,10 @@ use crate::utils::error::SCIMError;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct ResourceType {
-    /// RFC 7643: the schema URN(s) this resource conforms to.
-    /// `#[serde(default)]` because RFC 7643 §§6-7 allow the discovery
-    /// resources to be served without it; a present value round-trips.
+    /// RFC 7643 §3: the schema URN(s) this resource conforms to, REQUIRED and
+    /// carried by the RFC's §8.6 example. `#[serde(default)]` so a
+    /// non-conformant provider's payload can still be read; `validate()`
+    /// reports the omission.
     #[serde(default)]
     pub schemas: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -207,14 +208,13 @@ impl TryFrom<&str> for ResourceType {
 }
 
 impl Validate for ResourceType {
-    /// RFC 7643 §6 marks `name`, `endpoint` and `schema` REQUIRED. `id` is
-    /// explicitly not required for this resource, and `schemas` may be absent
-    /// (§§6-7), so neither is checked.
+    /// RFC 7643 §6 marks `name`, `endpoint` and `schema` REQUIRED, and says
+    /// `id` "is not required for the resource type"; `schemas` is REQUIRED by
+    /// §3 on every representation, and both §8.6 examples carry it.
+    /// Deserialization tolerates its absence so a non-conformant provider can
+    /// still be read; this reports it.
     fn validate(&self) -> Result<(), ValidationError> {
-        // §§6-7 allow `schemas` to be absent; when present it must name this type.
-        if !self.schemas.is_empty() {
-            require_schema_urn(&self.schemas, schema_urns::RESOURCE_TYPE)?;
-        }
+        require_schema_urn(&self.schemas, schema_urns::RESOURCE_TYPE)?;
         if self.name.is_empty() {
             return Err(ValidationError::missing_required("name"));
         }
@@ -276,19 +276,29 @@ mod tests {
         }
     }
 
-    /// §6 explicitly says `id` is not required for this resource, and §§6-7
-    /// allow `schemas` to be absent, so neither may be validated.
+    /// §6 explicitly says `id` is not required for this resource, so it is not
+    /// validated; `schemas` is REQUIRED by §3 and is. (Devin review on #49,
+    /// BUG-2.)
     #[test]
-    fn validate_ignores_id_and_schemas() {
+    fn validate_ignores_id_but_requires_schemas() {
         let minimal = ResourceType {
             id: None,
-            schemas: Vec::new(),
+            schemas: vec![crate::schema_urns::RESOURCE_TYPE.to_string()],
             name: "User".to_string(),
             endpoint: "/Users".to_string(),
             schema: crate::schema_urns::USER.to_string(),
             ..Default::default()
         };
         assert!(minimal.validate().is_ok());
+
+        let without = ResourceType {
+            schemas: Vec::new(),
+            ..minimal
+        };
+        let err = without
+            .validate()
+            .expect_err("absent schemas must not validate");
+        assert_eq!(err.path(), "schemas");
     }
 
     /// The `schemas` attribute is modelled from 1.0 on. RFC 7643 §6's example
@@ -311,6 +321,7 @@ mod tests {
         let no_schemas = r#"{"name":"User","endpoint":"/Users","schema":"urn:x"}"#;
         let rt: ResourceType = serde_json::from_str(no_schemas).unwrap();
         assert!(rt.schemas.is_empty());
+        assert_eq!(rt.validate().unwrap_err().path(), "schemas");
     }
 
     /// `Default` is constructible and carries the resource's own schema URN,

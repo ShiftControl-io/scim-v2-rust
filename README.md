@@ -242,14 +242,17 @@ job**. That split is deliberate — the grammar is the fiddly, spec-bound part,
 and how a filter maps onto SQL, LDAP or an in-memory index is specific to your
 server. What this crate saves you is the grammar.
 
-Filters are rejected if their AST nests deeper than `filter::MAX_FILTER_DEPTH`
-(64) or holds more than `filter::MAX_FILTER_TERMS` (1024) attribute
-expressions, whether they arrive via `.parse()` or deserialization. Without the
-depth bound, pathologically nested input like `not (not (… (title pr) …))`
-builds an AST that overflows the stack on the *next* `Display`, `==`, `{:?}`,
-serialize or drop — a remote DoS with no bad allocation in sight. `and`/`or`
-are n-ary (`Filter::And(Vec<Filter>)`), so a long flat chain such as a
-hundred-id `or` lookup is depth 2 and parses; only the term bound applies to it.
+Filters are rejected if they nest deeper than `filter::MAX_FILTER_DEPTH` (64)
+or hold more than `filter::MAX_FILTER_TERMS` (1024) attribute expressions,
+whether they arrive via `.parse()` or deserialization. Both limits are enforced
+*while* parsing, so an input that crosses one is rejected at that point with the
+rest unread, and peak memory for a hostile filter is bounded by the limits rather
+than by its length. Without the depth bound, pathologically nested input like
+`not (not (… (title pr) …))` builds an AST that overflows the stack on the *next*
+`Display`, `==`, `{:?}`, serialize or drop — a remote DoS with no bad allocation
+in sight. `and`/`or` are n-ary (`Filter::And(Operands<Filter>)`, at least two
+operands by construction), so a long flat chain such as a hundred-id `or` lookup
+is depth 2 and parses; only the term bound applies to it.
 
 ## For SCIM servers
 

@@ -5,11 +5,15 @@
 
 
 use crate::filter::{
-    AttrExp, AttrPath, CompareOp, CompValue, Filter, FilterActionError,
+    AttrExp, AttrPath, CompareOp, CompValue, Filter, FilterActionError, ParseBudget,
     PatchPath, PatchValuePath, ValFilter, ValuePath, parse_attr_path,
 };
 
-grammar;
+// `budget` enforces MAX_FILTER_TERMS and MAX_FILTER_DEPTH *while* parsing, so
+// an over-limit input is rejected as soon as it crosses a limit rather than
+// after its whole AST has been allocated. Terms are charged in `AttrExp`;
+// nesting is tracked by the Open*/Close* nonterminals below.
+grammar<'b>(budget: &'b ParseBudget);
 
 extern {
     type Error = FilterActionError;
@@ -79,9 +83,16 @@ pub Filter: Filter = {
 FilterAtom: Filter = {
     <e:AttrExp>               => Filter::Attr(e),
     <v:ValuePath>             => Filter::ValuePath(v),
-    "not" "(" <f:Filter> ")"  => Filter::Not(Box::new(f)),
-    "(" <f:Filter> ")"        => f,
+    "not" Open <f:Filter> Close  => Filter::Not(Box::new(f)),
+    Open <f:Filter> Close        => f,
 };
+
+// Nesting brackets reduce as soon as they are shifted, so the live depth is
+// known before anything inside them is parsed.
+Open: () = "(" =>? Ok(budget.enter()?);
+Close: () = ")" => budget.leave();
+OpenBracket: () = "[" =>? Ok(budget.enter()?);
+CloseBracket: () = "]" => budget.leave();
 
 // ---------------------------------------------------------------------------
 // Attribute expression and value path
@@ -89,7 +100,7 @@ FilterAtom: Filter = {
 
 // attrPath "[" valFilter "]"
 ValuePath: ValuePath = {
-    <a:AttrPath> "[" <vf:ValFilter> "]" => ValuePath {
+    <a:AttrPath> OpenBracket <vf:ValFilter> CloseBracket => ValuePath {
         attr: a,
         filter: Box::new(vf),
     },
@@ -98,8 +109,8 @@ ValuePath: ValuePath = {
 // attrPath "pr"  |  attrPath compareOp compValue
 // ("pr" token includes required leading SP; compareOp tokens include surrounding SP)
 AttrExp: AttrExp = {
-    <a:AttrPath> "pr"                          => AttrExp::Present(a),
-    <a:AttrPath> <op:CompareOp> <v:CompValue>  => AttrExp::Comparison(a, op, v),
+    <a:AttrPath> "pr"                          =>? { budget.term()?; Ok(AttrExp::Present(a)) },
+    <a:AttrPath> <op:CompareOp> <v:CompValue>  =>? { budget.term()?; Ok(AttrExp::Comparison(a, op, v)) },
 };
 
 AttrPath: AttrPath = {
@@ -124,8 +135,8 @@ pub ValFilter: ValFilter = {
 
 ValFilterAtom: ValFilter = {
     <e:AttrExp>                    => ValFilter::Attr(e),
-    "not" "(" <f:ValFilter> ")"    => ValFilter::Not(Box::new(f)),
-    "(" <f:ValFilter> ")"          => f,
+    "not" Open <f:ValFilter> Close    => ValFilter::Not(Box::new(f)),
+    Open <f:ValFilter> Close          => f,
 };
 
 // ---------------------------------------------------------------------------
@@ -165,13 +176,13 @@ pub Path: PatchPath = {
     // Plain attrPath (e.g. "userName", "name.familyName")
     <a:AttrPath> => PatchPath::Attr(a),
     // valuePath without trailing sub-attribute (e.g. emails[type eq "work"])
-    <a:AttrPath> "[" <vf:ValFilter> "]" => PatchPath::Value(PatchValuePath {
+    <a:AttrPath> OpenBracket <vf:ValFilter> CloseBracket => PatchPath::Value(PatchValuePath {
         attr: a,
         filter: vf,
         sub_attr: None,
     }),
     // valuePath with trailing sub-attribute (e.g. emails[type eq "work"].value)
-    <a:AttrPath> "[" <vf:ValFilter> "]" "." <s:AttrNameTok> => PatchPath::Value(PatchValuePath {
+    <a:AttrPath> OpenBracket <vf:ValFilter> CloseBracket "." <s:AttrNameTok> => PatchPath::Value(PatchValuePath {
         attr: a,
         filter: vf,
         sub_attr: Some(s.to_string()),

@@ -290,9 +290,18 @@ impl TryFrom<&str> for Schema {
 
 impl Validate for Schema {
     /// RFC 7643 §7: `id` is the schema URI and "service providers MUST
-    /// specify" it; `name` and `description` are OPTIONAL. §§6-7 allow the
-    /// `schemas` attribute itself to be absent, but when present it must name
-    /// this resource type.
+    /// specify" it; `name` and `description` are OPTIONAL.
+    ///
+    /// `schemas` is the one place this crate's validators tolerate absence.
+    /// §3 makes it REQUIRED on "all representations", but the RFC's own §8.7
+    /// schema representations — the User, Group, EnterpriseUser,
+    /// ServiceProviderConfig, ResourceType and Schema definitions — carry no
+    /// `schemas` attribute at all, and providers follow the example. Rejecting
+    /// what the RFC itself publishes would make `validate()` useless on real
+    /// `/Schemas` responses, so absence passes here alone; when present, the
+    /// array must still be non-empty, unique, and name this resource type.
+    /// `ResourceType` and `ServiceProviderConfig`, whose §8.5 and §8.6
+    /// examples do carry `schemas`, require it.
     fn validate(&self) -> Result<(), ValidationError> {
         if !self.schemas.is_empty() {
             require_schema_urn(&self.schemas, crate::schema_urns::SCHEMA)?;
@@ -311,7 +320,8 @@ mod schema_tests {
     use super::*;
 
     /// R2-L4: RFC 7643 §7 — `id` MUST be specified; `schemas`, when present,
-    /// must name this resource type; absent `schemas` is legal (§§6-7).
+    /// must name this resource type; absent `schemas` is tolerated for
+    /// `Schema` alone, after the RFC's own §8.7 representations.
     #[test]
     fn validate_requires_id_and_checks_the_urn() {
         use crate::Validate;

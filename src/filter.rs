@@ -58,7 +58,10 @@
 //! [`Display`], derived [`PartialEq`] / [`Debug`], serialization, and `Drop`
 //! impls off the end of the stack, so a hostile `?filter=` value with
 //! thousands of nested `not (…)` cannot crash the server after the filter has
-//! been accepted. The term bound is memory hygiene for the other axis.
+//! been accepted. The term bound is memory hygiene for the other axis. Both
+//! are enforced while the parser runs, so an input that crosses either is
+//! rejected at that point with the rest unread, and peak allocation for a
+//! hostile input is bounded by the limits rather than by its length.
 //!
 //! The two are independent because `and`/`or` are n-ary: `a or b or c …` is
 //! one [`Filter::Or`] however many operands it has, so a hundred-id batch
@@ -100,8 +103,24 @@
 use fluent_uri::Uri;
 use lalrpop_util::ParseError as LalrParseError;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::cell::Cell;
 use std::fmt::{Display, Formatter};
+use std::ops::{Deref, DerefMut};
+use std::sync::OnceLock;
 use thiserror::Error;
+
+/// The generated parsers, built once. Constructing one compiles the lexer's
+/// regex set (about 400 KiB and measurable time), which used to happen on
+/// every `from_str`; the parser itself is stateless, so sharing is free.
+fn filter_parser() -> &'static crate::filter_parser::FilterParser {
+    static PARSER: OnceLock<crate::filter_parser::FilterParser> = OnceLock::new();
+    PARSER.get_or_init(crate::filter_parser::FilterParser::new)
+}
+
+fn path_parser() -> &'static crate::filter_parser::PathParser {
+    static PARSER: OnceLock<crate::filter_parser::PathParser> = OnceLock::new();
+    PARSER.get_or_init(crate::filter_parser::PathParser::new)
+}
 
 /// Maximum allowed nesting depth for a parsed [`Filter`] or [`ValFilter`] tree.
 ///
@@ -134,7 +153,53 @@ pub const MAX_FILTER_DEPTH: usize = 64;
 ///
 /// Exceeding it is [`FilterActionError::TooManyTerms`], which a server should
 /// answer with RFC 7644 §3.12 `tooMany` or `invalidFilter`.
+///
+/// Both this and [`MAX_FILTER_DEPTH`] are enforced *during* parsing, not
+/// after: the parser charges each attribute expression against a budget as it
+/// is reduced and tracks open brackets as it shifts them, so an input that
+/// crosses a limit is rejected at that point and the rest of it is never read,
+/// let alone allocated. Peak memory for a hostile filter is therefore bounded
+/// by the limits, not by the input's length.
 pub const MAX_FILTER_TERMS: usize = 1024;
+
+/// Parse-time resource budget, threaded through the generated parser.
+///
+/// Charges each attribute expression against [`MAX_FILTER_TERMS`] and each
+/// open `(` / `[` against [`MAX_FILTER_DEPTH`], failing the parse the moment
+/// either is exceeded. This is what makes the limits a bound on allocation
+/// rather than a check on an already-built tree.
+#[derive(Debug, Default)]
+pub(crate) struct ParseBudget {
+    terms: Cell<usize>,
+    depth: Cell<usize>,
+}
+
+impl ParseBudget {
+    /// Charge one attribute expression.
+    pub(crate) fn term(&self) -> Result<(), FilterActionError> {
+        let n = self.terms.get() + 1;
+        if n > MAX_FILTER_TERMS {
+            return Err(FilterActionError::TooManyTerms(n));
+        }
+        self.terms.set(n);
+        Ok(())
+    }
+
+    /// Enter one level of syntactic nesting (`(`, `not (`, or `[`).
+    pub(crate) fn enter(&self) -> Result<(), FilterActionError> {
+        let d = self.depth.get() + 1;
+        if d > MAX_FILTER_DEPTH {
+            return Err(FilterActionError::DepthExceeded(d));
+        }
+        self.depth.set(d);
+        Ok(())
+    }
+
+    /// Leave one level of syntactic nesting.
+    pub(crate) fn leave(&self) {
+        self.depth.set(self.depth.get().saturating_sub(1));
+    }
+}
 
 /// Error produced by fallible grammar actions (`=>?` rules in the LALRPOP grammar)
 /// and by post-parse validation.
@@ -149,13 +214,16 @@ pub enum FilterActionError {
     /// A comparison value contained an invalid JSON escape or format.
     #[error("invalid comparison value: {0}")]
     InvalidCompValue(#[from] serde_json::Error),
-    /// The parsed filter's nesting depth exceeded [`MAX_FILTER_DEPTH`].
+    /// The filter's nesting depth exceeded [`MAX_FILTER_DEPTH`].
     ///
     /// The wrapped value is the depth at which the limit was first breached.
-    /// Nesting means `not (…)`, a value path's inner filter, or an operator
-    /// change such as an `or` inside an `and` — never the length of a
-    /// same-operator chain, which is bounded by
-    /// [`TooManyTerms`](FilterActionError::TooManyTerms) instead.
+    /// Nesting is measured two ways, both against the same limit: the number
+    /// of brackets open at once (`(`, `not (`, `[`) while parsing, which
+    /// rejects an over-deep input before its interior is read; and the depth
+    /// of the finished AST, where `not (…)`, a value path's inner filter, or
+    /// an operator change such as an `or` inside an `and` each add a level.
+    /// Neither counts the length of a same-operator chain, which is bounded
+    /// by [`TooManyTerms`](FilterActionError::TooManyTerms) instead.
     #[error("filter nesting depth exceeds maximum of {MAX_FILTER_DEPTH} (at depth {0})")]
     DepthExceeded(usize),
     /// The filter contains more attribute expressions than [`MAX_FILTER_TERMS`].
@@ -251,9 +319,9 @@ pub enum Filter {
     /// tree's depth reflects genuine nesting (`not`, grouping, a value path, an
     /// `or` inside an `and`) and never the length of a chain. That is what lets
     /// a 100-term batch lookup parse while [`MAX_FILTER_DEPTH`] still bounds the
-    /// recursion of the derived impls. Always has at least two operands when
-    /// produced by the parser.
-    And(Vec<Filter>),
+    /// recursion of the derived impls. [`Operands`] guarantees at least two
+    /// operands however the value was built.
+    And(Operands<Filter>),
 
     /// Logical disjunction — at least one operand must match.
     ///
@@ -262,7 +330,93 @@ pub enum Filter {
     /// preserve the original precedence on round-trip.
     ///
     /// N-ary, as [`And`](Filter::And).
-    Or(Vec<Filter>),
+    Or(Operands<Filter>),
+}
+
+/// A logical operator was built with fewer than two operands.
+///
+/// Returned by [`Operands::new`]; the wrapped value is the count supplied.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+#[error("a logical operator needs at least two operands, got {0}")]
+pub struct TooFewOperands(pub usize);
+
+/// The operands of an n-ary [`Filter::And`] / [`Filter::Or`] (and the
+/// [`ValFilter`] pair): at least two, by construction.
+///
+/// The SCIM grammar has no way to write a conjunction of one thing or of
+/// nothing, so a tree holding one would not survive `Display` and re-parse.
+/// Rather than check that at every use, the type rules it out: the only ways
+/// to obtain an `Operands` are [`Operands::new`] (which refuses fewer than
+/// two), [`Operands::pair`], the flattening constructors [`Filter::and`] /
+/// [`Filter::or`], and the parser. Dereferences to a slice, so `.len()`,
+/// `.iter()`, indexing and slice patterns all work; [`push`](Operands::push)
+/// is the only way to grow it and there is no way to shrink it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Operands<T>(Vec<T>);
+
+impl<T> Operands<T> {
+    /// Wrap `items`, which must hold at least two operands.
+    pub fn new(items: Vec<T>) -> Result<Self, TooFewOperands> {
+        if items.len() < 2 {
+            return Err(TooFewOperands(items.len()));
+        }
+        Ok(Self(items))
+    }
+
+    /// Exactly two operands.
+    pub fn pair(first: T, second: T) -> Self {
+        Self(vec![first, second])
+    }
+
+    /// Append an operand.
+    pub fn push(&mut self, item: T) {
+        self.0.push(item);
+    }
+
+    /// The operands as a slice.
+    pub fn as_slice(&self) -> &[T] {
+        &self.0
+    }
+
+    /// Take the operands back as a `Vec`.
+    pub fn into_vec(self) -> Vec<T> {
+        self.0
+    }
+
+    fn extend_from(&mut self, other: Operands<T>) {
+        self.0.extend(other.0);
+    }
+}
+
+impl<T> Deref for Operands<T> {
+    type Target = [T];
+    fn deref(&self) -> &[T] {
+        &self.0
+    }
+}
+
+/// Elements may be replaced in place; the length cannot change through a
+/// slice, so the two-operand floor holds.
+impl<T> DerefMut for Operands<T> {
+    fn deref_mut(&mut self) -> &mut [T] {
+        &mut self.0
+    }
+}
+
+impl<T> IntoIterator for Operands<T> {
+    type Item = T;
+    type IntoIter = std::vec::IntoIter<T>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+impl<'a, T> IntoIterator for &'a Operands<T> {
+    type Item = &'a T;
+    type IntoIter = std::slice::Iter<'a, T>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
 }
 
 impl Filter {
@@ -273,10 +427,10 @@ impl Filter {
     pub fn and(lhs: Filter, rhs: Filter) -> Filter {
         let mut items = match lhs {
             Filter::And(items) => items,
-            other => vec![other],
+            other => Operands(vec![other]),
         };
         match rhs {
-            Filter::And(more) => items.extend(more),
+            Filter::And(more) => items.extend_from(more),
             other => items.push(other),
         }
         Filter::And(items)
@@ -286,10 +440,10 @@ impl Filter {
     pub fn or(lhs: Filter, rhs: Filter) -> Filter {
         let mut items = match lhs {
             Filter::Or(items) => items,
-            other => vec![other],
+            other => Operands(vec![other]),
         };
         match rhs {
-            Filter::Or(more) => items.extend(more),
+            Filter::Or(more) => items.extend_from(more),
             other => items.push(other),
         }
         Filter::Or(items)
@@ -301,10 +455,10 @@ impl ValFilter {
     pub fn and(lhs: ValFilter, rhs: ValFilter) -> ValFilter {
         let mut items = match lhs {
             ValFilter::And(items) => items,
-            other => vec![other],
+            other => Operands(vec![other]),
         };
         match rhs {
-            ValFilter::And(more) => items.extend(more),
+            ValFilter::And(more) => items.extend_from(more),
             other => items.push(other),
         }
         ValFilter::And(items)
@@ -314,10 +468,10 @@ impl ValFilter {
     pub fn or(lhs: ValFilter, rhs: ValFilter) -> ValFilter {
         let mut items = match lhs {
             ValFilter::Or(items) => items,
-            other => vec![other],
+            other => Operands(vec![other]),
         };
         match rhs {
-            ValFilter::Or(more) => items.extend(more),
+            ValFilter::Or(more) => items.extend_from(more),
             other => items.push(other),
         }
         ValFilter::Or(items)
@@ -419,19 +573,16 @@ impl std::str::FromStr for Filter {
     type Err = ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let parsed = crate::filter_parser::FilterParser::new()
-            .parse(s.trim())
+        // The budget bounds terms and syntactic nesting while parsing; the AST
+        // depth walk below is the exact structural check on what came out.
+        let budget = ParseBudget::default();
+        let parsed = filter_parser()
+            .parse(&budget, s.trim())
             .map_err(|e| e.map_token(|t| t.to_string()))?;
         if let Some(depth) = filter_depth_exceeds(&parsed, MAX_FILTER_DEPTH) {
             drop_filter_iteratively(parsed);
             return Err(LalrParseError::User {
                 error: FilterActionError::DepthExceeded(depth),
-            });
-        }
-        if let Some(terms) = filter_terms_exceed(&parsed, MAX_FILTER_TERMS) {
-            drop_filter_iteratively(parsed);
-            return Err(LalrParseError::User {
-                error: FilterActionError::TooManyTerms(terms),
             });
         }
         Ok(parsed)
@@ -478,10 +629,10 @@ pub enum ValFilter {
     Not(Box<ValFilter>),
     /// Logical conjunction — both operands must match.
     /// N-ary, as [`Filter::And`].
-    And(Vec<ValFilter>),
+    And(Operands<ValFilter>),
     /// Logical disjunction — at least one operand must match.
     /// N-ary, as [`Filter::Or`].
-    Or(Vec<ValFilter>),
+    Or(Operands<ValFilter>),
 }
 
 /// An atomic filter expression: a presence test or an attribute comparison.
@@ -881,8 +1032,9 @@ impl std::str::FromStr for PatchPath {
     type Err = ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let parsed = crate::filter_parser::PathParser::new()
-            .parse(s.trim())
+        let budget = ParseBudget::default();
+        let parsed = path_parser()
+            .parse(&budget, s.trim())
             .map_err(|e| e.map_token(|t| t.to_string()))?;
         match parsed {
             PatchPath::Attr(a) => Ok(PatchPath::Attr(a)),
@@ -891,12 +1043,6 @@ impl std::str::FromStr for PatchPath {
                     drop_val_filter_iteratively(vp.filter);
                     return Err(LalrParseError::User {
                         error: FilterActionError::DepthExceeded(depth),
-                    });
-                }
-                if let Some(terms) = val_filter_terms_exceed(&vp.filter, MAX_FILTER_TERMS) {
-                    drop_val_filter_iteratively(vp.filter);
-                    return Err(LalrParseError::User {
-                        error: FilterActionError::TooManyTerms(terms),
                     });
                 }
                 Ok(PatchPath::Value(vp))
@@ -930,51 +1076,6 @@ fn filter_depth_exceeds(root: &Filter, limit: usize) -> Option<usize> {
             Filter::And(items) | Filter::Or(items) => {
                 worklist.extend(items.iter().map(|item| (item, depth + 1)));
             }
-        }
-    }
-    None
-}
-
-/// Count the attribute expressions (terms) in a filter, iteratively, stopping
-/// as soon as `limit` is exceeded.
-fn filter_terms_exceed(root: &Filter, limit: usize) -> Option<usize> {
-    let mut count = 0usize;
-    let mut worklist: Vec<&Filter> = vec![root];
-    while let Some(node) = worklist.pop() {
-        match node {
-            Filter::Attr(_) => count += 1,
-            Filter::ValuePath(vp) => {
-                let mut inner: Vec<&ValFilter> = vec![&vp.filter];
-                while let Some(v) = inner.pop() {
-                    match v {
-                        ValFilter::Attr(_) => count += 1,
-                        ValFilter::Not(x) => inner.push(x),
-                        ValFilter::And(items) | ValFilter::Or(items) => inner.extend(items),
-                    }
-                }
-            }
-            Filter::Not(inner) => worklist.push(inner),
-            Filter::And(items) | Filter::Or(items) => worklist.extend(items),
-        }
-        if count > limit {
-            return Some(count);
-        }
-    }
-    None
-}
-
-/// `ValFilter` mirror of [`filter_terms_exceed`].
-fn val_filter_terms_exceed(root: &ValFilter, limit: usize) -> Option<usize> {
-    let mut count = 0usize;
-    let mut worklist: Vec<&ValFilter> = vec![root];
-    while let Some(node) = worklist.pop() {
-        match node {
-            ValFilter::Attr(_) => count += 1,
-            ValFilter::Not(inner) => worklist.push(inner),
-            ValFilter::And(items) | ValFilter::Or(items) => worklist.extend(items),
-        }
-        if count > limit {
-            return Some(count);
         }
     }
     None
@@ -1216,7 +1317,7 @@ mod tests {
     #[test]
     fn test_scim_filter_simple_eq() {
         let f = crate::filter_parser::FilterParser::new()
-            .parse(r#"userName eq "bjensen""#)
+            .parse(&ParseBudget::default(), r#"userName eq "bjensen""#)
             .unwrap();
         assert_eq!(
             f,
@@ -1236,10 +1337,10 @@ mod tests {
     fn test_scim_filter_case_insensitive_op() {
         // RFC: "Attribute names and attribute operators used in filters are case insensitive"
         let f1 = crate::filter_parser::FilterParser::new()
-            .parse(r#"userName Eq "john""#)
+            .parse(&ParseBudget::default(), r#"userName Eq "john""#)
             .unwrap();
         let f2 = crate::filter_parser::FilterParser::new()
-            .parse(r#"userName eq "john""#)
+            .parse(&ParseBudget::default(), r#"userName eq "john""#)
             .unwrap();
         assert_eq!(f1, f2);
     }
@@ -1247,7 +1348,7 @@ mod tests {
     #[test]
     fn test_scim_filter_pr() {
         let f = crate::filter_parser::FilterParser::new()
-            .parse("title pr")
+            .parse(&ParseBudget::default(), "title pr")
             .unwrap();
         assert_eq!(
             f,
@@ -1262,7 +1363,7 @@ mod tests {
     #[test]
     fn test_scim_filter_sub_attr() {
         let f = crate::filter_parser::FilterParser::new()
-            .parse(r#"name.familyName co "O'Malley""#)
+            .parse(&ParseBudget::default(), r#"name.familyName co "O'Malley""#)
             .unwrap();
         assert_eq!(
             f,
@@ -1281,7 +1382,10 @@ mod tests {
     #[test]
     fn test_scim_filter_uri_prefix() {
         let f = crate::filter_parser::FilterParser::new()
-            .parse(r#"urn:ietf:params:scim:schemas:core:2.0:User:userName sw "J""#)
+            .parse(
+                &ParseBudget::default(),
+                r#"urn:ietf:params:scim:schemas:core:2.0:User:userName sw "J""#,
+            )
             .unwrap();
         assert_eq!(
             f,
@@ -1300,11 +1404,14 @@ mod tests {
     #[test]
     fn test_scim_filter_and() {
         let f = crate::filter_parser::FilterParser::new()
-            .parse(r#"title pr and userType eq "Employee""#)
+            .parse(
+                &ParseBudget::default(),
+                r#"title pr and userType eq "Employee""#,
+            )
             .unwrap();
         assert_eq!(
             f,
-            Filter::And(vec![
+            Filter::And(Operands::pair(
                 Filter::Attr(AttrExp::Present(AttrPath {
                     uri: None,
                     name: "title".into(),
@@ -1319,18 +1426,21 @@ mod tests {
                     CompareOp::Eq,
                     CompValue::Str("Employee".into()),
                 )),
-            ])
+            ))
         );
     }
 
     #[test]
     fn test_scim_filter_or() {
         let f = crate::filter_parser::FilterParser::new()
-            .parse(r#"title pr or userType eq "Intern""#)
+            .parse(
+                &ParseBudget::default(),
+                r#"title pr or userType eq "Intern""#,
+            )
             .unwrap();
         assert_eq!(
             f,
-            Filter::Or(vec![
+            Filter::Or(Operands::pair(
                 Filter::Attr(AttrExp::Present(AttrPath {
                     uri: None,
                     name: "title".into(),
@@ -1345,7 +1455,7 @@ mod tests {
                     CompareOp::Eq,
                     CompValue::Str("Intern".into()),
                 )),
-            ])
+            ))
         );
     }
 
@@ -1353,7 +1463,10 @@ mod tests {
     fn test_scim_filter_and_precedence_over_or() {
         // "A and B or C" should parse as "(A and B) or C"
         let f = crate::filter_parser::FilterParser::new()
-            .parse(r#"title pr and userType eq "Employee" or emails pr"#)
+            .parse(
+                &ParseBudget::default(),
+                r#"title pr and userType eq "Employee" or emails pr"#,
+            )
             .unwrap();
 
         let Filter::Or(items) = f else {
@@ -1367,7 +1480,7 @@ mod tests {
     #[test]
     fn test_scim_filter_not() {
         let f = crate::filter_parser::FilterParser::new()
-            .parse(r#"not (emails co "example.com")"#)
+            .parse(&ParseBudget::default(), r#"not (emails co "example.com")"#)
             .unwrap();
         assert!(matches!(f, Filter::Not(_)));
     }
@@ -1376,7 +1489,7 @@ mod tests {
     fn test_scim_filter_grouping() {
         // Parens change precedence: "A or (B and C)" — inner group is And
         let f = crate::filter_parser::FilterParser::new()
-            .parse(r#"userType eq "Employee" and (emails co "example.com" or emails.value co "example.org")"#)
+            .parse(&ParseBudget::default(), r#"userType eq "Employee" and (emails co "example.com" or emails.value co "example.org")"#)
             .unwrap();
         let Filter::And(items) = f else {
             panic!("expected And, got {f:?}");
@@ -1388,7 +1501,10 @@ mod tests {
     #[test]
     fn test_scim_filter_value_path() {
         let f = crate::filter_parser::FilterParser::new()
-            .parse(r#"emails[type eq "work" and value co "@example.com"]"#)
+            .parse(
+                &ParseBudget::default(),
+                r#"emails[type eq "work" and value co "@example.com"]"#,
+            )
             .unwrap();
         assert!(matches!(f, Filter::ValuePath(_)));
         if let Filter::ValuePath(vp) = f {
@@ -1431,7 +1547,7 @@ mod tests {
     #[test]
     fn test_scim_patch_path_attr() {
         let p = crate::filter_parser::PathParser::new()
-            .parse("userName")
+            .parse(&ParseBudget::default(), "userName")
             .unwrap();
         assert_eq!(
             p,
@@ -1446,7 +1562,7 @@ mod tests {
     #[test]
     fn test_scim_patch_path_sub_attr() {
         let p = crate::filter_parser::PathParser::new()
-            .parse("name.familyName")
+            .parse(&ParseBudget::default(), "name.familyName")
             .unwrap();
         assert_eq!(
             p,
@@ -1461,7 +1577,7 @@ mod tests {
     #[test]
     fn test_scim_patch_path_value_path() {
         let p = crate::filter_parser::PathParser::new()
-            .parse(r#"emails[type eq "work"]"#)
+            .parse(&ParseBudget::default(), r#"emails[type eq "work"]"#)
             .unwrap();
         let PatchPath::Value(vp) = p else {
             panic!("expected PatchPath::Value");
@@ -1473,7 +1589,7 @@ mod tests {
     #[test]
     fn test_scim_patch_path_value_path_sub_attr() {
         let p = crate::filter_parser::PathParser::new()
-            .parse(r#"emails[type eq "work"].value"#)
+            .parse(&ParseBudget::default(), r#"emails[type eq "work"].value"#)
             .unwrap();
         let PatchPath::Value(vp) = p else {
             panic!("expected PatchPath::Value");
@@ -1487,14 +1603,22 @@ mod tests {
     #[test_case(r#"emails[type eq "work"].urn:foo:bar"# ; "trailing_urn")]
     #[test_case("name.family.given" ; "too_many_sub_attrs")]
     fn path_rejected(s: &str) {
-        assert!(crate::filter_parser::PathParser::new().parse(s).is_err());
+        assert!(
+            crate::filter_parser::PathParser::new()
+                .parse(&ParseBudget::default(), s)
+                .is_err()
+        );
     }
 
     // Filter strings with invalid comp-values that must be rejected.
     #[test_case(r#"userName eq "\q""# ; "unknown_escape")]
     #[test_case(r#"userName eq "\uGHIJ""# ; "invalid_unicode_escape")]
     fn filter_comp_value_rejected(s: &str) {
-        assert!(crate::filter_parser::FilterParser::new().parse(s).is_err());
+        assert!(
+            crate::filter_parser::FilterParser::new()
+                .parse(&ParseBudget::default(), s)
+                .is_err()
+        );
     }
 
     // Invalid attrPaths that do not conform to RFC 7644 Figure 1.
@@ -1502,7 +1626,11 @@ mod tests {
     #[test_case("name.family.given pr" ; "too_many_sub_attrs")]
     #[test_case(r#"emails[name.family.given eq "x"]"# ; "value_path_inner_too_many_sub_attrs")]
     fn invalid_attr_path_rejected(s: &str) {
-        assert!(crate::filter_parser::FilterParser::new().parse(s).is_err());
+        assert!(
+            crate::filter_parser::FilterParser::new()
+                .parse(&ParseBudget::default(), s)
+                .is_err()
+        );
     }
 
     // The RFC ABNF requires SP separators around compare/logical operators.
@@ -1510,14 +1638,18 @@ mod tests {
     #[test_case(r#"emails[type eq"work"]"# ; "missing_space_in_value_path")]
     #[test_case(r#"title prand userType eq "Employee""# ; "missing_space_before_and")]
     fn filter_requires_required_spaces(s: &str) {
-        assert!(crate::filter_parser::FilterParser::new().parse(s).is_err());
+        assert!(
+            crate::filter_parser::FilterParser::new()
+                .parse(&ParseBudget::default(), s)
+                .is_err()
+        );
     }
 
     #[test]
     fn test_comp_value_surrogate_pair_handled() {
         // \uD800\uDC00 is a surrogate pair representing U+10000
         let f = crate::filter_parser::FilterParser::new()
-            .parse(r#"userName eq "\uD800\uDC00""#)
+            .parse(&ParseBudget::default(), r#"userName eq "\uD800\uDC00""#)
             .unwrap();
         if let Filter::Attr(AttrExp::Comparison(_, _, CompValue::Str(s))) = f {
             assert_eq!(s, "\u{10000}");
@@ -1529,7 +1661,10 @@ mod tests {
     #[test]
     fn test_scim_patch_path_complex_filter() {
         let p = crate::filter_parser::PathParser::new()
-            .parse(r#"emails[type eq "work" and value co "@example.com"].value"#)
+            .parse(
+                &ParseBudget::default(),
+                r#"emails[type eq "work" and value co "@example.com"].value"#,
+            )
             .unwrap();
         let PatchPath::Value(vp) = p else {
             panic!("expected PatchPath::Value");
@@ -1545,7 +1680,10 @@ mod tests {
     fn test_val_filter_parenthesized_grouping() {
         // Parenthesized grouping inside [...] should be accepted
         let f = crate::filter_parser::FilterParser::new()
-            .parse(r#"emails[(type eq "work") and value pr]"#)
+            .parse(
+                &ParseBudget::default(),
+                r#"emails[(type eq "work") and value pr]"#,
+            )
             .unwrap();
         assert!(matches!(f, Filter::ValuePath(_)));
         if let Filter::ValuePath(vp) = f {
@@ -1623,7 +1761,8 @@ mod tests {
     }
 
     // ---------------------------------------------------------------------------
-    // Depth- and term-limit enforcement (DoS hardening against pathological filters)
+    // Depth- and term-limit enforcement (DoS hardening against pathological
+    // filters), enforced while parsing
     // ---------------------------------------------------------------------------
 
     fn assert_depth_exceeded<T: std::fmt::Debug>(res: Result<T, ParseError>) {
@@ -1815,15 +1954,109 @@ mod tests {
         assert_eq!(*vp.filter, va);
     }
 
-    // The term count spans value-path inner filters too, since every
-    // attribute expression costs the same to hold.
+    // The term budget spans value-path inner filters too, since every
+    // attribute expression costs the same to hold: 600 inside the brackets
+    // plus 425 outside is 1025, one over the limit, while 600 + 424 parses.
     #[test]
-    fn term_count_includes_value_path_terms() {
-        let f: Filter = r#"emails[type eq "work" or type eq "home"] and title pr and not (x pr)"#
-            .parse()
-            .unwrap();
-        assert_eq!(filter_terms_exceed(&f, 3), Some(4));
-        assert!(filter_terms_exceed(&f, 4).is_none());
+    fn term_budget_spans_value_path_terms() {
+        let inner = chain("or", 600);
+        let outer = chain("and", MAX_FILTER_TERMS - 600 + 1);
+        assert_too_many_terms(
+            format!("emails[{inner}] and {outer}").parse::<Filter>(),
+            MAX_FILTER_TERMS + 1,
+        );
+        let outer = chain("and", MAX_FILTER_TERMS - 600);
+        format!("emails[{inner}] and {outer}")
+            .parse::<Filter>()
+            .expect("exactly MAX_FILTER_TERMS terms across a value path parses");
+    }
+
+    // Devin SEC-1: the limits are enforced while parsing, not on the finished
+    // tree. Observable without an allocator hook: garbage *after* the point
+    // where a limit is crossed is never reached, so the error is the limit
+    // error rather than a syntax error. Post-parse enforcement would have to
+    // finish the parse first and would report the syntax error instead.
+    #[test]
+    fn term_limit_fires_before_the_parser_reaches_the_rest_of_the_input() {
+        let s = format!("{} or ((((", chain("or", MAX_FILTER_TERMS + 1));
+        assert_too_many_terms(s.parse::<Filter>(), MAX_FILTER_TERMS + 1);
+        let s = format!("emails[{}] or ((((", chain("or", MAX_FILTER_TERMS + 1));
+        assert_too_many_terms(s.parse::<PatchPath>(), MAX_FILTER_TERMS + 1);
+    }
+
+    #[test]
+    fn depth_limit_fires_before_the_parser_reaches_the_rest_of_the_input() {
+        let s = format!("{}title pr ))))", "not (".repeat(MAX_FILTER_DEPTH + 1));
+        match s.parse::<Filter>() {
+            Err(LalrParseError::User {
+                error: FilterActionError::DepthExceeded(d),
+            }) => assert_eq!(
+                d,
+                MAX_FILTER_DEPTH + 1,
+                "reported at the first excess bracket"
+            ),
+            other => panic!("expected DepthExceeded from the live check, got {other:?}"),
+        }
+        // A well-formed input at exactly the syntactic limit still parses.
+        let s = not_chain(MAX_FILTER_DEPTH);
+        s.parse::<Filter>()
+            .expect("MAX_FILTER_DEPTH nested nots parse");
+    }
+
+    // Redundant parentheses are nesting too: the red team's round-2 report
+    // noted 5,000 of them parsed while a 65-term chain did not. Both limits
+    // now mean what they say.
+    #[test]
+    fn redundant_parentheses_count_as_nesting() {
+        let ok = format!(
+            "{}title pr{}",
+            "(".repeat(MAX_FILTER_DEPTH),
+            ")".repeat(MAX_FILTER_DEPTH)
+        );
+        ok.parse::<Filter>()
+            .expect("MAX_FILTER_DEPTH redundant parens parse");
+        let over = format!(
+            "{}title pr{}",
+            "(".repeat(MAX_FILTER_DEPTH + 1),
+            ")".repeat(MAX_FILTER_DEPTH + 1)
+        );
+        assert_depth_exceeded(over.parse::<Filter>());
+        let deep = format!("{}title pr{}", "(".repeat(5_000), ")".repeat(5_000));
+        assert_depth_exceeded(deep.parse::<Filter>());
+    }
+
+    // Devin BUG-4: the type rules out the arities the grammar cannot write.
+    #[test]
+    fn operands_refuse_fewer_than_two() {
+        let leaf = |n: &str| Filter::Attr(AttrExp::Present(AttrPath::with_name(n)));
+        assert_eq!(Operands::<Filter>::new(vec![]), Err(TooFewOperands(0)));
+        assert_eq!(Operands::new(vec![leaf("a")]), Err(TooFewOperands(1)));
+        let two = Operands::new(vec![leaf("a"), leaf("b")]).unwrap();
+        assert_eq!(two.len(), 2);
+        let mut three = two.clone();
+        three.push(leaf("c"));
+        assert_eq!(three.len(), 3);
+        assert_eq!(Filter::And(three).to_string(), "a pr and b pr and c pr");
+        assert_eq!(
+            TooFewOperands(1).to_string(),
+            "a logical operator needs at least two operands, got 1"
+        );
+    }
+
+    // Every hand-built tree the type permits survives Display and re-parse.
+    #[test]
+    fn hand_built_operands_round_trip() {
+        let leaf = |n: &str| Filter::Attr(AttrExp::Present(AttrPath::with_name(n)));
+        let f = Filter::Or(Operands::new(vec![leaf("a"), leaf("b"), leaf("c")]).unwrap());
+        assert_eq!(f.to_string().parse::<Filter>().unwrap(), f);
+        let f = Filter::And(Operands::pair(
+            Filter::Or(Operands::pair(leaf("a"), leaf("b"))),
+            Filter::Not(Box::new(leaf("c"))),
+        ));
+        assert_eq!(f.to_string(), "(a pr or b pr) and not (c pr)");
+        assert_eq!(f.to_string().parse::<Filter>().unwrap(), f);
+        let json = serde_json::to_string(&f).unwrap();
+        assert_eq!(serde_json::from_str::<Filter>(&json).unwrap(), f);
     }
 
     #[test]

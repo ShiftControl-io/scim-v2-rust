@@ -227,8 +227,9 @@ impl<F> Default for ListQuery<F> {
 ///
 /// Deserialization dispatches on the SCIM schema URN carried in the payload's
 /// `schemas` attribute (RFC 7643 §3). `Schema` and `ResourceType` resources,
-/// which per RFC 7643 §§6-7 are often served without a `schemas` field, are
-/// disambiguated by structural markers: the `attributes` array (Schema) or
+/// which are often served without a `schemas` field — RFC 7643's own §8.7
+/// schema representations carry none — are disambiguated by structural
+/// markers: the `attributes` array (Schema) or
 /// the `endpoint` + `schema` fields (ResourceType). Payloads that do not
 /// carry a recognized discriminator are rejected rather than silently
 /// classified, to prevent type confusion.
@@ -324,9 +325,10 @@ where
             ));
         }
 
-        // No "schemas" field. Per RFC 7643 §§6-7, Schema and ResourceType
-        // resources may appear without one. User and Group MUST carry their
-        // URN and are not eligible for structural fallback.
+        // No "schemas" field. Schema and ResourceType resources are seen
+        // without one in practice — RFC 7643's own §8.7 schema representations
+        // carry none — so they get a structural fallback. User and Group MUST
+        // carry their URN and are not eligible for it.
         let has_attributes = value
             .get("attributes")
             .map(Value::is_array)
@@ -427,8 +429,10 @@ pub trait ScimResource: sealed::Sealed {
 
     /// The `schemas` attribute this particular instance carries on the wire.
     ///
-    /// Empty when the payload omitted it, which RFC 7643 §§6-7 permit for the
-    /// discovery resources. [`ListResponse::validate`] compares this against
+    /// Empty when the payload omitted it, as discovery payloads sometimes do
+    /// (RFC 7643's own §8.7 schema representations carry none); whether that
+    /// is acceptable is each resource's own [`Validate`] decision.
+    /// [`ListResponse::validate`] compares a non-empty value against
     /// [`schema_urn`](ScimResource::schema_urn) so the typed path performs the
     /// same discriminator check the [`Resource`] deserializer does.
     fn declared_schemas(&self) -> &[String];
@@ -553,7 +557,10 @@ impl<R: ScimResource> Validate for ListResponse<R> {
     /// * When the response carries a *partial* result set — fewer entries in
     ///   `Resources` than `totalResults` — both `startIndex` and `itemsPerPage`
     ///   are present. §3.4.2 makes them REQUIRED "when partial results are
-    ///   returned due to pagination".
+    ///   returned due to pagination", and pagination is the only mechanism
+    ///   §3.4.2 gives for returning fewer resources than `totalResults`, so a
+    ///   short page without markers is treated as non-conformant rather than
+    ///   as an unpaginated page of unexplained size.
     ///
     /// This last invariant cannot be encoded in the type: `startIndex` and
     /// `itemsPerPage` are `Option<i64>` so that a wire `0` stays distinct from
@@ -636,7 +643,12 @@ impl<R: ScimResource> Validate for ListResponse<R> {
 
         // A short page — fewer `Resources` returned than the total that match —
         // is "partial results ... returned due to pagination" per §3.4.2, which
-        // makes both pagination markers REQUIRED.
+        // makes both pagination markers REQUIRED. §3.4.2 offers no other reason
+        // for a short page: `Resources` "MAY be a subset of the full set of
+        // resources if pagination is requested", `totalResults` "may be larger
+        // than the number of resources returned, such as when returning a
+        // single page", and Table 6 makes `count` — including a server-side
+        // default — a pagination parameter. A short page is a paginated page.
         if returned < self.total_results {
             if self.start_index.is_none() {
                 return Err(ValidationError::missing_required("startIndex"));
@@ -651,7 +663,9 @@ impl<R: ScimResource> Validate for ListResponse<R> {
         // `Resource`'s own deserializer dispatches on that URN specifically
         // "to prevent type confusion"; without this, a Group payload carrying
         // a `userName` deserialized cleanly into `ListResponse<User<String>>`
-        // and both validators returned Ok. Absence stays legal, per §§6-7.
+        // and both validators returned Ok. Whether an *absent* `schemas` is
+        // acceptable is each resource's own `Validate`'s call (only `Schema`
+        // tolerates it, after RFC 7643 §8.7's own examples), not this one's.
         for (i, resource) in self.resources.iter().enumerate() {
             let declared = resource.declared_schemas();
             if !declared.is_empty() {
@@ -861,10 +875,12 @@ mod resource_tests {
         assert_eq!(err.scim_type_str(), "invalidValue");
     }
 
-    /// RFC 7643 §§6-7 let a discovery resource omit `schemas` entirely, so an
-    /// absent discriminator must stay legal rather than becoming a new failure.
+    /// `ListResponse::validate` judges the envelope and, when a resource
+    /// declares `schemas`, the discriminator. An absent `schemas` is the
+    /// resource's own `Validate`'s business — `User::validate` rejects this one
+    /// — so it is not reported as a `ListResponse` failure.
     #[test]
-    fn typed_list_response_validate_tolerates_an_absent_discriminator() {
+    fn typed_list_response_validate_leaves_an_absent_discriminator_to_the_resource() {
         let list: ListResponse<User<String>> = ListResponse {
             schemas: vec![schema_urns::LIST_RESPONSE.to_string()],
             total_results: 1,
@@ -878,8 +894,9 @@ mod resource_tests {
         };
         assert!(
             list.validate().is_ok(),
-            "an omitted `schemas` is legal per §§6-7"
+            "the envelope check does not judge an omitted `schemas`"
         );
+        assert_eq!(list.resources[0].validate().unwrap_err().path(), "schemas");
     }
 
     /// The `schemas` array may carry URNs this crate does not model — a
@@ -1244,6 +1261,24 @@ mod tests {
             resources: vec![],
         };
         assert!(list.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_list_response_accepts_count_zero_page_with_markers() {
+        // RFC 7644 §3.4.2.4 Table 6: `count=0` "indicates that no resource
+        // results are to be returned except for totalResults" — a paginated
+        // page of size zero, which is conformant with its markers present and
+        // not without them.
+        let mut list: ListResponse<Resource<String>> = ListResponse {
+            schemas: vec![schema_urns::LIST_RESPONSE.to_string()],
+            total_results: 5,
+            items_per_page: Some(0),
+            start_index: Some(1),
+            resources: vec![],
+        };
+        assert_eq!(list.validate(), Ok(()));
+        list.items_per_page = None;
+        assert_eq!(list.validate().unwrap_err().path(), "itemsPerPage");
     }
 
     #[test]

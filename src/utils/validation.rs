@@ -112,16 +112,29 @@ impl ValidationError {
     }
 }
 
-/// RFC 7643 §3: a resource's `schemas` "MUST only contain values defined as
-/// schema and schemaExtensions for the resource's defined resourceType", and
-/// the protocol messages of RFC 7644 each carry one fixed URN. This checks
-/// that `required_urn` is present. It deliberately does *not* reject
-/// additional URNs: a resource may carry an extension this crate does not
-/// model, and the `Resource` deserializer in `models::others` likewise
-/// ignores URNs it does not recognise.
+/// RFC 7643 §3: `schemas` is REQUIRED and "MUST include a non-empty array";
+/// "each String value must be a unique URI" and "duplicate values MUST NOT
+/// be included"; and a resource's `schemas` "MUST only contain values defined
+/// as schema and schemaExtensions for the resource's defined resourceType",
+/// while the protocol messages of RFC 7644 each carry one fixed URN. This
+/// checks non-emptiness, uniqueness, and that `required_urn` is present. It
+/// deliberately does *not* reject additional URNs: a resource may carry an
+/// extension this crate does not model, and the `Resource` deserializer in
+/// `models::others` likewise ignores URNs it does not recognise. Uniqueness
+/// is byte-exact, the same comparison the membership check uses.
 pub fn require_schema_urn(schemas: &[String], required_urn: &str) -> Result<(), ValidationError> {
     if schemas.is_empty() {
         return Err(ValidationError::missing_required("schemas"));
+    }
+    if let Some(dup) = schemas
+        .iter()
+        .enumerate()
+        .find_map(|(i, s)| schemas[..i].contains(s).then_some(s))
+    {
+        return Err(ValidationError::invalid_value(
+            "schemas",
+            format!("duplicate value {dup}; RFC 7643 §3 requires each URI to be unique"),
+        ));
     }
     if !schemas.iter().any(|s| s == required_urn) {
         return Err(ValidationError::invalid_value(
@@ -443,6 +456,49 @@ mod tests {
         let json = serde_json::to_value(&body).unwrap();
         assert_eq!(json["scimType"], "invalidValue");
         assert_eq!(json["status"], "400", "status must serialize as a string");
+    }
+
+    /// RFC 7643 §3: non-empty, unique, and naming the required URN. Extra
+    /// URNs are allowed (an unmodelled extension), a duplicate of any URN is
+    /// not — including a duplicate of the required one, which is the case a
+    /// membership-only check waves through.
+    #[test]
+    fn require_schema_urn_enforces_non_empty_unique_and_present() {
+        let req = "urn:ietf:params:scim:schemas:core:2.0:User";
+        let ext = "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User";
+        let ok = |v: &[&str]| {
+            require_schema_urn(&v.iter().map(|s| s.to_string()).collect::<Vec<_>>(), req)
+        };
+
+        assert_eq!(ok(&[req]), Ok(()));
+        assert_eq!(ok(&[req, ext]), Ok(()));
+        assert_eq!(ok(&[ext, req]), Ok(()));
+
+        assert_eq!(ok(&[]), Err(ValidationError::missing_required("schemas")));
+        let err = ok(&[ext]).unwrap_err();
+        assert_eq!(err.path(), "schemas");
+        assert!(err.to_string().contains("must include"), "{err}");
+
+        for dup in [&[req, req][..], &[req, ext, ext], &[ext, req, ext]] {
+            let err = ok(dup).unwrap_err();
+            assert_eq!(err.path(), "schemas");
+            assert!(err.to_string().contains("duplicate value"), "{err}");
+            assert_eq!(err.scim_type_str(), "invalidValue");
+        }
+    }
+
+    /// The duplicate rule reaches every type through the shared helper; this
+    /// pins that `Strict` cannot certify a payload RFC 7643 §3 forbids.
+    #[cfg(feature = "models")]
+    #[test]
+    fn strict_rejects_duplicate_schema_urns() {
+        use crate::models::user::User;
+        let body = r#"{"schemas":["urn:ietf:params:scim:schemas:core:2.0:User","urn:ietf:params:scim:schemas:core:2.0:User"],"userName":"bjensen"}"#;
+        let err = serde_json::from_str::<Strict<User<String>, CreateRequest>>(body).unwrap_err();
+        assert!(err.to_string().contains("duplicate value"), "{err}");
+        // The lenient model still reads it, and reports the same failure on demand.
+        let user: User<String> = serde_json::from_str(body).unwrap();
+        assert_eq!(user.validate().unwrap_err().path(), "schemas");
     }
 
     /// `ValidationError` is comparable, which is what lets tests assert on a

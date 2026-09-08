@@ -10,10 +10,17 @@ so is free, and every break is listed below.
 
 ### Breaking Changes
 
-- **`Filter::And`/`Or` and `ValFilter::And`/`Or` are n-ary: `And(Vec<Filter>)`,
-  not `And(Box<Filter>, Box<Filter>)`.** `and` and `or` are associative, so
-  the parser now flattens same-operator chains into one node: `a and b and c`
-  is `And([a, b, c])`, and `a and (b and c)` parses to the identical tree.
+- **`Filter::And`/`Or` and `ValFilter::And`/`Or` are n-ary:
+  `And(Operands<Filter>)`, not `And(Box<Filter>, Box<Filter>)`.** `and` and
+  `or` are associative, so the parser now flattens same-operator chains into
+  one node: `a and b and c` is `And([a, b, c])`, and `a and (b and c)` parses
+  to the identical tree. `Operands<T>` is a `Vec` newtype that holds at least
+  two operands by construction — the grammar cannot write a conjunction of one
+  thing or of nothing, and the type does not let you build one — reached
+  through `Operands::new` (which refuses fewer than two with
+  `TooFewOperands`), `Operands::pair`, `push`, and the flattening
+  constructors. It derefs to a slice, so `.len()`, `.iter()`, indexing and
+  slice patterns work unchanged.
   Depth therefore measures genuine nesting (`not`, an `or` under an `and`, a
   value path's inner filter) and never chain length, which is what let the
   R2-I1 fix below land without loosening the depth cap. Patterns on these
@@ -22,7 +29,7 @@ so is free, and every break is listed below.
   `.any(…)`). Build filters programmatically with the new `Filter::and` /
   `Filter::or` (and `ValFilter` equivalents), which flatten the way the parser
   does, so a hand-built tree compares equal to its parsed `Display` output.
-  The parser never produces an `And`/`Or` with fewer than two operands.
+  Nothing can produce an `And`/`Or` with fewer than two operands.
 
 - **Multi-valued attributes are `Vec<T>`, not `Option<Vec<T>>`** — all 18 of
   them: `User`'s `emails`, `addresses`, `phoneNumbers`, `ims`, `photos`,
@@ -90,7 +97,8 @@ so is free, and every break is listed below.
 - **`Schema`, `ResourceType` and `ServiceProviderConfig` gained a `schemas`
   field.** All three carry it on the wire per RFC 7643 §§5-7, but none
   modelled it, so a present value was silently dropped and never
-  round-tripped. `#[serde(default)]` keeps absence legal, which §§6-7 allow.
+  round-tripped. `#[serde(default)]` keeps absence readable; whether it
+  validates is decided per type — see Fixed (Devin review).
 
 - **`Address` gained `value`, `display` and `primary`.** RFC 7643 §2.4 defines
   all three as common sub-attributes of every multi-valued attribute, and
@@ -132,7 +140,12 @@ so is free, and every break is listed below.
   Independent of `MAX_FILTER_DEPTH` by design: with an n-ary AST depth no
   longer bounds size. Generous on purpose — a hundred-id batch lookup is an
   ordinary request — while keeping a hostile `?filter=` from allocating
-  without limit. Map it to RFC 7644 §3.12 `tooMany` or `invalidFilter`.
+  without limit. Both limits are charged inside the parser as it runs (terms
+  as each attribute expression is reduced, depth as each `(`, `not (` or `[`
+  is shifted), so an over-limit input is rejected at the point it crosses the
+  line with the rest unread; peak allocation for a hostile input is bounded
+  by the limits, not by its length, and `tests/filter_budget_alloc.rs`
+  measures it. Map it to RFC 7644 §3.12 `tooMany` or `invalidFilter`.
 - `Filter::and` / `Filter::or` and `ValFilter::and` / `ValFilter::or`:
   flattening constructors that produce the shape the parser would.
 
@@ -244,6 +257,48 @@ so is free, and every break is listed below.
   node of depth 2 however long it is, and a separate `MAX_FILTER_TERMS` (1024)
   bounds size. A 100-term `or` chain now parses; a 100 000-term one is
   rejected with `TooManyTerms` without touching the stack.
+
+### Fixed (Devin review)
+
+Devin reviewed `be75d5c` and raised six items; five changed code and the
+sixth changed documentation.
+
+- **`ResourceType` and `ServiceProviderConfig` no longer validate without
+  `schemas`.** RFC 7643 §3 says "all representations of SCIM schemas MUST
+  include a non-empty array", and the RFC's own §8.5 and §8.6 examples carry
+  it. The 1.0 branch had excused all three discovery types citing "§§6-7",
+  which say no such thing. `Schema` alone keeps the exemption, on different
+  evidence: the §8.7 schema representations — every one the RFC publishes —
+  carry no `schemas` attribute, and providers follow the example, so
+  rejecting absence there would fail `validate()` on the RFC's own output.
+  Deserialization tolerates absence on all three; only `validate()` changed.
+- **Duplicate `schemas` values are rejected.** §3: "each String value must be
+  a unique URI" and "duplicate values MUST NOT be included". A membership
+  check waved `["…User", "…User"]` through; `require_schema_urn` now rejects
+  any repeated URI, which reaches every type that validates `schemas`,
+  including `Strict<T, M>`.
+- **`Operands<T>` makes the two-operand floor structural** — see Breaking
+  Changes. The n-ary commit had left `Filter::And(vec![])` and
+  `Filter::And(vec![x])` constructible; the first displayed as an empty
+  string and the second collapsed to its child, so neither survived a
+  round-trip. Both are now unrepresentable.
+- **The filter limits bound allocation, not just the finished tree.** The
+  term and depth caps were checked after parsing, by which point a 100 000
+  term filter had been fully allocated. They are now charged inside the
+  parser (see Added), a syntactic nesting count means redundant parentheses
+  count as nesting too, and the generated parsers are built once behind a
+  `OnceLock` rather than recompiling the lexer's regex set — about 400 KiB
+  and measurable time — on every `from_str`.
+- **`Compact` is documented as tree-wide and not field-aware**, with tests
+  that the one protocol array a conformant payload can hold empty —
+  `Resources` on an empty page, which RFC 7644 §3.4.2 makes REQUIRED only
+  "if totalResults is non-zero" — is omitted and still deserializes and
+  validates, and that non-empty arrays are never touched.
+- **`ListResponse::validate`'s short-page rule is documented as an
+  inference and defended.** §3.4.2 gives pagination as the only reason a
+  response holds fewer entries than `totalResults`, so a short page without
+  `startIndex`/`itemsPerPage` is treated as non-conformant; a `count=0` page
+  with its markers is pinned as conformant.
 
 ### Added (resilience and conformance pass)
 
@@ -357,7 +412,8 @@ so is free, and every break is listed below.
   Group payload carrying a `userName` deserialized cleanly into
   `ListResponse<User<String>>` with both validators returning `Ok`. This is
   what `ScimResource::schema_urn` is for; it was otherwise vestigial, and
-  `declared_schemas` is added alongside it. Absence stays legal per §§6-7.
+  `declared_schemas` is added alongside it. An absent `schemas` is left to
+  the resource's own `validate`.
 - `MemberType` compared `Other` byte-exact despite the schema's
   `caseExact: false`, so `Other("serviceaccount") != Other("ServiceAccount")`
   and `Other("User") != MemberType::User` even though both serialize to
