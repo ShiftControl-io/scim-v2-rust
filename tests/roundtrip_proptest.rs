@@ -12,6 +12,8 @@ use proptest::prelude::*;
 use scim_v2::models::enterprise_user::{EnterpriseUser, Manager};
 use scim_v2::models::group::{Group, Member, MemberType};
 use scim_v2::models::others::{ListResponse, Resource};
+// Only the case-folding property builds a PatchOp.
+#[cfg(feature = "case-insensitive")]
 use scim_v2::models::others::{OperationTarget, PatchOp, PatchOperation};
 use scim_v2::models::scim_schema::Meta;
 use scim_v2::models::user::{
