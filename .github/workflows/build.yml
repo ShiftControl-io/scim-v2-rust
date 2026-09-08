@@ -78,6 +78,11 @@ jobs:
           - --no-default-features --features models
           - --no-default-features --features schemas
           - --no-default-features --features filter,models
+          # `case-insensitive` with `filter` off: the only configurations in
+          # which `utils::case` compiles without the filter-only vocabulary
+          # its wire-name table also covers.
+          - --no-default-features --features case-insensitive
+          - --no-default-features --features schemas,case-insensitive
           # The shipped default set, exactly as a consumer gets it. Every other
           # row is a reduced or widened configuration, and a `cfg` interaction
           # that only shows in the default combination would otherwise be the

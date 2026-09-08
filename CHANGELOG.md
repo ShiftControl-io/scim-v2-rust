@@ -293,12 +293,89 @@ sixth changed documentation.
   that the one protocol array a conformant payload can hold empty —
   `Resources` on an empty page, which RFC 7644 §3.4.2 makes REQUIRED only
   "if totalResults is non-zero" — is omitted and still deserializes and
-  validates, and that non-empty arrays are never touched.
+  validates, and that non-empty arrays are never touched. Superseded in part
+  by R3-M3 below: a PATCH clear-all *is* a conformant payload the stripping
+  altered, so `Compact` is now fenced to the types where it cannot.
 - **`ListResponse::validate`'s short-page rule is documented as an
   inference and defended.** §3.4.2 gives pagination as the only reason a
   response holds fewer entries than `totalResults`, so a short page without
   `startIndex`/`itemsPerPage` is treated as non-conformant; a `count=0` page
   with its markers is pinned as conformant.
+
+### Fixed (red-team round 3)
+
+Round 3 reviewed `be75d5c`, before the Devin fixes landed, and raised
+sixteen items. Three were already closed by `45459f8` and are noted as
+such; the rest are fixed here. Tests 385 → 405 at `--all-features`.
+
+- **R3-C1 (Critical) — a deep `not (` chain with one trailing token aborted
+  the process.** lalrpop reduced the whole chain into a depth-N tree before
+  rejecting the trailing token, and dropping that tree ran the derived
+  recursive `Drop`, which overflowed the stack: an abort, not a panic, so no
+  `catch_unwind` or task boundary could contain it. The post-parse guard
+  never ran, because `from_str` never got a value back to drop. Closed by
+  the parse-time depth budget from `45459f8`, which rejects at the 65th
+  bracket before anything is built; pinned here with the reproduction —
+  34,000 and 40,000 levels plus ` and` on a 2 MiB thread, 640 levels plus
+  garbage on a 256 KiB thread, the `ValFilter` mirror, and
+  `SearchRequest<Filter>` / `SearchRequest<MaybeFilter>` bodies.
+- **R3-H1 (High) — empty and singleton `And`/`Or` were constructible.**
+  Closed by `Operands<T>` in `45459f8`. Added here: `Filter::all` /
+  `Filter::any` and the `ValFilter` pair, which fold a list into `None` for
+  no items, the item itself for one, and a flattened node otherwise, so an
+  empty allow-list is a value the caller has to handle rather than an empty
+  filter on the wire.
+- **R3-M1 — `MAX_FILTER_TERMS` bounded retention, not allocation.** Closed
+  by the parse-time budget in `45459f8`, measured by
+  `tests/filter_budget_alloc.rs`.
+- **R3-M2 — `canonicalize_keys` left the caller's `Value` half-rebuilt on a
+  collision.** It emptied the map and re-inserted entries until the
+  collision, so an error left a truncated object whose surviving key held
+  whichever spelling came first — possibly the attacker's — with every
+  ancestor half-rebuilt too. Now two-phase: a read-only collision check over
+  the whole tree, then a rewrite that cannot fail, so on `Err` the value is
+  byte-identical to what was passed. Documented as a postcondition; tested
+  at the top level, one level down and three levels down.
+- **R3-M3 — `Compact` deleted a PATCH clear-all.** `strip_unassigned`
+  removed a `PatchOp`'s `"value": []`, the RFC 7644 §3.5.1 clear-all the
+  module cites as its reason for not omitting `[]` by default, and a
+  pathless `add` lost the clear while keeping the set. `Compact<T>` now
+  requires a sealed `Compactable`, implemented for the resource and list
+  types and not for `PatchOp` or `SearchRequest`, so `Compact(&patch_op)`
+  is a compile error (a `compile_fail` doctest pins it); `strip_unassigned`
+  is crate-private; the docs warn against compacting a `PUT` body for the
+  same reason. Tests: all nine multi-valued attributes omitted, and the
+  compact form reading back equal.
+- **R3-M4 / R3-M5 — the `ValFilter` halves of the precedence-preserving
+  `Display` and of `and`-flattening were unpinned.** Mutation showed both
+  could be removed with the suite green. Now a value-path mixed-operator
+  table (five shapes, through `Filter` and `PatchPath`), `ValFilter::and`
+  parity with the parser, and both operators in the value-path
+  chain-at-limit test.
+- **R3-M6 — the `AmbiguousKey` rejection was pinned at one of three entry
+  points.** `from_value` and `CaseInsensitive` now assert it too.
+- **R3-L1 — the depth budget restarted inside a value path**, so 63 outer
+  `not`s around 63 inner ones passed as depth 63. The AST walk now threads
+  its running depth into the inner filter; the live syntactic count from
+  `45459f8` already shared one budget. Tested both ways.
+- **R3-L2 / R3-L6 — value-path term counting neither short-circuited nor
+  agreed across entry points, and `not` was uncounted.** Both counters were
+  removed in `45459f8` in favour of the parser budget, which charges every
+  attribute expression once. Pinned here: a 100,000-term value path reports
+  1025 on every entry point, and `not (x pr)` chains hit the limit like any
+  other term.
+- **R3-L3 — the `negative_total` pin was satisfied by a different branch.**
+  The table now asserts each bound's detail text, plus a negative total
+  with a non-empty page.
+- **R3-L4 — `Valid` and `Strict`'s `Serialize` and `Deref` had no
+  coverage.** Asserted.
+- **R3-L5 — the fixture inventory's comment stripping and `include_str!`
+  needle were unguarded.** Factored into `strip_comments` and `is_included`
+  with negative controls.
+- **R3-L7 — `case-insensitive` had no CI row.** Two rows added to
+  `build.yml` and to the weekly drift matrix — `--features case-insensitive`
+  and `--features schemas,case-insensitive` — for nine configurations.
+- **R3-I1 — `Context::as_str` had no coverage.** One assertion per variant.
 
 ### Added (resilience and conformance pass)
 

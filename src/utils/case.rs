@@ -194,37 +194,63 @@ fn table() -> &'static HashMap<String, &'static str> {
 /// extension URN this crate does not model is left byte-identical, subtree
 /// included. Two keys in one object that fold to the same name are an
 /// [`AmbiguousKey`] error rather than a silent overwrite.
+///
+/// On `Err`, `value` is exactly as it was passed. The collision check runs
+/// over the whole tree before any key is rewritten, so a caller that logs,
+/// echoes or retries the rejected body sees both spellings, not a half-rebuilt
+/// object asserting only the attacker's.
 pub fn canonicalize_keys(value: &mut Value) -> Result<(), AmbiguousKey> {
+    check_collisions(value)?;
+    rewrite_keys(value);
+    Ok(())
+}
+
+/// Phase one, read-only: the first pair of keys in one object that fold to
+/// the same canonical name, anywhere in the tree the rewrite would visit.
+fn check_collisions(value: &Value) -> Result<(), AmbiguousKey> {
     match value {
         Value::Object(map) => {
-            let entries: Vec<(String, Value)> = std::mem::take(map).into_iter().collect();
             // canonical key -> the original spelling that claimed it
-            let mut claimed: HashMap<String, String> = HashMap::with_capacity(entries.len());
-            for (k, mut v) in entries {
+            let mut claimed: HashMap<String, &str> = HashMap::with_capacity(map.len());
+            for (k, v) in map {
                 let lower = k.to_ascii_lowercase();
                 let known = table().get(&lower).copied();
-                // A URN key we do not model owns its subtree: leave it alone.
-                let foreign_extension = lower.starts_with("urn:") && known.is_none();
-                if !foreign_extension {
-                    canonicalize_keys(&mut v)?;
-                }
-                let key = match known {
-                    Some(canonical) => canonical.to_string(),
-                    None => k.clone(),
-                };
-                if let Some(first) = claimed.insert(key.clone(), k.clone()) {
+                let canonical = known.unwrap_or(k.as_str());
+                if let Some(first) = claimed.insert(canonical.to_string(), k.as_str()) {
                     return Err(AmbiguousKey {
-                        canonical: key,
-                        first,
-                        second: k,
+                        canonical: canonical.to_string(),
+                        first: first.to_string(),
+                        second: k.clone(),
                     });
                 }
-                map.insert(key, v);
+                // A URN key we do not model owns its subtree: leave it alone.
+                if !(lower.starts_with("urn:") && known.is_none()) {
+                    check_collisions(v)?;
+                }
             }
             Ok(())
         }
-        Value::Array(items) => items.iter_mut().try_for_each(canonicalize_keys),
+        Value::Array(items) => items.iter().try_for_each(check_collisions),
         _ => Ok(()),
+    }
+}
+
+/// Phase two: the rewrite, which cannot fail once phase one has passed.
+fn rewrite_keys(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            let entries: Vec<(String, Value)> = std::mem::take(map).into_iter().collect();
+            for (k, mut v) in entries {
+                let lower = k.to_ascii_lowercase();
+                let known = table().get(&lower).copied();
+                if !(lower.starts_with("urn:") && known.is_none()) {
+                    rewrite_keys(&mut v);
+                }
+                map.insert(known.map_or(k, str::to_string), v);
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(rewrite_keys),
+        _ => {}
     }
 }
 

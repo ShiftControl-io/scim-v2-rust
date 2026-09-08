@@ -937,16 +937,33 @@ fn value_path_chain_exceeding_term_limit_rejected() {
     assert_too_many_terms(format!("emails[{inner}].value").parse::<PatchPath>(), n);
 }
 
-#[test]
-fn value_path_chain_at_term_limit_parses() {
-    let inner = chain("or", MAX_FILTER_TERMS);
+// R3-M5: both operators, so the value-path half of the flattening — the
+// R2-I1 fix — is pinned and not only the `or` side.
+#[test_case("and" ; "and_chain")]
+#[test_case("or" ; "or_chain")]
+fn value_path_chain_at_term_limit_parses_flat(op: &str) {
+    let inner = chain(op, MAX_FILTER_TERMS);
     let f: Filter = format!("emails[{inner}]").parse().unwrap();
     let Filter::ValuePath(vp) = &f else {
-        panic!("expected ValuePath");
+        panic!("expected ValuePath, got {f:?}");
     };
-    assert!(matches!(&*vp.filter, ValFilter::Or(items) if items.len() == MAX_FILTER_TERMS));
+    let (ValFilter::And(items) | ValFilter::Or(items)) = &*vp.filter else {
+        panic!("expected a chain node, got {:?}", vp.filter);
+    };
+    assert_eq!(items.len(), MAX_FILTER_TERMS);
+    assert!(
+        filter_depth_exceeds(&f, 3).is_none(),
+        "value path + flat chain is depth 3"
+    );
+
     let p: PatchPath = format!("emails[{inner}].value").parse().unwrap();
-    assert!(matches!(p, PatchPath::Value(_)));
+    let PatchPath::Value(pv) = &p else {
+        panic!("expected PatchPath::Value");
+    };
+    let (ValFilter::And(items) | ValFilter::Or(items)) = &pv.filter else {
+        panic!("expected a chain node, got {:?}", pv.filter);
+    };
+    assert_eq!(items.len(), MAX_FILTER_TERMS);
 }
 
 // The point of the n-ary shape: every recursive impl runs in depth-2
@@ -1051,4 +1068,199 @@ fn extremely_deep_input_rejected_without_panic() {
     // or drop of the rejected AST.
     let s = not_chain(10_000);
     assert_depth_exceeded(s.parse::<Filter>());
+}
+
+// R3-C1: before the parse-time depth budget, lalrpop reduced a deep `not (`
+// chain into a depth-N tree *before* rejecting a trailing token, and dropping
+// that tree through the derived recursive `Drop` overflowed the stack — an
+// abort, not a panic, so nothing upstream could catch it. The existing
+// `extremely_deep_input_rejected_without_panic` missed it because its input
+// has no trailing token and took the guarded post-parse path. The budget now
+// rejects at the 65th bracket, before anything is built, on every entry point.
+#[test]
+fn deep_not_chain_with_a_trailing_token_is_rejected_on_a_small_stack() {
+    std::thread::Builder::new()
+        .stack_size(256 * 1024)
+        .spawn(|| {
+            let deep = 10 * MAX_FILTER_DEPTH;
+            assert_depth_exceeded(format!("{} and", not_chain(deep)).parse::<Filter>());
+            assert_depth_exceeded(format!("emails[{}] and", val_not_chain(deep)).parse::<Filter>());
+            assert_depth_exceeded(
+                format!("emails[{}].value garbage", val_not_chain(deep)).parse::<PatchPath>(),
+            );
+            let json = serde_json::to_string(&format!("{} and", not_chain(deep))).unwrap();
+            assert!(serde_json::from_str::<Filter>(&json).is_err());
+        })
+        .unwrap()
+        .join()
+        .expect("a deep chain with a trailing token must not overflow a 256 KiB stack");
+}
+
+// The round-3 orchestrator's exact reproduction: 34_000 levels plus ` and`
+// aborted the process on a 2 MiB thread, tokio's default worker stack.
+#[test]
+fn red_team_r3_c1_reproduction_returns_an_error() {
+    std::thread::Builder::new()
+        .stack_size(2 * 1024 * 1024)
+        .spawn(|| {
+            assert_depth_exceeded(format!("{} and", not_chain(34_000)).parse::<Filter>());
+            assert_depth_exceeded(format!("{} and", not_chain(40_000)).parse::<Filter>());
+            assert_depth_exceeded(
+                format!("emails[{}] and", val_not_chain(100_000)).parse::<Filter>(),
+            );
+        })
+        .unwrap()
+        .join()
+        .expect("must return Err, not abort");
+}
+
+// R3-H1's remaining half: `Operands` makes the degenerate nodes
+// unrepresentable; `all`/`any` give the fold-a-list case a constructor whose
+// empty result is a `None` the caller has to handle.
+#[test]
+fn all_and_any_fold_a_list_without_an_empty_or_singleton_node() {
+    let leaf = |n: &str| Filter::Attr(AttrExp::Present(AttrPath::with_name(n)));
+    assert_eq!(Filter::all(Vec::new()), None);
+    assert_eq!(Filter::any(Vec::new()), None);
+    assert_eq!(Filter::all(vec![leaf("a")]), Some(leaf("a")));
+    assert_eq!(
+        Filter::all(vec![leaf("a"), leaf("b"), leaf("c")]),
+        Some("a pr and b pr and c pr".parse().unwrap())
+    );
+    assert_eq!(
+        Filter::any(vec![leaf("a"), Filter::or(leaf("b"), leaf("c"))]),
+        Some("a pr or b pr or c pr".parse().unwrap())
+    );
+    let v = |n: &str| ValFilter::Attr(AttrExp::Present(AttrPath::with_name(n)));
+    assert_eq!(ValFilter::all(Vec::new()), None);
+    assert_eq!(ValFilter::all(vec![v("a")]), Some(v("a")));
+    assert_eq!(
+        ValFilter::any(vec![v("a"), v("b"), v("c")]),
+        Some(ValFilter::or(ValFilter::or(v("a"), v("b")), v("c")))
+    );
+}
+
+// R3-M4: the `ValFilter` half of the precedence-preserving `Display`. An
+// `or` under an `and` inside a value path keeps its parentheses, so the
+// string reparses to the same tree through both entry points.
+#[test_case("emails[(a pr or b pr) and c pr]", &["Or", "Attr"] ; "or_under_and_keeps_parens")]
+#[test_case("emails[a pr and b pr or c pr]", &["And", "Attr"] ; "and_under_or_no_parens_needed")]
+#[test_case("emails[a pr and (b pr or c pr) and d pr]", &["Attr", "Or", "Attr"] ; "or_in_middle_of_and")]
+#[test_case("emails[not (a pr or b pr) and c pr]", &["Not", "Attr"] ; "not_under_and")]
+#[test_case("emails[(a pr or b pr) and (c pr or d pr)]", &["Or", "Or"] ; "two_ors_under_and")]
+fn value_path_mixed_operator_structure_preserved(src: &str, shape: &[&str]) {
+    let f: Filter = src.parse().unwrap();
+    let Filter::ValuePath(vp) = &f else {
+        panic!("expected ValuePath, got {f:?}");
+    };
+    let (ValFilter::And(items) | ValFilter::Or(items)) = &*vp.filter else {
+        panic!("expected a chain node, got {:?}", vp.filter);
+    };
+    let got: Vec<&str> = items
+        .iter()
+        .map(|i| match i {
+            ValFilter::Attr(_) => "Attr",
+            ValFilter::And(_) => "And",
+            ValFilter::Or(_) => "Or",
+            ValFilter::Not(_) => "Not",
+        })
+        .collect();
+    assert_eq!(got, shape);
+    assert_eq!(f.to_string(), src);
+    assert_eq!(f.to_string().parse::<Filter>().unwrap(), f);
+
+    let path = format!("{src}.value");
+    let p: PatchPath = path.parse().unwrap();
+    let json = serde_json::to_string(&p).unwrap();
+    assert_eq!(json, serde_json::to_string(&path).unwrap());
+    assert_eq!(serde_json::from_str::<PatchPath>(&json).unwrap(), p);
+}
+
+// R3-M5: `ValFilter::and` flattens on both sides exactly as the parser does.
+#[test]
+fn val_filter_and_flattens_like_the_parser() {
+    let v = |n: &str| ValFilter::Attr(AttrExp::Present(AttrPath::with_name(n)));
+    let left = ValFilter::and(ValFilter::and(v("a"), v("b")), v("c"));
+    let right = ValFilter::and(v("a"), ValFilter::and(v("b"), v("c")));
+    let both = ValFilter::and(
+        ValFilter::and(v("a"), v("b")),
+        ValFilter::and(v("c"), v("d")),
+    );
+    let Filter::ValuePath(vp) = "emails[a pr and b pr and c pr]".parse::<Filter>().unwrap() else {
+        panic!("expected ValuePath");
+    };
+    assert_eq!(*vp.filter, left);
+    assert_eq!(*vp.filter, right);
+    let Filter::ValuePath(vp) = "emails[a pr and b pr and c pr and d pr]"
+        .parse::<Filter>()
+        .unwrap()
+    else {
+        panic!("expected ValuePath");
+    };
+    assert_eq!(*vp.filter, both);
+    assert!(matches!(&*vp.filter, ValFilter::And(items) if items.len() == 4));
+}
+
+// R3-L1: one filter has one depth budget. A value path's inner filter
+// continues the count, so cap-outer plus cap-inner is rejected — while
+// parsing by the syntactic count, and on a hand-built tree by the AST walk.
+#[test]
+fn depth_budget_is_shared_across_a_value_path() {
+    let half = MAX_FILTER_DEPTH - 1;
+    let s = format!(
+        "{}emails[{}]{}",
+        "not (".repeat(half),
+        val_not_chain(half),
+        ")".repeat(half)
+    );
+    assert_depth_exceeded(s.parse::<Filter>());
+
+    // Hand-built past the parser: 40 outer levels + the value path + 30
+    // inner levels is 71, over the limit only if the budget is shared.
+    let inner: Filter = format!("emails[{}]", val_not_chain(30)).parse().unwrap();
+    let over = (0..40).fold(inner, |f, _| Filter::Not(Box::new(f)));
+    assert!(
+        filter_depth_exceeds(&over, MAX_FILTER_DEPTH).is_some(),
+        "the AST walk must charge the inner filter against the outer budget"
+    );
+    let inner: Filter = format!("emails[{}]", val_not_chain(30)).parse().unwrap();
+    let within = (0..30).fold(inner, |f, _| Filter::Not(Box::new(f)));
+    assert!(
+        filter_depth_exceeds(&within, MAX_FILTER_DEPTH).is_none(),
+        "30 + 1 + 30 = 61 fits"
+    );
+}
+
+// R3-L2: the reported count is where the budget stopped, 1025, on every entry
+// point and however far past the limit the input runs.
+#[test]
+fn oversized_value_path_chains_report_the_same_count_on_every_entry_point() {
+    let inner = chain("or", 100_000);
+    assert_too_many_terms(
+        format!("emails[{inner}]").parse::<Filter>(),
+        MAX_FILTER_TERMS + 1,
+    );
+    assert_too_many_terms(
+        format!("emails[{inner}].value").parse::<PatchPath>(),
+        MAX_FILTER_TERMS + 1,
+    );
+    assert_too_many_terms(inner.parse::<Filter>(), MAX_FILTER_TERMS + 1);
+}
+
+// R3-L6: a negated term costs one term like any other, so `not` cannot be
+// used to slip past the term budget on either entry point.
+#[test]
+fn negated_terms_count_against_the_term_budget() {
+    let n = MAX_FILTER_TERMS + 1;
+    let chain = std::iter::repeat_n("not (title pr)", n)
+        .collect::<Vec<_>>()
+        .join(" or ");
+    assert_too_many_terms(chain.parse::<Filter>(), n);
+    assert_too_many_terms(format!("emails[{chain}]").parse::<Filter>(), n);
+    assert_too_many_terms(format!("emails[{chain}].value").parse::<PatchPath>(), n);
+    let ok = std::iter::repeat_n("not (title pr)", n - 1)
+        .collect::<Vec<_>>()
+        .join(" or ");
+    ok.parse::<Filter>()
+        .expect("exactly MAX_FILTER_TERMS negated terms parse");
 }

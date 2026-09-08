@@ -120,3 +120,11 @@ fn errors_compare_by_path_and_kind() {
         ValidationError::invalid_value("a", "detail")
     );
 }
+
+/// R3-I1: the labels consumers put in their log lines, one per variant.
+#[test]
+fn context_as_str_names_each_variant() {
+    assert_eq!(Context::CreateRequest.as_str(), "create request");
+    assert_eq!(Context::ReplaceRequest.as_str(), "replace request");
+    assert_eq!(Context::Response.as_str(), "response");
+}

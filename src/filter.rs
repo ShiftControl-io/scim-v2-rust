@@ -67,7 +67,9 @@
 //! one [`Filter::Or`] however many operands it has, so a hundred-id batch
 //! lookup has depth 2 and parses, while the same hundred terms would have
 //! been depth 100 in a binary tree. Depth counts only genuine nesting —
-//! `not`, grouping that changes the operator, a value path's inner filter.
+//! `not`, grouping that changes the operator, a value path's inner filter —
+//! and one filter has one budget: a value path's inner filter continues the
+//! count from where its enclosing filter left off rather than starting over.
 //! Hand-constructed [`Filter`] values bypass both checks and are the caller's
 //! responsibility; build them with [`Filter::and`] / [`Filter::or`] to keep
 //! the shape the parser would produce.
@@ -448,6 +450,22 @@ impl Filter {
         }
         Filter::Or(items)
     }
+
+    /// The conjunction of `items`: `None` for none, the item itself for one,
+    /// and a flattened [`And`](Filter::And) for more.
+    ///
+    /// The constructor for folding a computed list of conditions — an
+    /// allow-list, say — where an empty list must reach the caller's control
+    /// flow rather than become an empty filter that a server could read as
+    /// "match everything".
+    pub fn all(items: impl IntoIterator<Item = Filter>) -> Option<Filter> {
+        items.into_iter().reduce(Filter::and)
+    }
+
+    /// The disjunction of `items`, as [`Filter::all`].
+    pub fn any(items: impl IntoIterator<Item = Filter>) -> Option<Filter> {
+        items.into_iter().reduce(Filter::or)
+    }
 }
 
 impl ValFilter {
@@ -475,6 +493,16 @@ impl ValFilter {
             other => items.push(other),
         }
         ValFilter::Or(items)
+    }
+
+    /// The conjunction of `items`, as [`Filter::all`].
+    pub fn all(items: impl IntoIterator<Item = ValFilter>) -> Option<ValFilter> {
+        items.into_iter().reduce(ValFilter::and)
+    }
+
+    /// The disjunction of `items`, as [`Filter::any`].
+    pub fn any(items: impl IntoIterator<Item = ValFilter>) -> Option<ValFilter> {
+        items.into_iter().reduce(ValFilter::or)
     }
 }
 
@@ -1068,7 +1096,9 @@ fn filter_depth_exceeds(root: &Filter, limit: usize) -> Option<usize> {
         match node {
             Filter::Attr(_) => {}
             Filter::ValuePath(vp) => {
-                if let Some(d) = val_filter_depth_exceeds(&vp.filter, limit) {
+                // One budget for the whole filter: the inner filter continues
+                // from this node's depth rather than starting a fresh count.
+                if let Some(d) = val_filter_depth_exceeds_from(&vp.filter, depth + 1, limit) {
                     return Some(d);
                 }
             }
@@ -1083,7 +1113,14 @@ fn filter_depth_exceeds(root: &Filter, limit: usize) -> Option<usize> {
 
 /// `ValFilter` mirror of [`filter_depth_exceeds`].
 fn val_filter_depth_exceeds(root: &ValFilter, limit: usize) -> Option<usize> {
-    let mut worklist: Vec<(&ValFilter, usize)> = vec![(root, 1)];
+    val_filter_depth_exceeds_from(root, 1, limit)
+}
+
+/// [`val_filter_depth_exceeds`] with `root` at `start` rather than 1, so a
+/// value path's inner filter is charged against the budget its enclosing
+/// filter has already spent.
+fn val_filter_depth_exceeds_from(root: &ValFilter, start: usize, limit: usize) -> Option<usize> {
+    let mut worklist: Vec<(&ValFilter, usize)> = vec![(root, start)];
     while let Some((node, depth)) = worklist.pop() {
         if depth > limit {
             return Some(depth);

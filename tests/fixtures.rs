@@ -41,35 +41,87 @@ fn all_sources() -> String {
                 walk(&path, out);
             } else if path.extension().is_some_and(|e| e == "rs") {
                 let text = fs::read_to_string(&path).expect("readable source file");
-                // Drop block comments first, then line comments, so a fixture
-                // path mentioned in either kind of comment cannot satisfy the
-                // "a test reads this" claim. Crude against comment markers
-                // inside string literals, which only ever under-counts.
-                let mut rest = text.as_str();
-                let mut no_blocks = String::with_capacity(text.len());
-                while let Some(start) = rest.find("/*") {
-                    no_blocks.push_str(&rest[..start]);
-                    match rest[start + 2..].find("*/") {
-                        Some(end) => rest = &rest[start + 2 + end + 2..],
-                        None => {
-                            rest = "";
-                        }
-                    }
-                }
-                no_blocks.push_str(rest);
-                for line in no_blocks.lines() {
-                    let code = line.split_once("//").map_or(line, |(before, _)| before);
-                    // rustfmt wraps a long `include_str!("…")` across lines, so
-                    // drop all whitespace: the match below is about the macro
-                    // invocation, not its layout.
-                    out.extend(code.chars().filter(|c| !c.is_whitespace()));
-                }
+                out.push_str(&strip_comments(&text));
             }
         }
     }
     let mut out = String::new();
     walk(&repo_root().join("src"), &mut out);
     out
+}
+
+/// Source text with block comments, line comments and all whitespace removed,
+/// so a fixture path mentioned in a comment cannot satisfy a "a test reads
+/// this" claim and a rustfmt-wrapped `include_str!` matches its one-line form.
+/// Crude against comment markers inside string literals, which only ever
+/// under-counts.
+fn strip_comments(text: &str) -> String {
+    let mut rest = text;
+    let mut no_blocks = String::with_capacity(text.len());
+    while let Some(start) = rest.find("/*") {
+        no_blocks.push_str(&rest[..start]);
+        match rest[start + 2..].find("*/") {
+            Some(end) => rest = &rest[start + 2 + end + 2..],
+            None => rest = "",
+        }
+    }
+    no_blocks.push_str(rest);
+    let mut out = String::with_capacity(no_blocks.len());
+    for line in no_blocks.lines() {
+        let code = line.split_once("//").map_or(line, |(before, _)| before);
+        out.extend(code.chars().filter(|c| !c.is_whitespace()));
+    }
+    out
+}
+
+/// Whether `sources` (as produced by [`strip_comments`]) contains the actual
+/// `include_str!` invocation for `dir/name`, so a bare path in a string
+/// literal or a `format!` cannot satisfy the claim.
+fn is_included(sources: &str, dir: &str, name: &str) -> bool {
+    sources.contains(&format!(r#"include_str!("../../test_data/{dir}/{name}")"#))
+}
+
+/// R3-L5: the two properties that make the inventory search trustworthy have
+/// a negative control each, so reverting either fails here rather than
+/// silently returning the failure mode they prevent.
+#[test]
+fn comment_stripping_and_the_include_needle_are_load_bearing() {
+    let needle = r#"include_str!("../../test_data/rfc7644/x.json")"#;
+    assert_eq!(strip_comments(&format!("/* {needle} */")), "");
+    assert_eq!(
+        strip_comments(&format!("code // {needle}\nmore")),
+        "codemore"
+    );
+    assert_eq!(
+        strip_comments("a /* multi\nline\n*/ b // tail\nc"),
+        "abc",
+        "block comments spanning lines are removed too"
+    );
+    assert!(
+        !is_included("../../test_data/rfc7644/x.json", "rfc7644", "x.json"),
+        "a bare path must not count"
+    );
+    assert!(!is_included(
+        r#"format!("../../test_data/rfc7644/x.json")"#,
+        "rfc7644",
+        "x.json"
+    ));
+    assert!(is_included(needle, "rfc7644", "x.json"));
+    let wrapped = r#"include_str!(
+    "../../test_data/rfc7644/x.json"
+)"#;
+    assert!(
+        is_included(&strip_comments(wrapped), "rfc7644", "x.json"),
+        "a rustfmt-wrapped invocation matches"
+    );
+    assert!(
+        !is_included(
+            &strip_comments(&format!("// {needle}")),
+            "rfc7644",
+            "x.json"
+        ),
+        "a commented-out invocation does not"
+    );
 }
 
 fn readme() -> String {
@@ -141,8 +193,7 @@ fn the_support_column_matches_actual_include_str_usage() {
         let claimed_supported = line.contains("| SUPPORTED |");
         // The `include_str!` invocation itself, so a bare path in a string
         // literal or a `format!` cannot satisfy the claim.
-        let actually_used =
-            sources.contains(&format!(r#"include_str!("../../test_data/{dir}/{name}")"#));
+        let actually_used = is_included(&sources, dir, name);
 
         assert_eq!(
             claimed_supported,
@@ -169,9 +220,7 @@ fn every_provider_sample_is_exercised_by_a_test() {
     let sources = all_sources();
     for name in fixture_names("provider_samples") {
         assert!(
-            sources.contains(&format!(
-                r#"include_str!("../../test_data/provider_samples/{name}")"#
-            )),
+            is_included(&sources, "provider_samples", &name),
             "provider sample `{name}` is not read by any test"
         );
     }

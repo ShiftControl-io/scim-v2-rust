@@ -71,8 +71,21 @@ fn valid_and_strict_wrappers() {
         "a response needs an id"
     );
 
+    // R3-L4: a proven value goes back on the wire as the plain value, and
+    // `Strict` dereferences through `Valid` to it.
+    let valid = Valid::new(base_user(), Context::CreateRequest).expect("conformant");
+    assert_eq!(
+        serde_json::to_value(&valid).unwrap(),
+        serde_json::to_value(base_user()).unwrap()
+    );
     let body = serde_json::to_string(&base_user()).unwrap();
     let strict: Strict<User<String>, CreateRequest> = serde_json::from_str(&body).unwrap();
+    assert_eq!(strict.user_name, "bjensen");
+    assert_eq!(strict.context(), Context::CreateRequest);
+    assert_eq!(
+        serde_json::to_value(&strict).unwrap(),
+        serde_json::to_value(base_user()).unwrap()
+    );
     assert_eq!(strict.into_valid().user_name, "bjensen");
 
     let with_id = serde_json::to_string(&User {

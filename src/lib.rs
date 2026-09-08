@@ -12,7 +12,7 @@
 //!
 //! A SCIM server receiving `POST /Users`. [`Strict`] deserializes the body and
 //! validates it for the direction it is travelling in one step, so a
-//! non-conformant request never becomes a [`User`](models::user::User) at all;
+//! non-conformant request never becomes a `User` at all;
 //! the error names the offending attribute by its wire path and carries the
 //! RFC 7644 §3.12 `scimType`, ready for a `400`.
 //!

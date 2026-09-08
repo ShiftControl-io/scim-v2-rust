@@ -49,10 +49,39 @@ fn colliding_keys_are_rejected() {
         let mut v: Value = serde_json::from_str(raw).unwrap();
         let err = canonicalize_keys(&mut v).expect_err(raw);
         assert_ne!(err.first, err.second);
+        // R3-M6: all three entry points, not only `from_str`.
         assert!(
             from_str::<crate::models::user::User<String>>(raw).is_err(),
-            "the deserializing entry points must surface the collision"
+            "from_str must surface the collision: {raw}"
         );
+        assert!(
+            from_value::<crate::models::user::User<String>>(serde_json::from_str(raw).unwrap())
+                .is_err(),
+            "from_value must surface the collision: {raw}"
+        );
+        assert!(
+            serde_json::from_str::<CaseInsensitive<crate::models::user::User<String>>>(raw)
+                .is_err(),
+            "CaseInsensitive must surface the collision: {raw}"
+        );
+    }
+}
+
+/// R3-M2: a rejected body is left exactly as it was passed, at the top level
+/// and with the collision one level down among siblings that would otherwise
+/// have been renamed or dropped. A handler that logs or echoes the body after
+/// the error must see both spellings.
+#[test]
+fn a_rejected_value_is_left_untouched() {
+    for raw in [
+        r#"{"schemas":["urn:ietf:params:scim:schemas:core:2.0:User"],"userName":"alice","USERNAME":"admin","displayName":"Alice","externalId":"e1"}"#,
+        r#"{"DisplayName":"x","name":{"givenName":"a","GIVENNAME":"b"},"UserName":"u","emails":[{"VALUE":"v"}]}"#,
+        r#"{"a":[{"b":{"c":[{"userName":"1","USERNAME":"2"}]}}],"ExternalId":"e"}"#,
+    ] {
+        let before: Value = serde_json::from_str(raw).unwrap();
+        let mut v = before.clone();
+        canonicalize_keys(&mut v).expect_err(raw);
+        assert_eq!(v, before, "{raw}");
     }
 }
 

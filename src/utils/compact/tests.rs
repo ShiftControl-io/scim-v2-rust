@@ -53,3 +53,47 @@ fn strips_empty_arrays_and_nulls_recursively() {
     strip_unassigned(&mut v);
     assert_eq!(v, serde_json::json!({"c": [1], "d": {"f": "x", "g": [{}]}}));
 }
+
+/// R3-M3: every multi-valued attribute the plain form emits as `[]` is
+/// omitted — all nine, not only `emails` — every other member is untouched,
+/// and the compact form reads back equal to the original.
+#[cfg(feature = "models")]
+#[test]
+fn compact_omits_every_empty_multi_valued_attribute_and_reads_back_equal() {
+    use crate::models::user::User;
+
+    let user = User::<String> {
+        schemas: vec![crate::schema_urns::USER.to_string()],
+        user_name: "bjensen".to_string(),
+        display_name: Some("Barbara".to_string()),
+        ..Default::default()
+    };
+    let plain = serde_json::to_value(&user).unwrap();
+    let compact = serde_json::to_value(Compact(&user)).unwrap();
+    let mut omitted = Vec::new();
+    for (key, value) in plain.as_object().unwrap() {
+        if value.as_array().is_some_and(Vec::is_empty) {
+            assert!(compact.get(key).is_none(), "{key} should be omitted");
+            omitted.push(key.as_str());
+        } else {
+            assert_eq!(compact.get(key), Some(value), "{key} must be untouched");
+        }
+    }
+    omitted.sort_unstable();
+    assert_eq!(
+        omitted,
+        [
+            "addresses",
+            "emails",
+            "entitlements",
+            "groups",
+            "ims",
+            "phoneNumbers",
+            "photos",
+            "roles",
+            "x509Certificates",
+        ]
+    );
+    let back: User<String> = serde_json::from_value(compact).unwrap();
+    assert_eq!(back, user);
+}

@@ -59,7 +59,7 @@ Two things people miss:
 - **`--all-targets --all-features`.** Without `--all-targets` clippy never
   sees test code; without `--all-features` it never sees feature-gated items.
   CI uses both.
-- **The feature matrix.** Six configurations are built in CI. If you touch
+- **The feature matrix.** Nine configurations are built in CI. If you touch
   anything under a `#[cfg(feature = ...)]`, check at least
   `cargo test --no-default-features --features filter` and
   `--no-default-features --features models` locally.

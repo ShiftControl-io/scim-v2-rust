@@ -3,16 +3,18 @@ use test_case::test_case;
 
 /// R2-M3: the four bounds added to `validate` in round 1, each pinned
 /// with the wire path it reports.
-#[test_case(-5, 0, Some(1), Some(1), "totalResults" ; "negative_total")]
-#[test_case(1, 2, Some(1), Some(2), "totalResults" ; "more_returned_than_total")]
-#[test_case(3, 1, Some(0), Some(1), "startIndex" ; "zero_based_start_index")]
-#[test_case(3, 1, Some(1), Some(-1), "itemsPerPage" ; "negative_items_per_page")]
+#[test_case(-5, 0, Some(1), Some(1), "totalResults", "must not be negative" ; "negative_total")]
+#[test_case(-5, 3, Some(1), Some(3), "totalResults", "must not be negative" ; "negative_total_with_a_page")]
+#[test_case(1, 2, Some(1), Some(2), "totalResults", "resources returned but totalResults is" ; "more_returned_than_total")]
+#[test_case(3, 1, Some(0), Some(1), "startIndex", "" ; "zero_based_start_index")]
+#[test_case(3, 1, Some(1), Some(-1), "itemsPerPage", "" ; "negative_items_per_page")]
 fn validate_rejects_impossible_pagination(
     total: i64,
     returned: usize,
     start: Option<i64>,
     per_page: Option<i64>,
     path: &str,
+    detail: &str,
 ) {
     let user = || {
         Resource::User(Box::new(User::<String> {
@@ -29,7 +31,11 @@ fn validate_rejects_impossible_pagination(
         items_per_page: per_page,
         resources: (0..returned).map(|_| user()).collect(),
     };
-    assert_eq!(list.validate().expect_err(path).path(), path);
+    // R3-L3: `path` alone could not tell the negative-total branch from the
+    // more-returned-than-total one, so the detail text pins each to its own.
+    let err = list.validate().expect_err(path);
+    assert_eq!(err.path(), path);
+    assert!(err.to_string().contains(detail), "{err}");
 }
 
 /// R2-M6: an explicit `"Resources": null` is a form providers send, and it
@@ -1403,4 +1409,32 @@ mod resource_dispatch {
         assert!(matches!(list.resources[1], Resource::Group(_)));
         assert!(matches!(list.resources[2], Resource::Schema(_)));
     }
+}
+
+/// R3-C1 through the protocol message a server actually deserializes: a deep
+/// `not (` chain with a trailing token inside `SearchRequest.filter`, on a
+/// 2 MiB thread (tokio's default worker stack), must be an error and not an
+/// abort. Both the strict `Filter` field and the tolerant `MaybeFilter` one.
+#[test]
+fn deep_not_chain_in_a_search_request_is_rejected_not_fatal() {
+    std::thread::Builder::new()
+        .stack_size(2 * 1024 * 1024)
+        .spawn(|| {
+            let deep = format!(
+                "{}title pr{} and",
+                "not (".repeat(40_000),
+                ")".repeat(40_000)
+            );
+            let body = serde_json::json!({
+                "schemas": [schema_urns::SEARCH_REQUEST],
+                "filter": deep,
+            })
+            .to_string();
+            assert!(serde_json::from_str::<SearchRequest<Filter>>(&body).is_err());
+            let tolerant: SearchRequest<MaybeFilter> = serde_json::from_str(&body).unwrap();
+            assert!(matches!(tolerant.filter, Some(MaybeFilter::Invalid(_))));
+        })
+        .unwrap()
+        .join()
+        .expect("must return, not abort");
 }
