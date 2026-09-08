@@ -456,6 +456,15 @@ sixth changed documentation.
 
 ### Documentation and tooling
 
+- `lib.rs` and the README open with a quick start: a server handling
+  `POST /Users` through `Strict<User, CreateRequest>` and answering with a
+  `Valid` response, a client reading `GET /Users`, and a filter parse.
+  Feature-flag detail moves below the usage sections.
+- Unit tests live in `src/<module>/tests.rs`, one file per test module, so
+  the largest sources (`filter.rs`, `models/others.rs`, `models/user.rs`)
+  are half or less their former length. A pure move: the same 330 unit tests
+  run, from the same modules, with the fixture inventory following them.
+
 - README rewritten: badges, the feature table, and examples for the 1.0 API.
   Its code blocks are compiled and run as doctests, so it cannot drift. Four
   lines had shipped with escaped backticks, rendering as literal `` \` `` on

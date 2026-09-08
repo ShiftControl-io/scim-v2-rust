@@ -25,7 +25,9 @@ fn fixture_names(dir: &str) -> BTreeSet<String> {
 
 /// Every `.rs` file under `src/`, concatenated, with `//` line comments
 /// stripped. Used to ask whether a fixture is referenced by any
-/// `include_str!`.
+/// `include_str!`. Unit tests live in `src/<module>/tests.rs`, one level
+/// below the module they test, so a fixture path from there is
+/// `../../test_data/…`; that exact prefix is what the checks below match.
 ///
 /// The comment stripping is load-bearing: matching raw text meant a fixture
 /// mentioned only in a `//` comment or a TODO satisfied the claim that a test
@@ -140,7 +142,7 @@ fn the_support_column_matches_actual_include_str_usage() {
         // The `include_str!` invocation itself, so a bare path in a string
         // literal or a `format!` cannot satisfy the claim.
         let actually_used =
-            sources.contains(&format!(r#"include_str!("../test_data/{dir}/{name}")"#));
+            sources.contains(&format!(r#"include_str!("../../test_data/{dir}/{name}")"#));
 
         assert_eq!(
             claimed_supported,
@@ -168,7 +170,7 @@ fn every_provider_sample_is_exercised_by_a_test() {
     for name in fixture_names("provider_samples") {
         assert!(
             sources.contains(&format!(
-                r#"include_str!("../test_data/provider_samples/{name}")"#
+                r#"include_str!("../../test_data/provider_samples/{name}")"#
             )),
             "provider sample `{name}` is not read by any test"
         );

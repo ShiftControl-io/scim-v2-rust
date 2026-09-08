@@ -72,6 +72,18 @@ cargo install lalrpop --version 0.23.1
 lalrpop src/filter_parser.lalrpop
 ```
 
+## Where tests live
+
+Unit tests for `src/foo.rs` are in `src/foo/tests.rs`, declared at the bottom
+of `foo.rs` as `#[cfg(test)] mod tests;` (a module with a feature gate keeps
+it, e.g. `#[cfg(all(test, feature = "filter"))]`). They are child modules, so
+`use super::*;` sees the parent's private items exactly as an inline module
+would; the split only keeps the source files readable. Fixtures are pulled in
+with `include_str!("../../test_data/…")` from there, and `tests/fixtures.rs`
+matches that exact prefix, so a fixture read from anywhere else will show up as
+unread. Cross-crate behaviour — the public API, property round-trips, the
+allocation bound — lives in `tests/`.
+
 ## RFC claims must cite the RFC
 
 The RFC texts are checked in under `docs/rfcs/`. Any claim about what SCIM
