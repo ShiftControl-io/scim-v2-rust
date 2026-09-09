@@ -1565,10 +1565,11 @@ fn search_request_accepts_either_selection_alone() {
 }
 
 /// RFC 7644 §3.5.2.1: "The operation MUST contain a "value" member whose
-/// content specifies the value to be added". An omitted member and an
-/// explicit `null` are different things, and only the omission is the error.
+/// content specifies the value to be added", and §3.5.2.3 requires it of a
+/// `replace` too. An omitted member and an explicit `null` are different
+/// things, and only the omission is the error.
 #[test]
-fn patch_op_validate_requires_a_value_on_add() {
+fn patch_op_validate_requires_a_value_on_add_and_replace() {
     let op = |json: &str| -> PatchOp {
         serde_json::from_str(&format!(
             r#"{{"schemas":["{}"],"Operations":[{json}]}}"#,
@@ -1598,14 +1599,23 @@ fn patch_op_validate_requires_a_value_on_add() {
         op(r#"{"op":"add","path":"nickName","value":null}"#).validate(),
         Ok(())
     );
-    // A `remove` needs no value, and §3.5.2.3 states its requirement only for
-    // the pathless form, which the type already enforces.
+    // A `remove` needs no value; §3.5.2 gives it no `value` semantics at all.
     assert_eq!(
         op(r#"{"op":"remove","path":"nickName"}"#).validate(),
         Ok(())
     );
+    // A `replace` does: §3.5.2.3 replaces "the value at the target location",
+    // and requires the member for the pathless and complex-attribute forms.
+    let err = op(r#"{"op":"replace","path":"nickName"}"#)
+        .validate()
+        .expect_err("a replace with no value member");
+    assert_eq!(err.path(), "Operations[0].value");
     assert_eq!(
-        op(r#"{"op":"replace","path":"nickName"}"#).validate(),
+        op(r#"{"op":"replace","path":"nickName","value":"x"}"#).validate(),
+        Ok(())
+    );
+    assert_eq!(
+        op(r#"{"op":"replace","path":"nickName","value":null}"#).validate(),
         Ok(())
     );
     // A pathless add without a value never becomes a `PatchOp` at all.
@@ -1745,4 +1755,88 @@ fn list_query_default_omits_both_attribute_selectors() {
     assert_eq!(json["count"], 100);
     let back: ListQuery<Filter> = serde_json::from_value(json).unwrap();
     assert_eq!(back, ListQuery::default());
+}
+
+/// RFC 7644 §§3.4.2.5 and 3.4.3, of both selection parameters: "Attribute
+/// names MUST be in standard attribute notation (Section 3.10) form."
+#[test_case("userName" ; "plain")]
+#[test_case("name.familyName" ; "sub_attribute")]
+#[test_case("urn:ietf:params:scim:schemas:core:2.0:User:userName" ; "urn_prefixed")]
+#[test_case("userName,emails,name.givenName" ; "comma_separated")]
+#[test_case("userName, emails" ; "comma_space_separated")]
+fn attribute_selections_in_standard_notation_are_accepted(raw: &str) {
+    let q = ListQuery::<Filter> {
+        attributes: Some(raw.to_string()),
+        ..Default::default()
+    };
+    assert_eq!(q.validate(), Ok(()), "{raw:?} as attributes");
+    let q = ListQuery::<Filter> {
+        excluded_attributes: Some(raw.to_string()),
+        ..Default::default()
+    };
+    assert_eq!(q.validate(), Ok(()), "{raw:?} as excludedAttributes");
+
+    let r = SearchRequest::<Filter> {
+        attributes: raw.split(',').map(|s| s.trim().to_string()).collect(),
+        ..Default::default()
+    };
+    assert_eq!(r.validate(), Ok(()), "{raw:?} as a SearchRequest selection");
+}
+
+#[test_case("user Name" ; "space_in_name")]
+#[test_case("name." ; "empty_sub_attribute")]
+#[test_case("1abc" ; "leading_digit")]
+#[test_case("name.given.first" ; "two_sub_attributes")]
+#[test_case("emails[type eq \"work\"]" ; "value_path")]
+#[test_case("userName,,emails" ; "empty_entry_in_a_list")]
+#[test_case("userName,name." ; "malformed_entry_in_a_list")]
+fn malformed_attribute_selections_are_rejected(raw: &str) {
+    let q = ListQuery::<Filter> {
+        attributes: Some(raw.to_string()),
+        ..Default::default()
+    };
+    assert_eq!(
+        q.validate().map_err(|e| e.path().to_string()),
+        Err("attributes".to_string()),
+        "{raw:?}"
+    );
+    let q = ListQuery::<Filter> {
+        excluded_attributes: Some(raw.to_string()),
+        ..Default::default()
+    };
+    assert_eq!(
+        q.validate().map_err(|e| e.path().to_string()),
+        Err("excludedAttributes".to_string()),
+        "{raw:?}"
+    );
+
+    // The body carrier holds names individually, so a comma-separated string
+    // is itself one malformed name there.
+    let r = SearchRequest::<Filter> {
+        attributes: vec![raw.to_string()],
+        ..Default::default()
+    };
+    assert_eq!(
+        r.validate().map_err(|e| e.path().to_string()),
+        Err("attributes".to_string()),
+        "{raw:?}"
+    );
+}
+
+/// A wholly empty selection asserts nothing, so it is not a selection: it
+/// neither fails the notation check nor triggers the §3.9 mutual exclusion.
+#[test]
+fn an_empty_attribute_selection_is_treated_as_absent() {
+    let q = ListQuery::<Filter> {
+        attributes: Some(String::new()),
+        excluded_attributes: Some("emails".to_string()),
+        ..Default::default()
+    };
+    assert_eq!(q.validate(), Ok(()));
+    let r = SearchRequest::<Filter> {
+        attributes: Vec::new(),
+        excluded_attributes: vec!["emails".to_string()],
+        ..Default::default()
+    };
+    assert_eq!(r.validate(), Ok(()));
 }

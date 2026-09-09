@@ -872,10 +872,21 @@ pub enum PatchOperation {
     Replace(OperationTarget),
 }
 
+/// Whether `s` is RFC 7644 §3.10 standard attribute notation — an `attrPath`,
+/// optionally URN-prefixed, with at most one sub-attribute. Decided by the
+/// crate's own grammar rather than a second-guess at it: `<s> pr` must parse
+/// to a bare presence test.
+#[cfg(feature = "filter")]
+fn is_attribute_path(s: &str) -> bool {
+    format!("{s} pr")
+        .parse::<Filter>()
+        .is_ok_and(|f| matches!(f, Filter::Attr(AttrExp::Present(_))))
+}
+
 /// The RFC 7644 §3.4.2.3 sort rules, shared by the two query carriers:
 /// `sortOrder` is "the order in which the "sortBy" parameter is applied", so
-/// on its own it orders nothing, and §3.4.3 requires `sortBy` to "be in
-/// standard attribute notation (Section 3.10) form".
+/// on its own it orders nothing, and §3.4.3 requires that "the "sortBy"
+/// attribute MUST be in standard attribute notation (Section 3.10) form".
 #[cfg(feature = "filter")]
 fn validate_sort(sort_by: Option<&str>, sort_order_present: bool) -> Result<(), ValidationError> {
     if sort_order_present && sort_by.is_none() {
@@ -884,32 +895,53 @@ fn validate_sort(sort_by: Option<&str>, sort_order_present: bool) -> Result<(), 
             "present without sortBy; RFC 7644 §3.4.2.3 defines it as the order in which sortBy is applied",
         ));
     }
-    if let Some(sort_by) = sort_by {
-        // The grammar's own notion of an attribute path: `<path> pr` must
-        // parse to a bare presence test.
-        let is_attr_path = format!("{sort_by} pr")
-            .parse::<Filter>()
-            .is_ok_and(|f| matches!(f, Filter::Attr(AttrExp::Present(_))));
-        if !is_attr_path {
-            return Err(ValidationError::invalid_value(
-                "sortBy",
-                format!(
-                    "{sort_by:?} is not in standard attribute notation (RFC 7644 §3.4.3, §3.10)"
-                ),
-            ));
-        }
+    if let Some(sort_by) = sort_by.filter(|s| !is_attribute_path(s)) {
+        return Err(ValidationError::invalid_value(
+            "sortBy",
+            format!("{sort_by:?} is not in standard attribute notation (RFC 7644 §3.4.3, §3.10)"),
+        ));
     }
     Ok(())
 }
 
-/// RFC 7644 §3.9 offers "either of the mutually exclusive URL query
+/// The RFC 7644 §3.9 attribute-selection rules, shared by the two query
+/// carriers. §3.9 offers "either of the mutually exclusive URL query
 /// parameters "attributes" or "excludedAttributes"", so a request carrying
-/// both asserts two incompatible projections.
+/// both asserts two incompatible projections; and §§3.4.2.5 and 3.4.3 both
+/// say of each parameter that "Attribute names MUST be in standard attribute
+/// notation (Section 3.10) form", so a name a server cannot resolve to an
+/// attribute is a client error rather than something to ignore.
+///
+/// Each selection is passed as its individual names. A wholly empty
+/// selection (`?attributes=`, or an empty `Vec`) is treated as absent, which
+/// is the only reading that asserts nothing; an empty name *within* a list
+/// (`?attributes=userName,,emails`) is malformed and rejected.
 #[cfg(feature = "filter")]
-fn validate_attribute_selection(
-    attributes_present: bool,
-    excluded_present: bool,
+fn validate_attribute_selection<'a>(
+    attributes: impl Iterator<Item = &'a str>,
+    excluded: impl Iterator<Item = &'a str>,
 ) -> Result<(), ValidationError> {
+    fn check_names<'a>(
+        path: &str,
+        names: impl Iterator<Item = &'a str>,
+    ) -> Result<bool, ValidationError> {
+        let mut present = false;
+        for name in names {
+            present = true;
+            if !is_attribute_path(name) {
+                return Err(ValidationError::invalid_value(
+                    path,
+                    format!(
+                        "{name:?} is not in standard attribute notation (RFC 7644 §3.4.2.5, §3.10)"
+                    ),
+                ));
+            }
+        }
+        Ok(present)
+    }
+
+    let attributes_present = check_names("attributes", attributes)?;
+    let excluded_present = check_names("excludedAttributes", excluded)?;
     if attributes_present && excluded_present {
         return Err(ValidationError::invalid_value(
             "excludedAttributes",
@@ -917,6 +949,17 @@ fn validate_attribute_selection(
         ));
     }
     Ok(())
+}
+
+/// The individual names in a `ListQuery`'s comma-separated selection. Empty
+/// overall means no selection; an empty entry inside a non-empty list is
+/// kept, so [`validate_attribute_selection`] can reject it.
+#[cfg(feature = "filter")]
+fn selection_names(raw: Option<&str>) -> impl Iterator<Item = &str> {
+    raw.filter(|s| !s.is_empty())
+        .into_iter()
+        .flat_map(|s| s.split(','))
+        .map(str::trim)
 }
 
 #[cfg(feature = "filter")]
@@ -931,10 +974,8 @@ impl<F> Validate for ListQuery<F> {
     fn validate(&self) -> Result<(), ValidationError> {
         validate_sort(self.sort_by.as_deref(), self.sort_order.is_some())?;
         validate_attribute_selection(
-            self.attributes.as_deref().is_some_and(|a| !a.is_empty()),
-            self.excluded_attributes
-                .as_deref()
-                .is_some_and(|a| !a.is_empty()),
+            selection_names(self.attributes.as_deref()),
+            selection_names(self.excluded_attributes.as_deref()),
         )
     }
 }
@@ -956,8 +997,8 @@ impl<F> Validate for SearchRequest<F> {
         require_schema_urn(&self.schemas, schema_urns::SEARCH_REQUEST)?;
         validate_sort(self.sort_by.as_deref(), self.sort_order.is_some())?;
         validate_attribute_selection(
-            !self.attributes.is_empty(),
-            !self.excluded_attributes.is_empty(),
+            self.attributes.iter().map(String::as_str),
+            self.excluded_attributes.iter().map(String::as_str),
         )
     }
 }
@@ -972,12 +1013,20 @@ impl Validate for PatchOp {
     /// specifies the value to be added", since a path-carrying operation may
     /// legitimately omit `value` when it is a `remove`.
     ///
-    /// A `replace` with a path and no `value` is *not* rejected: §3.5.2.3
-    /// states its requirement only for the pathless form ("the "value"
-    /// attribute SHALL contain a list of one or more attributes that are to
-    /// be replaced"), which the type already enforces, and no MUST covers the
-    /// path form. An explicit `"value": null` counts as present, which is why
-    /// the field distinguishes the two.
+    /// A path-carrying `replace` is held to the same rule. §3.5.2.3 has no
+    /// single blanket MUST, but it opens with "The "replace" operation
+    /// replaces the value at the target location specified by the "path"" and
+    /// then requires the member twice: "the "value" attribute SHALL contain a
+    /// list of one or more attributes that are to be replaced" for the
+    /// pathless form, and "a set of sub-attributes SHALL be specified in the
+    /// "value" parameter" where the path names a complex attribute. Telling a
+    /// complex target from a single-valued one needs the resource's schema,
+    /// which this crate does not consult, and no reading of §3.5.2.3 gives a
+    /// valueless replace a defined outcome — so the check is uniform.
+    ///
+    /// An explicit `"value": null` counts as present, which is why the field
+    /// distinguishes the two: what a null means for the targeted attribute is
+    /// the server's decision, and absence is not.
     fn validate(&self) -> Result<(), ValidationError> {
         require_schema_urn(&self.schemas, schema_urns::PATCH_OP)?;
         if self.operations.is_empty() {
@@ -987,7 +1036,11 @@ impl Validate for PatchOp {
             ));
         }
         for (i, operation) in self.operations.iter().enumerate() {
-            if let PatchOperation::Add(OperationTarget::WithPath { value: None, .. }) = operation {
+            if matches!(
+                operation,
+                PatchOperation::Add(OperationTarget::WithPath { value: None, .. })
+                    | PatchOperation::Replace(OperationTarget::WithPath { value: None, .. })
+            ) {
                 return Err(ValidationError::missing_required(format!(
                     "Operations[{i}].value"
                 )));

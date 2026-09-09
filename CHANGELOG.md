@@ -96,13 +96,15 @@ Conformance, each checked against the RFC text in `docs/rfcs/`:
   that carry it; `AuthenticationScheme.type`, `name` and `description`
   REQUIRED (§5); `PatchOp` needs one or more operations (RFC 7644 §3.5.2);
   `SearchRequest` rejects `sortOrder` without `sortBy`, `attributes`
-  together with `excludedAttributes` (§3.9), and a `sortBy` that is not an
-  attribute path (§3.4.3); `ResourceType.schemaExtensions[].schema`
+  together with `excludedAttributes` (§3.9), and a `sortBy` or any
+  attribute-selection name that is not in standard attribute notation
+  (§§3.4.2.5, 3.4.3, 3.10); `ResourceType.schemaExtensions[].schema`
   REQUIRED (RFC 7643 §6).
 - A negative `count` or a `startIndex` below 1 is interpreted, not rejected
   (RFC 7644 §3.4.2.4 Table 6).
-- An `add` operation with a path and no `value` passed validation; §3.5.2.1
-  makes the member REQUIRED.
+- An `add` or `replace` operation with a path and no `value` passed
+  validation; §3.5.2.1 makes the member REQUIRED and §3.5.2.3 requires it of
+  a `replace` twice over.
 - `ListResponse::validate` checks `totalResults` against the page, both
   pagination markers on a short page, each resource's declared schema
   against the type it was parsed as, and each resource's own rules.
