@@ -188,19 +188,25 @@ The enforced form, which is what a server's request handler should take:
 use scim_v2::{Context, CreateRequest, Strict, Valid, models::user::User};
 
 // Parse and validate in one step; a bad body never becomes a `User` at all.
+// The body carries `userName`, the login name the client chooses (RFC 7643
+// §4.1). It has no `id`: that is a separate attribute, the identifier the
+// server assigns when it stores the resource (§3.1).
 let body = r#"{"schemas":["urn:ietf:params:scim:schemas:core:2.0:User"],"userName":"bjensen"}"#;
 let valid: Valid<User<String>> =
     serde_json::from_str::<Strict<User<String>, CreateRequest>>(body)?.into_valid();
 assert_eq!(valid.user_name, "bjensen");
 
-// A create body that carries an id is rejected at the door (RFC 7643 §3.1).
+// A create body that carries an `id` is rejected at the door: the client
+// "MUST NOT" choose the server's identifier (RFC 7643 §3.1).
 let with_id = r#"{"schemas":["urn:ietf:params:scim:schemas:core:2.0:User"],"userName":"bjensen","id":"7"}"#;
 assert!(serde_json::from_str::<Strict<User<String>, CreateRequest>>(with_id).is_err());
 
 // Or validate a value you already hold, for a given direction.
 let user = valid.into_inner();
 assert!(Valid::new(user.clone(), Context::CreateRequest).is_ok());
-assert!(Valid::new(user, Context::Response).is_err()); // a response needs an id
+// As a *response* the same value fails: a server's representation "MUST
+// include a non-empty id value" (§3.1), and this one has none yet.
+assert!(Valid::new(user, Context::Response).is_err());
 # Ok::<(), serde_json::Error>(())
 ```
 
