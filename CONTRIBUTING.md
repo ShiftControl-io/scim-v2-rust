@@ -136,7 +136,7 @@ cargo mutants --in-diff <(git diff origin/main...HEAD -- src) \
 ```
 
 A surviving mutant in code you added is a missing test, not noise. Line
-coverage on this crate read 96% while seven mutants in new code survived.
+coverage on this crate read 95% while seven mutants in new code survived.
 Mutation testing is a local step, not a CI job: it is slow and its output
 needs a reader.
 
@@ -159,7 +159,7 @@ identifiers, keep the structure.
 
 ## Coverage
 
-Line coverage is measured on every push to `main` and is currently ~96%
+Line coverage is measured on every push to `main` and is currently ~95%
 (excluding the generated parser). A PR that lowers it should say why.
 
 ```bash

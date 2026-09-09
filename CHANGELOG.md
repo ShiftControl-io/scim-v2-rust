@@ -67,6 +67,8 @@ below; 1.0 was the one moment they were free.
 - `Validate` for `SearchRequest`, `PatchOp`, `ScimHttpError`, `Schema`,
   `AuthenticationScheme`, and `ListResponse` (the envelope and every
   resource on the page).
+- `FilterActionError::InvalidAttrName`, naming the RFC 7644 §3.4.2.2
+  `ATTRNAME` rule a malformed path segment broke.
 - `ValidationError::under(parent)` for nested errors; `require_schema_urn`
   and `at_most_one_primary` helpers, re-exported at the root.
 - `schema_urns::ERROR`, `SERVICE_PROVIDER_CONFIG`, `BULK_REQUEST` and
@@ -133,7 +135,7 @@ Robustness:
   catches upstream drift.
 - `CONTRIBUTING.md` carries the review rules this release taught, with PR
   and issue templates. Unit tests live in `src/<module>/tests.rs`. Line
-  coverage 88% → 96%. Dependencies are caret requirements at major.minor.
+  coverage 88% → 95%. Dependencies are caret requirements at major.minor.
 
 ## 0.5.0
 

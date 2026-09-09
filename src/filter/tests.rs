@@ -1382,3 +1382,39 @@ fn ast_depth_over_the_limit_within_the_syntactic_budget_is_rejected() {
         .parse::<PatchPath>()
         .expect("fits through PatchPath too");
 }
+
+// A malformed segment names the rule it broke, not the dot-count rule.
+#[test_case("a. pr" ; "empty_sub_attribute")]
+#[test_case("a.- pr" ; "dash_sub_attribute")]
+#[test_case("a: pr" ; "colon_without_urn")]
+#[test_case("urn:::: pr" ; "colons_only")]
+fn malformed_attribute_names_report_the_attrname_rule(src: &str) {
+    let err = src.parse::<Filter>().expect_err(src);
+    let LalrParseError::User {
+        error: FilterActionError::InvalidAttrName(token),
+    } = &err
+    else {
+        panic!("{src:?}: expected InvalidAttrName, got {err:?}");
+    };
+    assert!(src.starts_with(token.as_str()), "{src:?} → {token:?}");
+    assert!(err.to_string().contains("ATTRNAME"), "{err}");
+    assert!(
+        !err.to_string().contains("more than one sub-attribute"),
+        "{err}"
+    );
+}
+
+#[test]
+fn two_sub_attributes_still_report_the_dot_count_rule() {
+    let err = "name.given.first pr".parse::<Filter>().unwrap_err();
+    assert!(matches!(
+        err,
+        LalrParseError::User {
+            error: FilterActionError::InvalidAttrPath(_)
+        }
+    ));
+    assert!(
+        err.to_string().contains("more than one sub-attribute"),
+        "{err}"
+    );
+}

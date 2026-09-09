@@ -135,17 +135,21 @@ pub fn require_schema_urn(schemas: &[String], required_urn: &str) -> Result<(), 
     if schemas.is_empty() {
         return Err(ValidationError::missing_required("schemas"));
     }
-    if let Some(dup) = schemas
-        .iter()
-        .enumerate()
-        .find_map(|(i, s)| schemas[..i].contains(s).then_some(s))
-    {
-        return Err(ValidationError::invalid_value(
-            "schemas",
-            format!("duplicate value {dup}; RFC 7643 §3 requires each URI to be unique"),
-        ));
+    // One pass, linear: `schemas` is attacker-sized and this runs inside
+    // `Strict`'s deserialization, so a quadratic scan here was a CPU
+    // amplifier on the success path.
+    let mut seen = std::collections::HashSet::with_capacity(schemas.len());
+    let mut has_required = false;
+    for s in schemas {
+        if !seen.insert(s.as_str()) {
+            return Err(ValidationError::invalid_value(
+                "schemas",
+                format!("duplicate value {s}; RFC 7643 §3 requires each URI to be unique"),
+            ));
+        }
+        has_required |= s == required_urn;
     }
-    if !schemas.iter().any(|s| s == required_urn) {
+    if !has_required {
         return Err(ValidationError::invalid_value(
             "schemas",
             format!("must include {required_urn}"),

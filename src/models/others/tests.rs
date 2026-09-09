@@ -97,6 +97,13 @@ fn patch_op_validate_requires_at_least_one_operation_and_the_urn() {
             .path(),
         "schemas"
     );
+
+    // And the RFC's own example is conformant.
+    let add_member: PatchOp = serde_json::from_str(include_str!(
+        "../../test_data/rfc7644/s3.5.2.1_add_member.json"
+    ))
+    .unwrap();
+    assert_eq!(add_member.validate(), Ok(()));
 }
 
 /// RFC 7644 §3.4.2.3 / §3.4.3: `sortBy` and `sortOrder` are part of the

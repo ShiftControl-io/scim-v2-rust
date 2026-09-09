@@ -144,3 +144,21 @@ fn under_prefixes_the_path_and_keeps_kind_and_detail() {
     assert_eq!(err.path(), "Resources[3].userName");
     assert_eq!(err.kind(), &ValidationErrorKind::MissingRequiredAttribute);
 }
+
+/// The uniqueness check is linear. 100,000 distinct URNs validate in
+/// milliseconds; the quadratic scan this replaces took tens of seconds on
+/// the same input, and it ran inside `Strict`'s deserialization on the
+/// success path, where nothing rate-limits.
+#[test]
+fn require_schema_urn_is_linear_in_the_number_of_schemas() {
+    let req = "urn:ietf:params:scim:schemas:core:2.0:User";
+    let mut schemas: Vec<String> = (0..100_000).map(|i| format!("urn:example:{i}")).collect();
+    schemas.push(req.to_string());
+    let started = std::time::Instant::now();
+    assert_eq!(require_schema_urn(&schemas, req), Ok(()));
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed < std::time::Duration::from_secs(10),
+        "100k distinct schemas took {elapsed:?}; the check has gone super-linear"
+    );
+}

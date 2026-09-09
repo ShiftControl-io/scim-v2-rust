@@ -25,7 +25,22 @@ mod sealed {
 /// `User`, `Group`, `EnterpriseUser`, `Schema`, `ResourceType`,
 /// `ServiceProviderConfig`, `Resource` and `ListResponse`. `PatchOp` and
 /// `SearchRequest` are deliberately absent; see [`Compact`].
-pub trait Compactable: Serialize + sealed::Sealed {}
+pub trait Compactable: Serialize + sealed::Sealed {
+    /// The value to put on the wire: this type serialized, then stripped of
+    /// its unassigned multi-valued attributes.
+    ///
+    /// The default strips the whole tree. `ListResponse` overrides it to strip
+    /// inside each entry of `Resources` and leave the envelope alone, because
+    /// RFC 7644 §3.4.2 makes `Resources` "REQUIRED if totalResults is
+    /// non-zero", so a `count=0` page with matches must keep its empty
+    /// `Resources`, and `totalResults`, `startIndex` and `itemsPerPage` are
+    /// not attributes at all.
+    fn compact_value(&self) -> Result<Value, serde_json::Error> {
+        let mut value = serde_json::to_value(self)?;
+        strip_unassigned(&mut value);
+        Ok(value)
+    }
+}
 
 #[cfg(feature = "models")]
 mod impls {
@@ -54,7 +69,15 @@ mod impls {
     impl<T: Serialize> Sealed for Resource<T> {}
     impl<T: Serialize> Compactable for Resource<T> {}
     impl<R: ScimResource + Serialize> Sealed for ListResponse<R> {}
-    impl<R: ScimResource + Serialize> Compactable for ListResponse<R> {}
+    impl<R: ScimResource + Serialize> Compactable for ListResponse<R> {
+        fn compact_value(&self) -> Result<serde_json::Value, serde_json::Error> {
+            let mut value = serde_json::to_value(self)?;
+            if let Some(resources) = value.get_mut("Resources").and_then(|r| r.as_array_mut()) {
+                resources.iter_mut().for_each(super::strip_unassigned);
+            }
+            Ok(value)
+        }
+    }
 }
 
 /// Remove every `null` and every empty array from `value`, recursively.
@@ -77,14 +100,14 @@ pub(crate) fn strip_unassigned(value: &mut Value) {
 
 /// Serialize `T` with unassigned multi-valued attributes omitted.
 ///
-/// The stripping is tree-wide and not field-aware: every empty array goes,
-/// including protocol arrays such as a `ListResponse`'s `Resources`, and
-/// arrays inside extension payloads this crate does not model. RFC 7643 §2.5
-/// applies to every multi-valued attribute, extensions included, and for the
-/// types this accepts no conformant *representation* is altered by it:
-/// `Resources` is "REQUIRED if totalResults is non-zero" (RFC 7644 §3.4.2),
-/// so an empty page may omit it; `schemas` is REQUIRED non-empty, so an
-/// empty one was already invalid. Non-empty arrays are never touched.
+/// Within a resource the stripping is tree-wide and not field-aware: every
+/// empty array goes, including arrays inside extension payloads this crate
+/// does not model, since RFC 7643 §2.5 applies to every multi-valued
+/// attribute. `schemas` is REQUIRED non-empty, so an empty one was already
+/// invalid. Non-empty arrays are never touched. A `ListResponse` is
+/// compacted per entry of `Resources` and its envelope is left intact:
+/// RFC 7644 §3.4.2 makes `Resources` "REQUIRED if totalResults is non-zero",
+/// which a `count=0` page with matches is, so it must keep its empty array.
 ///
 /// # Not for request bodies
 ///
@@ -126,9 +149,10 @@ pub struct Compact<'a, T: Compactable>(pub &'a T);
 
 impl<T: Compactable> Serialize for Compact<'_, T> {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut v = serde_json::to_value(self.0).map_err(serde::ser::Error::custom)?;
-        strip_unassigned(&mut v);
-        v.serialize(serializer)
+        self.0
+            .compact_value()
+            .map_err(serde::ser::Error::custom)?
+            .serialize(serializer)
     }
 }
 

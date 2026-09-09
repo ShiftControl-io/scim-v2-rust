@@ -213,6 +213,14 @@ pub enum FilterActionError {
     /// An `attrPath` token contained more than one sub-attribute segment.
     #[error("attrPath '{0}' has more than one sub-attribute segment")]
     InvalidAttrPath(String),
+    /// A segment of an `attrPath` token is not an RFC 7644 §3.4.2.2 `ATTRNAME`:
+    /// a letter followed by letters, digits, `_` or `-`. Covers an empty
+    /// sub-attribute (`name.`), a segment starting with a digit or dash, and
+    /// an empty name after a URN prefix.
+    #[error(
+        "attrPath '{0}': each segment must be ATTRNAME = ALPHA *(nameChar) (RFC 7644 §3.4.2.2)"
+    )]
+    InvalidAttrName(String),
     /// A comparison value contained an invalid JSON escape or format.
     #[error("invalid comparison value: {0}")]
     InvalidCompValue(#[from] serde_json::Error),
@@ -844,7 +852,7 @@ pub(crate) fn parse_attr_path(s: &str) -> Result<AttrPath, FilterActionError> {
     // shape as a whole, so `name.` (empty sub-attribute) and `name.1x` reach
     // here and must be refused.
     if !is_attr_name(name) || sub_attr.is_some_and(|sub| !is_attr_name(sub)) {
-        return Err(FilterActionError::InvalidAttrPath(s.to_string()));
+        return Err(FilterActionError::InvalidAttrName(s.to_string()));
     }
 
     Ok(AttrPath {

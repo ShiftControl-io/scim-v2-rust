@@ -1,6 +1,8 @@
 use pretty_assertions::assert_eq;
 
 use super::*;
+use crate::utils::validation::ValidationErrorKind;
+use test_case::test_case;
 
 /// RFC 7643 §5's example ServiceProviderConfig, as reproduced in this
 /// module's own documentation.
@@ -329,4 +331,29 @@ fn service_provider_config_deserialization() {
         Some("http://example.com/help/httpBasic.html".to_string())
     );
     assert_eq!(http_scheme.r#type.as_deref(), Some("httpbasic"));
+}
+
+/// RFC 7643 §5 marks `type`, `name` and `description` REQUIRED; each leg is
+/// pinned separately so a missing one cannot hide behind the others.
+#[test_case("type" ; "type_required")]
+#[test_case("name" ; "name_required")]
+#[test_case("description" ; "description_required")]
+fn validate_requires_each_authentication_scheme_attribute(field: &str) {
+    let mut config = ServiceProviderConfig::try_from(RFC_S5_EXAMPLE).unwrap();
+    config.authentication_schemes.push(AuthenticationScheme {
+        name: "HTTP Basic".to_string(),
+        description: "RFC 2617".to_string(),
+        r#type: Some("httpbasic".to_string()),
+        ..Default::default()
+    });
+    assert_eq!(config.validate(), Ok(()));
+    match field {
+        "type" => config.authentication_schemes[1].r#type = None,
+        "name" => config.authentication_schemes[1].name.clear(),
+        "description" => config.authentication_schemes[1].description.clear(),
+        other => panic!("unexpected field {other}"),
+    }
+    let err = config.validate().expect_err(field);
+    assert_eq!(err.path(), format!("authenticationSchemes[1].{field}"));
+    assert_eq!(err.kind(), &ValidationErrorKind::MissingRequiredAttribute);
 }

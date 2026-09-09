@@ -301,3 +301,49 @@ fn resource_delegates_validation_to_the_wrapped_resource() {
     );
     assert_eq!(no_id.validate_context(Context::CreateRequest), Ok(()));
 }
+
+/// All four `Resource` arms report their own URN and declared schemas, and
+/// delegate `validate` to the wrapped type.
+#[test]
+fn every_resource_arm_reports_its_urn_and_delegates_validation() {
+    let user = Resource::User(Box::new(User::<String> {
+        schemas: vec![schema_urns::USER.to_string()],
+        user_name: String::new(),
+        ..Default::default()
+    }));
+    assert_eq!(user.schema_urn(), schema_urns::USER);
+    assert_eq!(user.declared_schemas(), [schema_urns::USER]);
+    assert_eq!(user.validate().unwrap_err().path(), "userName");
+    let user_no_id = Resource::User(Box::new(User::<String> {
+        schemas: vec![schema_urns::USER.to_string()],
+        user_name: "u".to_string(),
+        ..Default::default()
+    }));
+    assert_eq!(
+        user_no_id
+            .validate_context(Context::Response)
+            .unwrap_err()
+            .path(),
+        "id"
+    );
+
+    let schema: Schema = serde_json::from_value(serde_json::json!({
+        "schemas": [schema_urns::SCHEMA], "id": "", "name": "X", "description": "d", "attributes": [], "meta": {}
+    }))
+    .unwrap();
+    let schema = Resource::<String>::Schema(Box::new(schema));
+    assert_eq!(schema.schema_urn(), schema_urns::SCHEMA);
+    assert_eq!(schema.declared_schemas(), [schema_urns::SCHEMA]);
+    assert_eq!(schema.validate().unwrap_err().path(), "id");
+    assert_eq!(schema.validate_context(Context::Response), Ok(()));
+
+    let rt: ResourceType = serde_json::from_value(serde_json::json!({
+        "schemas": [schema_urns::RESOURCE_TYPE], "id": "User", "name": "", "endpoint": "/Users", "schema": schema_urns::USER
+    }))
+    .unwrap();
+    let rt = Resource::<String>::ResourceType(Box::new(rt));
+    assert_eq!(rt.schema_urn(), schema_urns::RESOURCE_TYPE);
+    assert_eq!(rt.declared_schemas(), [schema_urns::RESOURCE_TYPE]);
+    assert_eq!(rt.validate().unwrap_err().path(), "name");
+    assert_eq!(rt.validate_context(Context::Response), Ok(()));
+}

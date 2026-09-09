@@ -1,27 +1,49 @@
 use super::*;
 
-/// The one protocol array a conformant
-/// payload can legitimately hold empty is `Resources` on an empty page,
-/// and RFC 7644 §3.4.2 permits omitting it, so the compact form still
-/// deserializes and validates.
+/// RFC 7644 §3.4.2: `Resources` is "REQUIRED if totalResults is non-zero",
+/// so a `count=0` page with matches must keep its empty array; the envelope
+/// is never stripped, only each resource inside it.
 #[cfg(feature = "models")]
 #[test]
-fn compact_empty_page_omits_resources_and_still_validates() {
+fn compact_keeps_the_list_envelope_and_compacts_each_resource() {
     use crate::Validate;
     use crate::models::{others::ListResponse, user::User};
 
-    let page: ListResponse<User<String>> = ListResponse {
+    let count_zero: ListResponse<User<String>> = ListResponse {
         schemas: vec![crate::schema_urns::LIST_RESPONSE.to_string()],
-        total_results: 0,
-        items_per_page: None,
-        start_index: None,
+        total_results: 100,
+        items_per_page: Some(0),
+        start_index: Some(500),
         resources: vec![],
     };
+    assert_eq!(count_zero.validate(), Ok(()));
+    let json = serde_json::to_value(Compact(&count_zero)).unwrap();
+    assert_eq!(json["Resources"], serde_json::json!([]), "{json}");
+    assert_eq!(json["itemsPerPage"], 0);
+    let back: ListResponse<User<String>> = serde_json::from_value(json).unwrap();
+    assert_eq!(back, count_zero);
+
+    let page: ListResponse<User<String>> = ListResponse {
+        schemas: vec![crate::schema_urns::LIST_RESPONSE.to_string()],
+        total_results: 1,
+        items_per_page: Some(1),
+        start_index: Some(1),
+        resources: vec![User::<String> {
+            schemas: vec![crate::schema_urns::USER.to_string()],
+            user_name: "bjensen".to_string(),
+            id: Some("1".to_string()),
+            ..Default::default()
+        }],
+    };
     let json = serde_json::to_value(Compact(&page)).unwrap();
-    assert!(json.get("Resources").is_none(), "{json}");
+    assert!(
+        json["Resources"][0].get("emails").is_none(),
+        "resource compacted: {json}"
+    );
+    assert_eq!(json["Resources"][0]["userName"], "bjensen");
     assert_eq!(json["schemas"].as_array().map(Vec::len), Some(1));
     let back: ListResponse<User<String>> = serde_json::from_value(json).unwrap();
-    assert_eq!(back.validate(), Ok(()));
+    assert_eq!(back.validate_as(crate::Context::Response), Ok(()));
     assert_eq!(back, page);
 }
 
