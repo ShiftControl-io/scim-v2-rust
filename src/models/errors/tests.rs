@@ -137,3 +137,39 @@ fn scim_http_error_serialize_to_json() {
         })
     );
 }
+
+/// RFC 7644 §3.12: `status` is "the HTTP status code … expressed as a JSON
+/// string", so a numeric string outside 100–599 is not one.
+#[test]
+fn validate_rejects_a_status_outside_the_http_range() {
+    let error = |status: &str| ScimHttpError {
+        schemas: vec![schema_urns::ERROR.to_string()],
+        scim_type: None,
+        detail: None,
+        status: status.to_string(),
+    };
+    assert_eq!(error("400").validate(), Ok(()));
+    assert_eq!(error("599").validate(), Ok(()));
+    for bad in ["99", "600", "999", "0", "-400", "4xx", ""] {
+        assert_eq!(
+            error(bad).validate().unwrap_err().path(),
+            "status",
+            "{bad:?}"
+        );
+    }
+}
+
+/// `ScimType` prints its wire keyword, which is what the error body carries.
+#[test]
+fn scim_type_displays_its_wire_keyword() {
+    assert_eq!(ScimType::InvalidValue.to_string(), "invalidValue");
+    assert_eq!(ScimType::TooMany.to_string(), "tooMany");
+    assert_eq!(
+        ScimType::Other("vendorSpecific".to_string()).to_string(),
+        "vendorSpecific"
+    );
+    assert_eq!(
+        serde_json::to_string(&ScimType::InvalidFilter).unwrap(),
+        "\"invalidFilter\""
+    );
+}

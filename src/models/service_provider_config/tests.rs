@@ -124,7 +124,7 @@ fn validate_rejects_two_primary_schemes() {
     );
 }
 
-/// R2-M6: `"authenticationSchemes": null` must reach `validate` as an
+/// `"authenticationSchemes": null` must reach `validate` as an
 /// empty list, so the caller gets the wire-path error rather than a raw
 /// serde message.
 #[test]
@@ -161,7 +161,7 @@ fn schemas_round_trips() {
 /// Deserialization tolerates a missing `schemas` so a non-conformant
 /// provider's config can still be read; `validate()` reports it, because
 /// RFC 7643 §3 makes the attribute REQUIRED on every representation and
-/// the §8.5 example carries it. (Devin review on #49, BUG-2.)
+/// the §8.5 example carries it.
 #[test]
 fn missing_schemas_deserializes_but_does_not_validate() {
     let json = RFC_S5_EXAMPLE.replace(

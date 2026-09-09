@@ -2,625 +2,139 @@
 
 ## 1.0.0
 
-First stable release. The API is now covered by SemVer, and
-`cargo-semver-checks` runs on every PR to keep it that way.
+First stable release. The public API is covered by SemVer from here and
+`cargo-semver-checks` runs on every PR. Every breaking change is listed
+below; 1.0 was the one moment they were free.
 
-This release breaks compatibility deliberately, in the one place where doing
-so is free, and every break is listed below.
+### Breaking changes
 
-### Breaking Changes
-
-- **`Filter::And`/`Or` and `ValFilter::And`/`Or` are n-ary:
-  `And(Operands<Filter>)`, not `And(Box<Filter>, Box<Filter>)`.** `and` and
-  `or` are associative, so the parser now flattens same-operator chains into
-  one node: `a and b and c` is `And([a, b, c])`, and `a and (b and c)` parses
-  to the identical tree. `Operands<T>` is a `Vec` newtype that holds at least
-  two operands by construction — the grammar cannot write a conjunction of one
-  thing or of nothing, and the type does not let you build one — reached
-  through `Operands::new` (which refuses fewer than two with
-  `TooFewOperands`), `Operands::pair`, `push`, and the flattening
-  constructors. It derefs to a slice, so `.len()`, `.iter()`, indexing and
-  slice patterns work unchanged.
-  Depth therefore measures genuine nesting (`not`, an `or` under an `and`, a
-  value path's inner filter) and never chain length, which is what let the
-  R2-I1 fix below land without loosening the depth cap. Patterns on these
-  variants change from `And(lhs, rhs)` to `And(items)`; evaluators that
-  recursed on two children now fold over `items` (`items.iter().all(…)` /
-  `.any(…)`). Build filters programmatically with the new `Filter::and` /
-  `Filter::or` (and `ValFilter` equivalents), which flatten the way the parser
-  does, so a hand-built tree compares equal to its parsed `Display` output.
-  Nothing can produce an `And`/`Or` with fewer than two operands.
-
-- **Multi-valued attributes are `Vec<T>`, not `Option<Vec<T>>`** — all 18 of
-  them: `User`'s `emails`, `addresses`, `phoneNumbers`, `ims`, `photos`,
-  `groups`, `entitlements`, `roles` and `x509Certificates`; `Group.members`;
-  `ResourceType.schemaExtensions`; `Schema`'s `canonicalValues`,
-  `subAttributes` and `referenceTypes`; `SearchRequest`'s `attributes` and
-  `excludedAttributes`. RFC 7643 §2.5 makes an unassigned attribute, an
-  explicit `null`, and an empty array equivalent in state, so the old type
-  offered three representations of one thing and made every caller decide
-  whether `None` and `Some(vec![])` differed. Suggested by @travipross while
-  reviewing #48. All three wire forms now deserialize to an empty `Vec`,
-  including explicit `null` — which needs a `deserialize_with`, since
-  `#[serde(default)]` alone rejects `"roles": null`, a form providers do send.
-
-  An unassigned multi-valued attribute serializes as `[]`, not by omission.
-  RFC 7643 §2.5 permits omitting it, but RFC 7644 §3.5.1 gives `[]`
-  operational meaning that omission does not have: "Clients that want to
-  override a server's defaults MAY specify `null` for a single-valued
-  attribute, or an empty array `[]` for a multi-valued attribute, to clear all
-  values", whereas an omitted attribute is merely "not asserted" and the
-  server MAY clear it *or* substitute a default. Since these models are
-  request bodies as well as representations, emitting `[]` is what keeps a
-  conformant clear-all expressible. `SearchRequest`'s `attributes` and
-  `excludedAttributes` are the exception and are still omitted when empty:
-  those are §3.9 attribute *selection*, not resource attributes, and an empty
-  selection asserts nothing.
-
-- **`ListResponse` is generic over the resource, not the ID type.** `GET
-  /Users` is now `ListResponse<User<String>>` and deserializes straight into
-  `Vec<User<String>>`; the heterogeneous form RFC 7644 §3.4.3 allows at the
-  root `/.search` endpoint is `ListResponse<Resource<String>>`. Previously the
-  parameter was the ID type and `Resources` was always a four-way enum a
-  caller had to match through even when the endpoint returned one kind. It
-  also boxed every variant to keep the enum small — `User<String>` is 992
-  bytes against the enum's 16 — so a 100-user page meant 100 separate
-  allocations where the typed form is one contiguous `Vec`.
-
-  Reusing an existing type parameter for a new purpose is the dangerous part:
-  `ListResponse<String>` used to compile and mean "ids are strings", and would
-  have kept compiling under the new meaning while failing at runtime on
-  deserialize. `R` is therefore bounded by the new `ScimResource` trait, which
-  has a private supertrait, so `ListResponse<String>` is a compile error
-  (E0277) rather than a runtime surprise. The sealing also fixes the
-  implementing set to this crate's resources, which is the intended scope.
-  Note that `cargo-semver-checks` has no lint for this class of change — the
-  seal is what catches it. It has no lint for a public field's type changing
-  either, which is why the 0.5.0 release below needed its break verified by
-  compiling a consumer against the published 0.4.2 rather than by trusting the
-  tool.
-
-- **The `serialize()` and `deserialize()` methods are gone** from `User`,
-  `Group`, `EnterpriseUser`, `Schema`, `ResourceType` and
-  `ServiceProviderConfig`. They wrapped `serde_json::to_string` / `from_str`
-  and only remapped the error type, while hiding `to_writer`, `from_slice` and
-  `from_value`; an inherent method named `deserialize` beside
-  `serde::Deserialize::deserialize` shadowed the trait method. Use
-  `serde_json` directly.
-
-- **`validate()` moved to the `Validate` trait** and returns `ValidationError`
-  instead of `SCIMError`. Add `use scim_v2::Validate;`. The error carries the
-  SCIM **wire** path (`userName`, not `user_name`) and the RFC 7644 §3.12
-  `scimType` keyword, and `ValidationError::to_http_error` builds the error
-  body a server should return.
-
-- **`Schema`, `ResourceType` and `ServiceProviderConfig` gained a `schemas`
-  field.** All three carry it on the wire per RFC 7643 §§5-7, but none
-  modelled it, so a present value was silently dropped and never
-  round-tripped. `#[serde(default)]` keeps absence readable; whether it
-  validates is decided per type — see Fixed (Devin review).
-
-- **`Address` gained `value`, `display` and `primary`.** RFC 7643 §2.4 defines
-  all three as common sub-attributes of every multi-valued attribute, and
-  gives "the preferred mailing address" as its example of `primary`; §4.1.2's
-  listing for `addresses` simply omits them. JumpCloud sends
-  `addresses[].primary`, and it was being dropped.
-
-- **`MemberType` gained an `Other(String)` variant** and is
-  `#[non_exhaustive]`. RFC 7643 §7 defines `canonicalValues` as "a
-  collection of *suggested* canonical values that MAY be used", so a provider
-  may send a `members.type` outside {User, Group} — which previously failed
-  deserialization of the entire enclosing payload, losing a whole
-  `ListResponse` to one unrecognised member. Unknown labels now round-trip
-  verbatim, and matching is case-insensitive per the schema's
-  `caseExact: false`. Because the enum now has a non-unit variant, a numeric
-  cast like `MemberType as isize` no longer compiles.
-
+- **`Filter::And`/`Or` and `ValFilter::And`/`Or` are n-ary**:
+  `And(Operands<Filter>)` instead of `And(Box<Filter>, Box<Filter>)`. The
+  parser flattens same-operator chains, so `a or b or c` is one node and a
+  hundred-id lookup no longer hits the depth cap. `Operands<T>` holds at least
+  two operands by construction and derefs to a slice. Build filters with
+  `Filter::and`, `or`, `all` and `any`.
+- **Multi-valued attributes are `Vec<T>`, not `Option<Vec<T>>`** (all 18).
+  RFC 7643 §2.5 makes absent, `null` and `[]` one state, so all three
+  deserialize to an empty `Vec`. An empty attribute serializes as `[]`, since
+  RFC 7644 §3.5.1 gives `[]` the meaning "clear all values" that omission
+  lacks; `utils::compact::Compact(&value)` omits them in a response. Suggested
+  by @travipross in #48.
+- **`ListResponse` is generic over the resource, not the ID type**:
+  `ListResponse<User<String>>` deserializes straight into `Vec<User<String>>`,
+  and the heterogeneous form is `ListResponse<Resource<String>>`. `R` is bound
+  by the sealed `ScimResource` trait, so the old `ListResponse<String>` is a
+  compile error rather than a runtime surprise.
+- **`validate()` moved to the `Validate` trait** (`use scim_v2::Validate;`)
+  and returns `ValidationError`, which carries the SCIM wire path and the
+  RFC 7644 §3.12 `scimType`; `to_http_error()` builds the error body.
+- **`User<T>` and `Group<T>` need `T: Display` to validate**, so a response's
+  `id` can be checked for RFC 7643 §3.1's "non-empty". `String`,
+  `uuid::Uuid` and the integers qualify.
+- **`Compact<T>` requires the sealed `Compactable`**: resources and lists,
+  never `PatchOp` or `SearchRequest`, whose `[]` means clear-all.
+- **The `serialize()` / `deserialize()` wrappers are gone.** Use `serde_json`.
+- **`Schema`, `ResourceType` and `ServiceProviderConfig` gained `schemas`**,
+  and **`Address` gained `value`, `display` and `primary`** (RFC 7643 §2.4).
+  All were dropped on the wire before.
+- **`MemberType` gained `Other(String)`** and compares case-insensitively, so
+  an unknown `members.type` no longer fails a whole page (RFC 7643 §7 calls
+  canonical values *suggested*).
 - **`SCIMError`, `FilterActionError`, `Resource` and `MemberType` are
-  `#[non_exhaustive]`.** After 1.0 an added variant is a breaking change, so
-  each public enum was given a deliberate answer. The enums that mirror RFC
-  7644's grammar — `Filter`, `AttrExp`, `ValFilter`, `CompareOp`, `CompValue`,
-  `PatchPath`, `PatchOperation`, `OperationTarget`, `MaybeFilter` — stay
-  exhaustive on purpose, because the RFC closes those sets and an exhaustive
-  `match` is worth having. The model *structs* are deliberately not
-  `#[non_exhaustive]`, since that would forbid `..Default::default()`
-  downstream; `User` was audited against the embedded RFC 7643 §4.1 schema and
-  carries every attribute.
-
-- **`SearchRequest::excluded_attributes` is now `pub`.** It never was, so no
-  caller could set it.
+  `#[non_exhaustive]`.** The grammar enums stay exhaustive on purpose.
+- **`SearchRequest::excluded_attributes` is `pub`.** It never was.
 
 ### Added
 
-- `filter::MAX_FILTER_TERMS` (1024) and `FilterActionError::TooManyTerms(usize)`:
-  a size bound on the number of attribute expressions in one filter or PATCH
-  path, counted across `and`/`or` chains and value-path inner filters,
-  enforced at the same two entry points as the depth cap (`Filter::from_str`,
-  `PatchPath::from_str`, and the `Deserialize` impls that delegate to them).
-  Independent of `MAX_FILTER_DEPTH` by design: with an n-ary AST depth no
-  longer bounds size. Generous on purpose — a hundred-id batch lookup is an
-  ordinary request — while keeping a hostile `?filter=` from allocating
-  without limit. Both limits are charged inside the parser as it runs (terms
-  as each attribute expression is reduced, depth as each `(`, `not (` or `[`
-  is shifted), so an over-limit input is rejected at the point it crosses the
-  line with the rest unread; peak allocation for a hostile input is bounded
-  by the limits, not by its length, and `tests/filter_budget_alloc.rs`
-  measures it. Map it to RFC 7644 §3.12 `tooMany` or `invalidFilter`.
-- `Filter::and` / `Filter::or` and `ValFilter::and` / `ValFilter::or`:
-  flattening constructors that produce the shape the parser would.
-
-- **Feature flags `filter`, `models` and `schemas`, all on by default**, so an
-  existing consumer sees no change. Turning off `filter` drops eight crates —
-  `lalrpop-util`, `fluent-uri`, `regex-automata`, `regex-syntax`,
-  `aho-corasick`, `borrow-or-share`, `ref-cast`, `ref-cast-impl` — taking the
-  tree from 22 to 14 and removing a regex engine from the supply chain. For a
-  SCIM server that has its own resource model and wants only the grammar:
-  `default-features = false, features = ["filter"]`.
-- `ScimResource`, a sealed trait naming the resources that may appear in a
-  `ListResponse`, with `schema_urn()`.
-- `Validate`, `ValidationError` and `ValidationErrorKind`, re-exported at the
-  crate root.
+- **Feature flags** `filter`, `models`, `schemas` and `case-insensitive`, all
+  on by default and all additive. `default-features = false, features =
+  ["filter"]` gives a server the grammar alone and drops eight crates.
+- **Direction-aware validation**: `validate_as(Context)` with
+  `CreateRequest`, `ReplaceRequest` and `Response`; `Valid<T>` as proof that
+  a value passed; `Strict<T, M>` to deserialize and validate in one step.
+- **Case-insensitive attribute names** (RFC 7643 §2.1) through `utils::case`
+  and `CaseInsensitive<T>`. Two spellings of one attribute in one object are
+  an `AmbiguousKey` error, and the rejected value is left untouched.
+- **Filter limits**: `MAX_FILTER_DEPTH` (64) and `MAX_FILTER_TERMS` (1024),
+  enforced while parsing so a hostile filter is rejected before it is
+  allocated; `FilterActionError::TooManyTerms`. `tests/filter_budget_alloc.rs`
+  measures the peak.
+- `sortBy` and `sortOrder` on `SearchRequest` and `ListQuery` (RFC 7644
+  §3.4.2.3), plus `effective_count()` / `effective_start_index()` applying
+  §3.4.2.4 Table 6.
+- `ScimType`, the RFC 7644 §3.12 keywords; `ScimHttpError.scim_type` is an
+  `Option<ScimType>`.
+- `Validate` for `SearchRequest`, `PatchOp`, `ScimHttpError`, `Schema`,
+  `AuthenticationScheme`, and `ListResponse` (the envelope and every
+  resource on the page).
+- `ValidationError::under(parent)` for nested errors; `require_schema_urn`
+  and `at_most_one_primary` helpers, re-exported at the root.
 - `schema_urns::ERROR`, `SERVICE_PROVIDER_CONFIG`, `BULK_REQUEST` and
   `BULK_RESPONSE`.
+- Property-based round-trip tests over generated resources.
 
 ### Fixed
 
-- `EnterpriseUser::validate` demanded `employeeNumber`, `costCenter`,
-  `organization`, `division`, `department` and `manager`, so it rejected every
-  conformant extension that left any of them unset. RFC 7643 §4.3 defines no
-  REQUIRED attribute, and all six are `required: false` in the schema this
-  crate embeds. The module had no tests at all, which is why nobody noticed.
-- `ServiceProviderConfig::validate` failed whenever `patch`, `bulk`, `filter`,
-  `changePassword`, `sort` or `etag` reported `supported: false`. §5 makes the
-  `supported` *field* required, not its value true: a server without bulk
-  support correctly advertises `"bulk": {"supported": false}`. It now checks
-  `authenticationSchemes`, which §5 does mark REQUIRED.
-- `primary` tolerated a stringified boolean only on `Role`, the one place
-  #45 had patched. A provider sending `"primary": "true"` on an email hit the
-  identical failure. All nine multi-valued types now share the lenient
-  deserializer.
-- `Bulk::default()` returned `maxOperations: 1000, maxPayloadSize: 1048576`
-  and `Filter::default()` returned `maxResults: 100`, while
-  `ServiceProviderConfig::default()` hand-built the same structs with zeros —
-  two different defaults for one type depending on the constructor. They now
-  delegate, and the limits are zero, since a positive limit beside
-  `supported: false` advertises a capacity the server lacks.
-- `SCIMError` implements `std::error::Error`. It had a hand-written `Display`
-  and no `Error` impl, so it could not be boxed as `dyn Error` or composed
-  with `anyhow`. It now derives `thiserror::Error`, like the filter errors
-  already did.
+Conformance, each checked against the RFC text in `docs/rfcs/`:
 
-### Fixed (MSRV)
+- `EnterpriseUser::validate` demanded six attributes RFC 7643 §4.3 leaves
+  optional; `ServiceProviderConfig::validate` rejected `"supported": false`,
+  which §5 permits.
+- `schemas` must be non-empty, unique and name the resource's URN (§3), and
+  a present enterprise extension needs its URN declared. `Schema` alone may
+  omit `schemas`, as the RFC's own §8.7 representations do.
+- `primary: true` at most once per multi-valued attribute (§2.4), on all nine
+  that carry it; `AuthenticationScheme.type`, `name` and `description`
+  REQUIRED (§5); `PatchOp` needs one or more operations (RFC 7644 §3.5.2);
+  `SearchRequest` rejects `sortOrder` without `sortBy`, `attributes`
+  together with `excludedAttributes` (§3.9), and a `sortBy` that is not an
+  attribute path (§3.4.3); `ResourceType.schemaExtensions[].schema`
+  REQUIRED (RFC 7643 §6).
+- A negative `count` or a `startIndex` below 1 is interpreted, not rejected
+  (RFC 7644 §3.4.2.4 Table 6).
+- `ListResponse::validate` checks `totalResults` against the page, both
+  pagination markers on a short page, each resource's declared schema
+  against the type it was parsed as, and each resource's own rules.
 
-- `rust-version` said `1.85`, and the crate has not built on 1.85 since the
-  filter parser landed: `lalrpop-util`'s entire 0.23 line declares rustc 1.86,
-  and the checked-in parser is generated by 0.23.1, so dropping to 0.22 would
-  mean regenerating it. Nothing checked the claim, which is what the new MSRV
-  CI job is for — it failed on its first run. Now `1.86`, verified against a
-  real 1.86.0 toolchain. The crate's *code* still compiles on 1.85 without
-  `filter`, verified likewise, but that is not a usable configuration:
-  `rust-version` is a package-wide floor Cargo enforces before compiling
-  anything and is not conditional on feature selection, so 1.86 gates every
-  configuration. Cargo cannot express a per-feature MSRV.
+Robustness:
 
-### Fixed (red-team round 2)
-
-- **`utils::case` corrupted correctly-cased payloads.** `WIRE_NAMES` listed
-  both `Resources` and `resources`, and both `Operations` and `operations`;
-  the lowercase entries were Rust field names that had leaked into a table of
-  wire names. Keyed by lowercase, the pairs collapsed and the lowercase
-  spelling won, so the case-insensitive path rewrote the RFC's own
-  `"Resources"` to `"resources"` — every page came back **empty with no
-  error**, because the field has a default — and `"Operations"` to
-  `"operations"`, so a PATCH body byte-identical to RFC 7644's example failed
-  to parse. The two entries are gone and a test asserts the table is
-  injective under case folding, which the membership test could never catch.
-- **Colliding keys were resolved last-write-wins**, with the winner decided
-  by `serde_json::Map`'s byte order rather than document order — so
-  `{"userName":"alice","USERNAME":"admin"}` and its reverse gave different
-  answers, and an attacker could pick the spelling that wins. RFC 7643 §2.1
-  makes them one attribute asserted twice with no precedence rule. It is now
-  an `AmbiguousKey` error, surfaced through every entry point.
-- **Canonicalisation reached into extension namespaces the crate does not
-  own.** Keys like `Value` or `TITLE` inside `urn:example:…` were rewritten
-  to this crate's spelling, although that namespace is not governed by §2.1
-  and its vendor may be case-sensitive; the module doc had claimed nothing
-  was lost. A subtree under an unknown URN is now left byte-identical.
-- `SerializationError` gained the `#[source]` its sibling already had, so the
-  `serde_json` error is reachable through the standard chain walk.
-- `to_http_error` takes no status: every `ValidationErrorKind` is a 400, and
-  the `u16` parameter accepted `0` or `65535` while the crate's own
-  `ScimHttpError::validate` rejected them. A body needing another status is
-  built directly and validated.
-- The seal's second `compile_fail` guard had been failing for an unrelated
-  reason — its impl omitted `declared_schemas` — and so proved nothing about
-  the seal; it is complete now, and the inert-on-stable error codes are
-  dropped in favour of a comment naming the mutation each snippet catches.
-- Pinned, all previously unguarded: the four `ListResponse::validate` bounds,
-  every `validate_context` branch on `User` and `Group` including the
-  `password` one, `Valid` and `Strict` as unit tests, the three null-collapse
-  sites, `at_most_one_primary` on all eight attributes, `Schema::validate`,
-  and `MemberType`'s case-insensitive `PartialEq` together with its `Hash`
-  through a real `HashSet`. The fixture-inventory check strips block comments
-  and matches the `include_str!` invocation rather than a bare path. The
-  property strategy now generates all nine multi-valued attributes, and the
-  casing property covers `ListResponse` and `PatchOp` — the case that would
-  have caught the collision at authoring time.
-- CI's matrix now includes the shipped default feature set, which no row had
-  exercised: six rows were reductions and the other two both enabled the
-  non-default compact posture.
-
-- **R2-I1 — a flat `or` chain of more than 64 terms was rejected as "too
-  deep".** The AST was a binary tree, so `a or b or c …` nested one level per
-  term and `MAX_FILTER_DEPTH` (64) capped a batch lookup at 64 ids. Fixed by
-  making the AST n-ary (see Breaking Changes): a same-operator chain is one
-  node of depth 2 however long it is, and a separate `MAX_FILTER_TERMS` (1024)
-  bounds size. A 100-term `or` chain now parses; a 100 000-term one is
-  rejected with `TooManyTerms` without touching the stack.
-
-### Fixed (Devin review)
-
-Devin reviewed `be75d5c` and raised six items; five changed code and the
-sixth changed documentation.
-
-- **`ResourceType` and `ServiceProviderConfig` no longer validate without
-  `schemas`.** RFC 7643 §3 says "all representations of SCIM schemas MUST
-  include a non-empty array", and the RFC's own §8.5 and §8.6 examples carry
-  it. The 1.0 branch had excused all three discovery types citing "§§6-7",
-  which say no such thing. `Schema` alone keeps the exemption, on different
-  evidence: the §8.7 schema representations — every one the RFC publishes —
-  carry no `schemas` attribute, and providers follow the example, so
-  rejecting absence there would fail `validate()` on the RFC's own output.
-  Deserialization tolerates absence on all three; only `validate()` changed.
-- **Duplicate `schemas` values are rejected.** §3: "each String value must be
-  a unique URI" and "duplicate values MUST NOT be included". A membership
-  check waved `["…User", "…User"]` through; `require_schema_urn` now rejects
-  any repeated URI, which reaches every type that validates `schemas`,
-  including `Strict<T, M>`.
-- **`Operands<T>` makes the two-operand floor structural** — see Breaking
-  Changes. The n-ary commit had left `Filter::And(vec![])` and
-  `Filter::And(vec![x])` constructible; the first displayed as an empty
-  string and the second collapsed to its child, so neither survived a
-  round-trip. Both are now unrepresentable.
-- **The filter limits bound allocation, not just the finished tree.** The
-  term and depth caps were checked after parsing, by which point a 100 000
-  term filter had been fully allocated. They are now charged inside the
-  parser (see Added), a syntactic nesting count means redundant parentheses
-  count as nesting too, and the generated parsers are built once behind a
-  `OnceLock` rather than recompiling the lexer's regex set — about 400 KiB
-  and measurable time — on every `from_str`.
-- **`Compact` is documented as tree-wide and not field-aware**, with tests
-  that the one protocol array a conformant payload can hold empty —
-  `Resources` on an empty page, which RFC 7644 §3.4.2 makes REQUIRED only
-  "if totalResults is non-zero" — is omitted and still deserializes and
-  validates, and that non-empty arrays are never touched. Superseded in part
-  by R3-M3 below: a PATCH clear-all *is* a conformant payload the stripping
-  altered, so `Compact` is now fenced to the types where it cannot.
-- **`ListResponse::validate`'s short-page rule is documented as an
-  inference and defended.** §3.4.2 gives pagination as the only reason a
-  response holds fewer entries than `totalResults`, so a short page without
-  `startIndex`/`itemsPerPage` is treated as non-conformant; a `count=0` page
-  with its markers is pinned as conformant.
-
-### Fixed (red-team round 3)
-
-Round 3 reviewed `be75d5c`, before the Devin fixes landed, and raised
-sixteen items. Three were already closed by `45459f8` and are noted as
-such; the rest are fixed here. Tests 385 → 405 at `--all-features`.
-
-- **R3-C1 (Critical) — a deep `not (` chain with one trailing token aborted
-  the process.** lalrpop reduced the whole chain into a depth-N tree before
-  rejecting the trailing token, and dropping that tree ran the derived
-  recursive `Drop`, which overflowed the stack: an abort, not a panic, so no
-  `catch_unwind` or task boundary could contain it. The post-parse guard
-  never ran, because `from_str` never got a value back to drop. Closed by
-  the parse-time depth budget from `45459f8`, which rejects at the 65th
-  bracket before anything is built; pinned here with the reproduction —
-  34,000 and 40,000 levels plus ` and` on a 2 MiB thread, 640 levels plus
-  garbage on a 256 KiB thread, the `ValFilter` mirror, and
-  `SearchRequest<Filter>` / `SearchRequest<MaybeFilter>` bodies.
-- **R3-H1 (High) — empty and singleton `And`/`Or` were constructible.**
-  Closed by `Operands<T>` in `45459f8`. Added here: `Filter::all` /
-  `Filter::any` and the `ValFilter` pair, which fold a list into `None` for
-  no items, the item itself for one, and a flattened node otherwise, so an
-  empty allow-list is a value the caller has to handle rather than an empty
-  filter on the wire.
-- **R3-M1 — `MAX_FILTER_TERMS` bounded retention, not allocation.** Closed
-  by the parse-time budget in `45459f8`, measured by
-  `tests/filter_budget_alloc.rs`.
-- **R3-M2 — `canonicalize_keys` left the caller's `Value` half-rebuilt on a
-  collision.** It emptied the map and re-inserted entries until the
-  collision, so an error left a truncated object whose surviving key held
-  whichever spelling came first — possibly the attacker's — with every
-  ancestor half-rebuilt too. Now two-phase: a read-only collision check over
-  the whole tree, then a rewrite that cannot fail, so on `Err` the value is
-  byte-identical to what was passed. Documented as a postcondition; tested
-  at the top level, one level down and three levels down.
-- **R3-M3 — `Compact` deleted a PATCH clear-all.** `strip_unassigned`
-  removed a `PatchOp`'s `"value": []`, the RFC 7644 §3.5.1 clear-all the
-  module cites as its reason for not omitting `[]` by default, and a
-  pathless `add` lost the clear while keeping the set. `Compact<T>` now
-  requires a sealed `Compactable`, implemented for the resource and list
-  types and not for `PatchOp` or `SearchRequest`, so `Compact(&patch_op)`
-  is a compile error (a `compile_fail` doctest pins it); `strip_unassigned`
-  is crate-private; the docs warn against compacting a `PUT` body for the
-  same reason. Tests: all nine multi-valued attributes omitted, and the
-  compact form reading back equal.
-- **R3-M4 / R3-M5 — the `ValFilter` halves of the precedence-preserving
-  `Display` and of `and`-flattening were unpinned.** Mutation showed both
-  could be removed with the suite green. Now a value-path mixed-operator
-  table (five shapes, through `Filter` and `PatchPath`), `ValFilter::and`
-  parity with the parser, and both operators in the value-path
-  chain-at-limit test.
-- **R3-M6 — the `AmbiguousKey` rejection was pinned at one of three entry
-  points.** `from_value` and `CaseInsensitive` now assert it too.
-- **R3-L1 — the depth budget restarted inside a value path**, so 63 outer
-  `not`s around 63 inner ones passed as depth 63. The AST walk now threads
-  its running depth into the inner filter; the live syntactic count from
-  `45459f8` already shared one budget. Tested both ways.
-- **R3-L2 / R3-L6 — value-path term counting neither short-circuited nor
-  agreed across entry points, and `not` was uncounted.** Both counters were
-  removed in `45459f8` in favour of the parser budget, which charges every
-  attribute expression once. Pinned here: a 100,000-term value path reports
-  1025 on every entry point, and `not (x pr)` chains hit the limit like any
-  other term.
-- **R3-L3 — the `negative_total` pin was satisfied by a different branch.**
-  The table now asserts each bound's detail text, plus a negative total
-  with a non-empty page.
-- **R3-L4 — `Valid` and `Strict`'s `Serialize` and `Deref` had no
-  coverage.** Asserted.
-- **R3-L5 — the fixture inventory's comment stripping and `include_str!`
-  needle were unguarded.** Factored into `strip_comments` and `is_included`
-  with negative controls.
-- **R3-L7 — `case-insensitive` had no CI row.** Two rows added to
-  `build.yml` and to the weekly drift matrix — `--features case-insensitive`
-  and `--features schemas,case-insensitive` — for nine configurations.
-- **R3-I1 — `Context::as_str` had no coverage.** One assertion per variant.
-
-### Fixed (Devin review, round 2)
-
-Devin re-reviewed at `1b91363` and raised five items; all five changed code.
-Tests 405 → 411 at `--all-features`.
-
-- **A negative `count` was a validation error.** RFC 7644 §3.4.2.4 Table 6
-  says a negative `count` "SHALL be interpreted as 0" and a `startIndex`
-  below 1 as 1, so both are valid input with a defined reading, not errors.
-  `SearchRequest::validate` accepts them, and `effective_count()` /
-  `effective_start_index()` on `SearchRequest` and `ListQuery` apply the
-  table for a server.
-- **An empty `id` passed a `Response` check.** RFC 7643 §3.1: "MUST include a
-  non-empty id value". `User<T>` and `Group<T>` now require `T: Display` on
-  their `Validate` impls and reject an id that prints as empty, so
-  `Some("")` fails `validate_as(Response)`, `Valid` and `Strict<_,
-  Response>`; `String`, `uuid::Uuid` and the integers all satisfy the bound.
-- **An enterprise extension body without its URN passed.** §3: `schemas`
-  names "the namespaces of the SCIM schemas that define the attributes
-  present", so a present `enterprise_user` now requires the enterprise URN
-  in `schemas`. The other direction stays lenient per §3.3.
-- **`ListResponse::validate` stopped at the envelope.** It now runs each
-  resource's own `validate()`, and `validate_as(ctx)` carries the context
-  into every resource, so a `Response` page needs an `id` on each entry.
-  Failures are reported under `Resources[i]`. `ScimResource` gains
-  `Validate` as a supertrait and `Resource<T>` implements it by delegation.
-- **Nested `AuthenticationScheme` errors lost their kind.** New
-  `ValidationError::under(parent)` relocates an error beneath a container
-  while keeping kind and detail; `ServiceProviderConfig` and `ListResponse`
-  use it.
-
-### Added (resilience and conformance pass)
-
-- **Direction-aware validation.** `Validate` gains `validate_as(Context)` on
-  top of `validate()`, with `Context::{CreateRequest, ReplaceRequest,
-  Response}`. RFC 7643 §3.1 makes `id` REQUIRED in a server's representation
-  and "MUST NOT be specified by the client" on create; §4.1's `password` is
-  `returned: never`. Neither can be expressed by a single direction-agnostic
-  check, and `validate()` remains that check. A replace request tolerates
-  `id`, since RFC 7644 §3.5.1 has the server ignore readOnly attributes and
-  its own PUT example carries one.
-- **`Valid<T>`.** Obtainable only through `Valid::new(value, Context)`, so a
-  handler that takes `Valid<User>` cannot be handed an unvalidated resource:
-  forgetting to validate is a compile error, at zero runtime cost. `Deref`
-  but no `DerefMut`, since mutation could invalidate it.
-- **`Strict<T, M>`.** Deserialize-and-validate in one step for callers who
-  want to reject a non-conformant body at the parse boundary, with `M` one of
-  the `CreateRequest` / `ReplaceRequest` / `Response` markers. The plain
-  models stay lenient so a real provider's payload can always be read.
-- **Case-insensitive attribute names**, RFC 7643 §2.1: "Attribute names are
-  case insensitive". A payload carrying `"USERNAME"` failed with `missing
-  field userName`. `utils::case` canonicalises every known attribute,
-  sub-attribute, protocol member and URN before deserializing —
-  `CaseInsensitive<T>`, `utils::case::from_str`, `from_value` — leaving
-  unknown keys untouched. The Java SCIM SDK gets the same effect from
-  Jackson's `ACCEPT_CASE_INSENSITIVE_PROPERTIES`; scim2-models lowercases
-  every key citing §2.1. Behind the `case-insensitive` feature, on by default.
-- **Wire-behaviour choices are types, not features.** An earlier revision of
-  this branch exposed lenient booleans and compact output as Cargo features.
-  The second red-team round pointed out what that meant: Cargo unifies
-  features across the whole dependency graph, so any transitive crate
-  enabling `compact-multi-valued` for its own logging would silently stop
-  every other consumer's RFC 7644 §3.5.1 clear-all from reaching the wire,
-  with no way for them to opt out. Both were removed. Lenient boolean parsing
-  is simply always on — it only widens what is accepted. Compact output is
-  `utils::compact::Compact(&value)`, a serialize wrapper the caller chooses at
-  the call site, on the same pattern as `CaseInsensitive<T>` and
-  `Strict<T, M>`. `case-insensitive` stays a feature because it is genuinely
-  additive: it only compiles an opt-in module.
-- Every model derives `Clone` and `PartialEq`, and `tests/roundtrip_proptest.rs`
-  generates resources and asserts serialize-then-deserialize is the identity.
-  Each asymmetry this release fixed by hand was a round-trip failure of the
-  kind this now finds mechanically.
-- `Schema` gains `Validate`: RFC 7643 §7 says service providers "MUST
-  specify" the schema URI as `id`.
-
-### Added (independent RFC review)
-
-- `sortBy` and `sortOrder` on `SearchRequest` and `ListQuery`, per RFC 7644
-  §3.4.2.3 and §3.4.3, with a `SortOrder` enum. Neither field existed, so a
-  client could not express a sort and a server deserializing a search body
-  silently lost one. `SearchRequest::validate` rejects `sortOrder` without
-  `sortBy`, which §3.4.2.3 defines as the order in which `sortBy` is applied.
-- `ScimType`, the ten RFC 7644 §3.12 keywords as an enum with an `Other`
-  catch-all, and `ScimHttpError.scim_type` is now `Option<ScimType>` rather
-  than a bare string servers would hand-type. `ValidationError::scim_type()`
-  returns it; `scim_type_str()` gives the wire string.
-- `Validate` for `SearchRequest`, `PatchOp` (the URN, and §3.5.2's "one or
-  more" operations — an empty array previously deserialized and validated as
-  nothing) and `ScimHttpError` (the URN, and a numeric status).
-- Every `Validate` impl now checks that `schemas` carries the resource's own
-  URN. RFC 7643 §3: it "MUST only contain values defined as schema and
-  schemaExtensions for the resource's defined resourceType" — a `User` whose
-  `schemas` named the Group URN passed before. Additional URNs are still
-  accepted, since a resource may carry an extension this crate does not model.
-- `User` and `ServiceProviderConfig` validation enforces RFC 7643 §2.4 — "The
-  primary attribute value true MUST appear no more than once" — on every
-  multi-valued attribute that carries `primary`.
-- `AuthenticationScheme` validation enforces §5: `type`, `name` and
-  `description` REQUIRED. The red-team finding that led to `type` becoming
-  optional cited §8.7's schema representation, which §8 describes as
-  non-normative; §5 prose governs. The field stays `Option` so a document
-  following the §8.7 text still parses, and `validate` reports the gap by
-  index.
-- `active` tolerates a stringified boolean, as every `primary` already did.
-- Grammar coverage: 36 table-driven cases pinning RFC 7644 §3.4.2.2's ABNF —
-  nameChar rules, keyword case, every JSON number form, the `pr`/`valuePath`
-  compositions, and the rejections (`pr` with a value, `valuePath.subAttr`
-  inside a filter, capitalised literals, unbalanced parens, trailing input) —
-  plus all five Figure 8 PATCH paths, every documented `op` spelling, and
-  `Resource` dispatch with an unknown URN beside a known one. The parser
-  handled all of them already; nothing had pinned them.
-
-### Fixed (red-team triage)
-
-- `AuthenticationScheme.primary` was the ninth `primary` carrier and the one
-  without the lenient boolean deserializer, so a provider stringifying
-  booleans made the *entire* `/ServiceProviderConfig` document unparseable —
-  the one call a client makes before it knows any of a provider's quirks. All
-  nine are now covered, and pinned by a test that goes through the real model
-  types rather than a synthetic struct.
-- `ListResponse.Resources` and `ServiceProviderConfig.authenticationSchemes`
-  were missed by the null-collapsing sweep. `"Resources": null` lost an entire
-  empty page including `totalResults`, and `"authenticationSchemes": null`
-  failed deserialization before `validate()` could report the attribute by
-  wire path.
-- `AuthenticationScheme.type` and `.spec_uri` are now `Option<String>`. RFC
-  7643's schema defines no `type` sub-attribute at all and marks `specUri`
-  `required: false`, so a conformant minimal scheme was rejected at the type
-  level — including the payload this crate's own `TryFrom` doc example
-  presents.
-- `ListResponse::validate` was one-sided: it checked only that a *short* page
-  carried its pagination markers, so `totalResults: -5`, three resources
-  against `totalResults: 1`, and `startIndex: 0` all passed. It now rejects a
-  negative `totalResults`, a `totalResults` smaller than the number of
-  resources returned, a `startIndex` below 1 (§3.4.2: "the 1-based index of
-  the first result"), and a negative `itemsPerPage`.
-- `ListResponse::validate` also compares each resource's declared `schemas`
-  against the type it was parsed as. `Resource`'s deserializer dispatches on
-  that URN "to prevent type confusion", and the typed path bypassed it: a
-  Group payload carrying a `userName` deserialized cleanly into
-  `ListResponse<User<String>>` with both validators returning `Ok`. This is
-  what `ScimResource::schema_urn` is for; it was otherwise vestigial, and
-  `declared_schemas` is added alongside it. An absent `schemas` is left to
-  the resource's own `validate`.
-- `MemberType` compared `Other` byte-exact despite the schema's
-  `caseExact: false`, so `Other("serviceaccount") != Other("ServiceAccount")`
-  and `Other("User") != MemberType::User` even though both serialize to
-  `"User"`. `PartialEq` and `Hash` are now hand-written and route through the
-  same folding `From<String>` applies.
-- `ValidationError::to_http_error` took the HTTP status as an unvalidated
-  `impl Into<String>`, so `"not-a-status"` produced a syntactically valid but
-  non-conformant §3.12 body. It now takes `u16` and does the rendering, making
-  the wrong value unrepresentable.
-- Restored the four `Manager` serialization guards that #48's review had
-  specifically asked for and this release's rewrite of the module deleted —
-  the rewrite took coverage from 0% to 93% while removing its only defence
-  against the defect the module had been fixed for.
-- Three empty inherent `impl` blocks left behind by the serde-wrapper removal.
+- Stringified booleans such as `"True"` are accepted on `active` and every
+  `primary`; `null` is accepted for every multi-valued attribute, including
+  `Resources` and `authenticationSchemes`.
+- A deep `not (` chain with one trailing token aborted the process, and a
+  long flat `or` chain was rejected as too deep. Both are gone with the n-ary
+  AST and the parse-time limits.
+- `utils::case` rewrote the RFC's own `Resources` and `Operations` keys, and
+  resolved colliding keys last-write-wins.
+- `Bulk` and `Filter` had different defaults depending on the constructor.
+- `SCIMError` implements `std::error::Error`.
+- `rust-version` is `1.86`, the real floor set by `lalrpop-util` 0.23; it
+  claimed 1.85 and nothing checked it.
 
 ### Security and release pipeline
 
-- `publish.yml` interpolated `${{ inputs.version }}` directly into a `run:`
-  body, in the one job that holds `CRATES_TOKEN`. `${{ }}` is substituted
-  before bash parses the line, so a version containing a quote could run
-  arbitrary commands — after the `crates-io` environment approval had already
-  been granted, and before the version, manifest and tag checks. The input now
-  arrives through `env:` and its shape is validated first.
-- The publish tag guard could not fire in either direction: `actions/checkout`
-  defaults to `fetch-tags: false`, so dispatched from a branch it reported
-  "tag does not exist" for a tag that did — and following that advice is how a
-  tag gets force-moved onto the wrong commit. It now fetches tags and resolves
-  against `origin`, so "not pushed" and "not fetched" are distinguishable.
-- The publish `Verify` step claimed to re-run everything CI runs and skipped
-  the dependency audit, the feature matrix, `cargo doc` and
-  `RUSTFLAGS: -D warnings`. With caret requirements and no committed lock, a
-  RUSTSEC advisory landing since the last run on main was invisible at publish
-  time. All four are now included.
-- `cargo-deny` ran `check advisories licenses sources`, so `deny.toml`'s
-  `[bans]` section — including `wildcards = "deny"` — was never evaluated.
-- The signed-commits check read the API inside a process substitution, which
-  `set -e` cannot observe, so a rate limit reported as an unsigned commit with
-  an empty summary. The coverage-badge `curl` had no `--fail`, so an expired
-  token went green while the badge served a stale value for ever.
+- `publish.yml` interpolated `${{ inputs.version }}` into a `run:` body in
+  the job holding `CRATES_TOKEN`. Inputs now arrive through `env:` and are
+  shape-checked. Publishing is manual, dry-run by default, behind a
+  `crates-io` environment, and requires the version to match `Cargo.toml`
+  and a tag on the same commit.
+- The tag guard, the publish-time verification, `cargo-deny`'s `[bans]` and
+  the signed-commits check each had a way to pass without checking anything.
 
 ### Documentation and tooling
 
-- `lib.rs` and the README open with a quick start: a server handling
-  `POST /Users` through `Strict<User, CreateRequest>` and answering with a
-  `Valid` response, a client reading `GET /Users`, and a filter parse.
-  Feature-flag detail moves below the usage sections.
-- Unit tests live in `src/<module>/tests.rs`, one file per test module, so
-  the largest sources (`filter.rs`, `models/others.rs`, `models/user.rs`)
-  are half or less their former length. A pure move: the same 330 unit tests
-  run, from the same modules, with the fixture inventory following them.
+- `lib.rs` and the README open with a quick start (a server handling
+  `POST /Users`, a client reading `GET /Users`, a filter parse), and a
+  "deserializing does not validate" section says when to validate and what
+  happens if you do not.
+- CI runs clippy `--all-targets --all-features`, a nine-configuration
+  feature matrix, the MSRV, `cargo doc -D warnings`, `cargo-semver-checks`,
+  `cargo-deny`, a coverage badge and a signed-commits check; a weekly job
+  catches upstream drift.
+- `CONTRIBUTING.md` carries the review rules this release taught, with PR
+  and issue templates. Unit tests live in `src/<module>/tests.rs`. Line
+  coverage 88% → 96%. Dependencies are caret requirements at major.minor.
 
-- README rewritten: badges, the feature table, and examples for the 1.0 API.
-  Its code blocks are compiled and run as doctests, so it cannot drift. Four
-  lines had shipped with escaped backticks, rendering as literal `` \` `` on
-  GitHub.
-- `CONTRIBUTING.md`, a PR template, and issue templates for bugs, RFC
-  conformance gaps and feature requests.
-- CI: clippy now runs `--all-targets --all-features` (it previously saw
-  neither test code nor gated items), plus new jobs for the six-configuration
-  feature matrix, the declared MSRV, `cargo doc -D warnings`,
-  `cargo-semver-checks` and `cargo-deny`, and coverage published as a badge.
-- A `Signed commits required` check that maps each of GitHub's
-  `verification.reason` codes to its specific fix, rather than reporting the
-  code alone.
-- Publishing to crates.io is manual (`workflow_dispatch`), defaults to a dry
-  run, requires the version input to match `Cargo.toml` and a tag on the same
-  commit, and runs behind a `crates-io` environment. It was previously
-  triggered by any `v*.*.*` tag push.
-- Test enforcement tightened after the red team demonstrated it was partly
-  vacuous: `tests/fixtures.rs` matched raw source text, so a fixture mentioned
-  only in a `//` comment satisfied "read by a test", and provider samples had
-  no inventory check at all. Comments are now stripped, the support column is
-  resolved against the directory each row's fixture actually lives in, and
-  provider samples get their own row check. The three `compile_fail` doctests
-  guarding the sealed trait inline their full paths, so a broken `use` line
-  cannot make them pass for the wrong reason, and a third case fails the
-  moment `mod sealed` becomes public — both verified by mutation. A new
-  `tests/public_api.rs` exercises the public surface from a separate crate,
-  which is the only place field privacy is enforced: deleting `pub` from
-  `SearchRequest::excluded_attributes` previously left the whole suite green.
-- A weekly scheduled `Weekly drift` workflow, which is the guard the loose
-  caret requirements actually need: consumers get whatever is newest on the day
-  they build, and nothing about that is exercised by a PR, since `build.yml`
-  only runs when this repo changes and the risk here is something outside it
-  changing. It resolves fresh with no cache, runs the suite and the feature
-  matrix on stable (plus beta, advisory), re-checks that the advertised MSRV
-  still holds — a dependency can raise its own `rust-version` with no commit
-  here — re-runs the advisory audit, and files an issue on failure, since
-  GitHub does not surface a failed scheduled run the way it does a failed PR.
-- Dependency requirements are stated as caret requirements at major.minor
-  (`serde = "1.0"`, `thiserror = "2.0"`, `lalrpop-util = "0.23"`,
-  `fluent-uri = "0.4"`). Every form is a caret requirement and cargo resolves
-  to the newest compatible release either way, so the patch digit only set a
-  floor — a claim about the oldest API this crate compiles against — and a
-  needlessly precise floor forced consumers to upgrade for no reason.
-- Line coverage 88.25% → 95.99%, functions 81.15% → 90.02%, excluding the
-  generated parser and measured with CI's exact `cargo llvm-cov` recipe
-  (unit and integration tests; doctests are not instrumented on stable). `tests/fixtures.rs` now enforces that every fixture is
-  documented and read by a test, which found three dead JumpCloud fixtures
-  that now have round-trip tests.
 ## 0.5.0
 
 Releases the RFC 7644 conformance work from #47 and #48. A minor bump rather

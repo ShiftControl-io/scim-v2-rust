@@ -1,6 +1,6 @@
 use super::*;
 
-/// R2-C1: the table must be injective under case folding. Two entries that
+/// The table must be injective under case folding. Two entries that
 /// fold to the same key collapse in the `HashMap`, and the loser was the
 /// RFC's own spelling — `Resources` and `Operations` were being rewritten
 /// to lowercase, silently emptying every `ListResponse` page and making a
@@ -37,7 +37,7 @@ fn protocol_envelope_members_keep_their_rfc_casing() {
     }
 }
 
-/// R2-H1: two spellings of one attribute in one object is an error, not a
+/// Two spellings of one attribute in one object is an error, not a
 /// silent last-write-wins whose winner depends on byte order.
 #[test]
 fn colliding_keys_are_rejected() {
@@ -49,7 +49,7 @@ fn colliding_keys_are_rejected() {
         let mut v: Value = serde_json::from_str(raw).unwrap();
         let err = canonicalize_keys(&mut v).expect_err(raw);
         assert_ne!(err.first, err.second);
-        // R3-M6: all three entry points, not only `from_str`.
+        // All three entry points, not only `from_str`.
         assert!(
             from_str::<crate::models::user::User<String>>(raw).is_err(),
             "from_str must surface the collision: {raw}"
@@ -67,7 +67,7 @@ fn colliding_keys_are_rejected() {
     }
 }
 
-/// R3-M2: a rejected body is left exactly as it was passed, at the top level
+/// A rejected body is left exactly as it was passed, at the top level
 /// and with the collision one level down among siblings that would otherwise
 /// have been renamed or dropped. A handler that logs or echoes the body after
 /// the error must see both spellings.
@@ -85,7 +85,7 @@ fn a_rejected_value_is_left_untouched() {
     }
 }
 
-/// R2-M2: a subtree under an extension URN this crate does not model is
+/// A subtree under an extension URN this crate does not model is
 /// not RFC 7643 §2.1 territory and is left byte-identical. The extension
 /// this crate does model is canonicalised, because that vocabulary is ours.
 #[test]

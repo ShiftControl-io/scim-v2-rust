@@ -1,6 +1,6 @@
 //! Case-insensitive attribute names, per RFC 7643 §2.1.
 //!
-//! "Attribute names are case insensitive and are often camel-cased." A
+//! "Attribute names are case insensitive and are often camel-cased" A
 //! conformant peer may therefore send `"USERNAME"` or `"displayname"`, and a
 //! `serde` derive matching exact strings drops the key and then fails on the
 //! missing required field. This module rewrites every known attribute name,

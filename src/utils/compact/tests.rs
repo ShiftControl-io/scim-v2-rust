@@ -1,6 +1,6 @@
 use super::*;
 
-/// Devin review on #49, ANALYSIS-1: the one protocol array a conformant
+/// The one protocol array a conformant
 /// payload can legitimately hold empty is `Resources` on an empty page,
 /// and RFC 7644 §3.4.2 permits omitting it, so the compact form still
 /// deserializes and validates.
@@ -54,7 +54,7 @@ fn strips_empty_arrays_and_nulls_recursively() {
     assert_eq!(v, serde_json::json!({"c": [1], "d": {"f": "x", "g": [{}]}}));
 }
 
-/// R3-M3: every multi-valued attribute the plain form emits as `[]` is
+/// Every multi-valued attribute the plain form emits as `[]` is
 /// omitted — all nine, not only `emails` — every other member is untouched,
 /// and the compact form reads back equal to the original.
 #[cfg(feature = "models")]

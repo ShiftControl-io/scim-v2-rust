@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 #[cfg(feature = "filter")]
-use crate::filter::{Filter, InvalidFilterError, MaybeFilter, PatchPath};
+use crate::filter::{AttrExp, Filter, InvalidFilterError, MaybeFilter, PatchPath};
 use crate::models::group::Group;
 use crate::models::resource_types::ResourceType;
 use crate::models::scim_schema::Schema;
@@ -131,7 +131,7 @@ pub struct SearchRequest<F = Filter> {
     pub schemas: Vec<String>,
     /// RFC 7644 §3.9 attribute selection, not a resource attribute — so unlike
     /// the multi-valued attributes on `User` and `Group`, an empty list is
-    /// omitted rather than sent as `[]`. §3.5.1's "empty array to clear all
+    /// omitted rather than sent as `[]`. §3.5.1\'s "an empty array … for a multi-valued attribute, to clear all
     /// values" is about a resource's own attributes; an empty *selection* is
     /// not an assertion about anything, and a server could reasonably read
     /// `"attributes": []` as a request for no attributes at all.
@@ -143,7 +143,7 @@ pub struct SearchRequest<F = Filter> {
     pub attributes: Vec<String>,
     /// RFC 7644 §3.9 attribute selection, not a resource attribute — so unlike
     /// the multi-valued attributes on `User` and `Group`, an empty list is
-    /// omitted rather than sent as `[]`. §3.5.1's "empty array to clear all
+    /// omitted rather than sent as `[]`. §3.5.1\'s "an empty array … for a multi-valued attribute, to clear all
     /// values" is about a resource's own attributes; an empty *selection* is
     /// not an assertion about anything, and a server could reasonably read
     /// `"attributes": []` as a request for no attributes at all.
@@ -859,18 +859,44 @@ pub enum PatchOperation {
 
 #[cfg(feature = "filter")]
 impl<F> Validate for SearchRequest<F> {
-    /// RFC 7644 §3.4.3: the body carries the SearchRequest URN. §3.4.2.3:
-    /// `sortOrder` without `sortBy` orders nothing, so it is rejected rather
-    /// than silently ignored. A negative `count` or a `startIndex` below 1 is
-    /// *not* an error: §3.4.2.4 Table 6 says each "SHALL be interpreted" as 0
-    /// and 1 respectively, which [`effective_count`](Self::effective_count)
-    /// and [`effective_start_index`](Self::effective_start_index) do.
+    /// RFC 7644 §3.4.3: the body carries the SearchRequest URN, and "the
+    /// sortBy attribute MUST be in standard attribute notation (Section 3.10)
+    /// form". §3.4.2.3: `sortOrder` is "the order in which the sortBy
+    /// parameter is applied", so without `sortBy` it orders nothing and is
+    /// rejected rather than silently ignored. §3.9 calls `attributes` and
+    /// `excludedAttributes` "mutually exclusive URL query parameters", so
+    /// both at once is rejected. A negative `count` or a `startIndex` below 1
+    /// is *not* an error: §3.4.2.4 Table 6 says each "SHALL be interpreted"
+    /// as 0 and 1 respectively, which
+    /// [`effective_count`](Self::effective_count) and
+    /// [`effective_start_index`](Self::effective_start_index) do.
     fn validate(&self) -> Result<(), ValidationError> {
         require_schema_urn(&self.schemas, schema_urns::SEARCH_REQUEST)?;
         if self.sort_order.is_some() && self.sort_by.is_none() {
             return Err(ValidationError::invalid_value(
                 "sortOrder",
                 "present without sortBy; RFC 7644 §3.4.2.3 defines it as the order in which sortBy is applied",
+            ));
+        }
+        if let Some(sort_by) = self.sort_by.as_deref() {
+            // The grammar's own notion of an attribute path: `<path> pr` must
+            // parse to a bare presence test.
+            let is_attr_path = format!("{sort_by} pr")
+                .parse::<Filter>()
+                .is_ok_and(|f| matches!(f, Filter::Attr(AttrExp::Present(_))));
+            if !is_attr_path {
+                return Err(ValidationError::invalid_value(
+                    "sortBy",
+                    format!(
+                        "{sort_by:?} is not in standard attribute notation (RFC 7644 §3.4.3, §3.10)"
+                    ),
+                ));
+            }
+        }
+        if !self.attributes.is_empty() && !self.excluded_attributes.is_empty() {
+            return Err(ValidationError::invalid_value(
+                "excludedAttributes",
+                "may not be combined with attributes; RFC 7644 §3.9 makes them mutually exclusive",
             ));
         }
         Ok(())

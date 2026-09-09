@@ -208,9 +208,10 @@ impl TryFrom<&str> for ResourceType {
 }
 
 impl Validate for ResourceType {
-    /// RFC 7643 §6 marks `name`, `endpoint` and `schema` REQUIRED, and says
-    /// `id` "is not required for the resource type"; `schemas` is REQUIRED by
-    /// §3 on every representation, and both §8.6 examples carry it.
+    /// RFC 7643 §6 marks `name`, `endpoint` and `schema` REQUIRED, along with
+    /// each schema extension's `schema`, and says `id` "is not required for
+    /// the resource type"; `schemas` is REQUIRED by §3 on every
+    /// representation, and both §8.6 examples carry it.
     /// Deserialization tolerates its absence so a non-conformant provider can
     /// still be read; this reports it.
     fn validate(&self) -> Result<(), ValidationError> {
@@ -223,6 +224,15 @@ impl Validate for ResourceType {
         }
         if self.schema.is_empty() {
             return Err(ValidationError::missing_required("schema"));
+        }
+        // §6 on each schema extension: `schema` "MUST be equal to the id
+        // attribute of a Schema resource. REQUIRED."
+        for (i, ext) in self.schema_extensions.iter().enumerate() {
+            if ext.schema.is_empty() {
+                return Err(ValidationError::missing_required(format!(
+                    "schemaExtensions[{i}].schema"
+                )));
+            }
         }
         Ok(())
     }

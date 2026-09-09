@@ -12,7 +12,7 @@ fn base_user() -> User<String> {
     }
 }
 
-/// R2-M4: every branch of `validate_context`, as unit tests rather than
+/// Every branch of `validate_context`, as unit tests rather than
 /// doctests, including the `password` branch that had no coverage at all.
 #[test]
 fn validate_context_enforces_direction_rules() {
@@ -71,7 +71,7 @@ fn valid_and_strict_wrappers() {
         "a response needs an id"
     );
 
-    // R3-L4: a proven value goes back on the wire as the plain value, and
+    // A proven value goes back on the wire as the plain value, and
     // `Strict` dereferences through `Valid` to it.
     let valid = Valid::new(base_user(), Context::CreateRequest).expect("conformant");
     assert_eq!(
@@ -97,7 +97,7 @@ fn valid_and_strict_wrappers() {
     assert!(err.to_string().contains("id"), "{err}");
 }
 
-/// R2-L4: RFC 7643 §2.4's at-most-one-primary rule on every attribute that
+/// RFC 7643 §2.4's at-most-one-primary rule on every attribute that
 /// carries `primary`, not only `emails`.
 #[test_case("emails" ; "emails")]
 #[test_case("phoneNumbers" ; "phone_numbers")]
@@ -1100,7 +1100,7 @@ mod rfc7644_samples {
     }
 }
 
-/// Devin round 2, BUG-2: RFC 7643 §3.1 says a representation "MUST include a
+/// RFC 7643 §3.1 says a representation "MUST include a
 /// non-empty id value". `Some("")` is not one, through `validate_as`, `Valid`
 /// and `Strict<_, Response>`; a non-string id is judged through `Display`.
 #[test]
@@ -1139,7 +1139,7 @@ fn response_rejects_an_empty_id() {
     assert_eq!(uuid.validate_as(Context::Response), Ok(()));
 }
 
-/// Devin round 2, BUG-3: RFC 7643 §3 — `schemas` names the namespaces of the
+/// RFC 7643 §3 — `schemas` names the namespaces of the
 /// attributes present, so an enterprise extension body needs its URN
 /// declared. The other direction stays lenient (§3.3: the URI indicates
 /// attributes that *may* exist).

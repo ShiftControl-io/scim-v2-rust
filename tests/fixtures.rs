@@ -81,7 +81,7 @@ fn is_included(sources: &str, dir: &str, name: &str) -> bool {
     sources.contains(&format!(r#"include_str!("../../test_data/{dir}/{name}")"#))
 }
 
-/// R3-L5: the two properties that make the inventory search trustworthy have
+/// The two properties that make the inventory search trustworthy have
 /// a negative control each, so reverting either fails here rather than
 /// silently returning the failure mode they prevent.
 #[test]

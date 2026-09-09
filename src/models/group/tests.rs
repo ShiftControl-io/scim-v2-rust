@@ -1,4 +1,4 @@
-/// R2-M4: `Group::validate` and every branch of its `validate_context`.
+/// `Group::validate` and every branch of its `validate_context`.
 #[test]
 fn validate_and_validate_context() {
     let base = Group::<String> {
@@ -53,7 +53,7 @@ fn validate_and_validate_context() {
     assert!(with_id.validate_as(Context::Response).is_ok());
 }
 
-/// R2-L3: the hand-written `PartialEq` is case-insensitive and `Hash`
+/// The hand-written `PartialEq` is case-insensitive and `Hash`
 /// agrees with it, exercised through a real container.
 #[test]
 fn member_type_equality_and_hash_are_case_insensitive() {
@@ -295,7 +295,7 @@ fn group_deserialization_handles_missing_optional_fields() {
     assert!(group.meta.is_none());
 }
 
-/// Devin round 2, BUG-2: RFC 7643 §3.1's "non-empty id" on a Group response.
+/// RFC 7643 §3.1's "non-empty id" on a Group response.
 #[test]
 fn response_rejects_an_empty_id() {
     let group = |id: Option<&str>| -> Group<String> {
@@ -323,5 +323,49 @@ fn response_rejects_an_empty_id() {
     assert_eq!(
         group(Some("e9e30dba")).validate_as(Context::Response),
         Ok(())
+    );
+}
+
+/// Equality and hashing distinguish different members while folding case;
+/// the label is what goes on the wire.
+#[test]
+fn member_type_distinguishes_different_values_and_hashes_them_apart() {
+    use std::hash::{DefaultHasher, Hash, Hasher};
+    fn h(m: &MemberType) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        m.hash(&mut hasher);
+        hasher.finish()
+    }
+    assert_ne!(MemberType::User, MemberType::Group);
+    assert_ne!(
+        MemberType::Other("a".to_string()),
+        MemberType::Other("b".to_string())
+    );
+    assert_ne!(
+        MemberType::Other("ServiceAccount".to_string()),
+        MemberType::User
+    );
+    assert_ne!(h(&MemberType::User), h(&MemberType::Group));
+    assert_ne!(
+        h(&MemberType::Other("a".to_string())),
+        h(&MemberType::Other("b".to_string()))
+    );
+    assert_eq!(
+        h(&MemberType::Other("user".to_string())),
+        h(&MemberType::User)
+    );
+    assert_eq!(MemberType::User.label(), "User");
+    assert_eq!(MemberType::Group.label(), "Group");
+    assert_eq!(
+        MemberType::Other("ServiceAccount".to_string()).label(),
+        "ServiceAccount"
+    );
+    assert_eq!(
+        serde_json::to_string(&MemberType::Group).unwrap(),
+        "\"Group\""
+    );
+    assert_eq!(
+        serde_json::to_string(&MemberType::Other("ServiceAccount".to_string())).unwrap(),
+        "\"ServiceAccount\""
     );
 }

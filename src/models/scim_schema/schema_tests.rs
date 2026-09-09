@@ -1,6 +1,6 @@
 use super::*;
 
-/// R2-L4: RFC 7643 §7 — `id` MUST be specified; `schemas`, when present,
+/// RFC 7643 §7 — `id` MUST be specified; `schemas`, when present,
 /// must name this resource type; absent `schemas` is tolerated for
 /// `Schema` alone, after the RFC's own §8.7 representations.
 #[test]

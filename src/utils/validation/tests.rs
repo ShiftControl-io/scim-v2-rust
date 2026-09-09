@@ -121,7 +121,7 @@ fn errors_compare_by_path_and_kind() {
     );
 }
 
-/// R3-I1: the labels consumers put in their log lines, one per variant.
+/// The labels consumers put in their log lines, one per variant.
 #[test]
 fn context_as_str_names_each_variant() {
     assert_eq!(Context::CreateRequest.as_str(), "create request");
@@ -129,7 +129,7 @@ fn context_as_str_names_each_variant() {
     assert_eq!(Context::Response.as_str(), "response");
 }
 
-/// Devin round 2, ANALYSIS-2: relocating an error under a container keeps
+/// Relocating an error under a container keeps
 /// its kind and detail; only the path gains the prefix.
 #[test]
 fn under_prefixes_the_path_and_keeps_kind_and_detail() {

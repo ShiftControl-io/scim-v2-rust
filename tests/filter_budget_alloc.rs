@@ -1,6 +1,6 @@
 //! Peak-allocation bound for hostile filters.
 //!
-//! Devin's review of #49 (SEC-1) observed that a term limit checked after
+//! A term limit checked after
 //! parsing bounds nothing about memory: the whole AST exists before the check
 //! runs. The limits are now charged while the parser runs, and this test is
 //! the direct falsifier — it measures peak live allocation across the parse

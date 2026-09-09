@@ -84,19 +84,68 @@ matches that exact prefix, so a fixture read from anywhere else will show up as
 unread. Cross-crate behaviour — the public API, property round-trips, the
 allocation bound — lives in `tests/`.
 
-## RFC claims must cite the RFC
+## RFC claims quote the RFC
 
-The RFC texts are checked in under `docs/rfcs/`. Any claim about what SCIM
-requires — in code, a comment, a test name, or a PR description — should cite
-the section, and the citation should be verifiable against those files rather
-than from memory. Several bugs in this crate's history came from a plausible
-recollection of the spec: `EnterpriseUser::validate` demanded six attributes
-the schema marks `required: false`, and `ServiceProviderConfig::validate`
-rejected `"bulk": {"supported": false}`, which §5 explicitly permits.
+The RFC texts are checked in under `docs/rfcs/`. Any check that rejects or
+normalises input traces to a MUST, MUST NOT, SHALL or REQUIRED in that text,
+and the doc comment on the check quotes the sentence with its section:
+`RFC 7643 §3.1: "MUST include a non-empty id value"`. `tests/rfc_citations.rs`
+extracts every such quotation from the source and fails if it is not verbatim
+in the RFC, so a paraphrase goes in plain words and quotation marks mean
+quotation. Section numbers are read from the file, never recalled: this crate
+briefly shipped a rule citing "§§6-7" that those sections do not contain.
+"SHALL be interpreted as" is normalisation, not a reason to reject (RFC 7644
+§3.4.2.4 Table 6 on `count` and `startIndex`).
 
-Note that RFC 7643's `canonicalValues` are *suggestions* (§7), and its
-per-attribute schema listings are not always complete — §4.1.2 omits the
-`primary` sub-attribute that §2.4 defines for every multi-valued attribute.
+Two things the RFC does that surprise people: `canonicalValues` are
+*suggestions* (RFC 7643 §7), and the per-attribute listings are not always
+complete — §4.1.2 omits the `primary` sub-attribute that §2.4 defines for
+every multi-valued attribute.
+
+## Changing the shape of a public type
+
+Before changing a public type's representation, write down what the old shape
+made unrepresentable. Each of those invariants is either still impossible in
+the new shape or has a test that rejects it, and the PR says which.
+`And(Box<_>, Box<_>)` becoming `And(Vec<_>)` silently allowed zero and one
+operand; `Operands<T>` is the shape this rule would have produced first.
+
+## Guards and limits
+
+A limit is verified by the hostile input it exists for, on every entry point
+(`Filter`, `PatchPath`, `Deserialize`, and the protocol message that carries
+it), on the failure path as well as the success path (the same input with a
+trailing syntax error), and by measurement where the claim is about a
+resource — `tests/filter_budget_alloc.rs` counts bytes rather than reasoning
+about them. A guard tested only on the path its author was looking at was
+found unreachable on the one next to it.
+
+## Error paths on in-place mutation
+
+A function that takes `&mut` and can fail states what the value holds on
+`Err`, and a test asserts it (`v == v_before`). Check first, mutate second:
+`canonicalize_keys` is the two-phase example.
+
+## Mutation-test your diff
+
+Before opening or updating a PR:
+
+```bash
+cargo mutants --in-diff <(git diff origin/main...HEAD -- src) \
+  -e filter_parser.rs -e tests.rs -e '*_tests.rs' -- --all-features
+```
+
+A surviving mutant in code you added is a missing test, not noise. Line
+coverage on this crate read 96% while seven mutants in new code survived.
+Mutation testing is a local step, not a CI job: it is slow and its output
+needs a reader.
+
+## Comments are for readers of the code, not of the PR
+
+No review-round tags, finding numbers or reviewer names in code comments;
+they mean nothing once the PR closes. Keep the reason and the RFC citation.
+A comment explaining why something is *not* checked is a gap, not a
+resolution: fix it, or list it in the PR under known gaps.
 
 ## Test fixtures
 

@@ -1,4 +1,4 @@
-/// R2-M6: `"schemaExtensions": null` is the third `Vec` field the
+/// `"schemaExtensions": null` is the third `Vec` field the
 /// null-collapse sweep covers; nothing had pinned it.
 #[test]
 fn schema_extensions_null_collapses_to_empty() {
@@ -44,8 +44,7 @@ fn validate_requires_name_endpoint_and_schema() {
 }
 
 /// §6 explicitly says `id` is not required for this resource, so it is not
-/// validated; `schemas` is REQUIRED by §3 and is. (Devin review on #49,
-/// BUG-2.)
+/// validated; `schemas` is REQUIRED by §3 and is.
 #[test]
 fn validate_ignores_id_but_requires_schemas() {
     let minimal = ResourceType {
@@ -220,4 +219,31 @@ fn test_get_resource_types() {
         "urn:ietf:params:scim:schemas:core:2.0:Group"
     );
     assert!(group_resource_type.schema_extensions.is_empty());
+}
+
+/// RFC 7643 §6: a schema extension's `schema` "MUST be equal to the id
+/// attribute of a Schema resource. REQUIRED."
+#[test]
+fn validate_requires_each_schema_extension_to_name_its_schema() {
+    let mut rt = ResourceType {
+        schemas: vec![crate::schema_urns::RESOURCE_TYPE.to_string()],
+        name: "User".to_string(),
+        endpoint: "/Users".to_string(),
+        schema: crate::schema_urns::USER.to_string(),
+        schema_extensions: vec![
+            SchemaExtension {
+                schema: crate::schema_urns::ENTERPRISE_USER.to_string(),
+                required: true,
+            },
+            SchemaExtension {
+                schema: String::new(),
+                required: false,
+            },
+        ],
+        ..Default::default()
+    };
+    let err = rt.validate().unwrap_err();
+    assert_eq!(err.path(), "schemaExtensions[1].schema");
+    rt.schema_extensions.pop();
+    assert_eq!(rt.validate(), Ok(()));
 }

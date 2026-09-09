@@ -24,7 +24,16 @@
       `filter_parser.rs`
 - [ ] If I added a test fixture, it has a row in `src/test_data/README.md` and
       a test that reads it
-- [ ] Any claim about SCIM cites an RFC section I checked against `docs/rfcs/`
+- [ ] Any claim about SCIM cites an RFC section I checked against `docs/rfcs/`,
+      and every new rejection or normalisation quotes the sentence it enforces
+      (`tests/rfc_citations.rs` passes)
+- [ ] If a public type's shape changed, the PR lists what the old shape made
+      unrepresentable and how the new one still forbids it
+- [ ] Any new limit or guard is tested with the hostile input it exists for,
+      on every entry point and on the failure path
+- [ ] `cargo mutants --in-diff` over my diff: no surviving mutants in added
+      code, or each one is explained in the PR
+- [ ] No review-round tags or reviewer names in code comments
 
 ## Test plan
 

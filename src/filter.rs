@@ -837,15 +837,29 @@ pub(crate) fn parse_attr_path(s: &str) -> Result<AttrPath, FilterActionError> {
 
     let (name, sub_attr) = rest
         .split_once('.')
-        .map_or((rest, None), |(name, sub_attr)| {
-            (name, Some(sub_attr.to_string()))
-        });
+        .map_or((rest, None), |(name, sub_attr)| (name, Some(sub_attr)));
+
+    // Both segments are ATTRNAME: "ATTRNAME = ALPHA *(nameChar)" with
+    // "nameChar = "-" / "_" / DIGIT / ALPHA". The lexer admits the token
+    // shape as a whole, so `name.` (empty sub-attribute) and `name.1x` reach
+    // here and must be refused.
+    if !is_attr_name(name) || sub_attr.is_some_and(|sub| !is_attr_name(sub)) {
+        return Err(FilterActionError::InvalidAttrPath(s.to_string()));
+    }
 
     Ok(AttrPath {
         uri,
         name: name.to_string(),
-        sub_attr,
+        sub_attr: sub_attr.map(str::to_string),
     })
+}
+
+/// RFC 7644 §3.4.2.2 `ATTRNAME`: an ASCII letter followed by letters, digits,
+/// `_` or `-`.
+fn is_attr_name(s: &str) -> bool {
+    let mut chars = s.chars();
+    chars.next().is_some_and(|c| c.is_ascii_alphabetic())
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
 /// A SCIM PATCH operation path (RFC 7644 §3.5.2).

@@ -258,7 +258,7 @@ fn any_key_casing_deserializes_identically() {
             prop_assert_eq!(back, u);
 
             // A list envelope — `Resources` is the capitalised member whose
-            // collision in the table shipped round 1 green (R2-C1).
+            // collision in the table shipped green.
             let total = users.len() as i64;
             let list = ListResponse::<User<String>> {
                 schemas: vec![schema_urns::LIST_RESPONSE.to_string()],

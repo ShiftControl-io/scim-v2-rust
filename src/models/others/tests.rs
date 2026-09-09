@@ -1,7 +1,7 @@
 use super::*;
 use test_case::test_case;
 
-/// R2-M3: the four bounds added to `validate` in round 1, each pinned
+/// The four `ListResponse::validate` bounds, each pinned
 /// with the wire path it reports.
 #[test_case(-5, 0, Some(1), Some(1), "totalResults", "must not be negative" ; "negative_total")]
 #[test_case(-5, 3, Some(1), Some(3), "totalResults", "must not be negative" ; "negative_total_with_a_page")]
@@ -31,14 +31,14 @@ fn validate_rejects_impossible_pagination(
         items_per_page: per_page,
         resources: (0..returned).map(|_| user()).collect(),
     };
-    // R3-L3: `path` alone could not tell the negative-total branch from the
+    // `path` alone could not tell the negative-total branch from the
     // more-returned-than-total one, so the detail text pins each to its own.
     let err = list.validate().expect_err(path);
     assert_eq!(err.path(), path);
     assert!(err.to_string().contains(detail), "{err}");
 }
 
-/// R2-M6: an explicit `"Resources": null` is a form providers send, and it
+/// An explicit `"Resources": null` is a form providers send, and it
 /// must land as an empty page *with the envelope intact*, not as an error
 /// or a silently defaulted struct.
 #[test]
@@ -1411,7 +1411,7 @@ mod resource_dispatch {
     }
 }
 
-/// R3-C1 through the protocol message a server actually deserializes: a deep
+/// The deep-nesting abort through the protocol message a server actually deserializes: a deep
 /// `not (` chain with a trailing token inside `SearchRequest.filter`, on a
 /// 2 MiB thread (tokio's default worker stack), must be an error and not an
 /// abort. Both the strict `Filter` field and the tolerant `MaybeFilter` one.
@@ -1439,7 +1439,7 @@ fn deep_not_chain_in_a_search_request_is_rejected_not_fatal() {
         .expect("must return, not abort");
 }
 
-/// Devin round 2, BUG-1: RFC 7644 §3.4.2.4 Table 6 says a negative `count`
+/// RFC 7644 §3.4.2.4 Table 6 says a negative `count`
 /// "SHALL be interpreted as 0" and a `startIndex` below 1 as 1, so neither is
 /// a validation error; the effective accessors apply the table.
 #[test]
@@ -1477,4 +1477,63 @@ fn search_request_out_of_range_pagination_is_interpreted_not_rejected() {
         (q.effective_count(), q.effective_start_index()),
         (Some(0), 1)
     );
+}
+
+/// RFC 7644 §3.9 makes `attributes` and `excludedAttributes` "mutually
+/// exclusive"; §3.4.3 says `sortBy` "MUST be in standard attribute notation".
+#[test]
+fn search_request_rejects_both_selections_and_a_malformed_sort_by() {
+    let both = SearchRequest::<Filter> {
+        attributes: vec!["userName".to_string()],
+        excluded_attributes: vec!["emails".to_string()],
+        ..Default::default()
+    };
+    assert_eq!(both.validate().unwrap_err().path(), "excludedAttributes");
+
+    for good in [
+        "userName",
+        "name.familyName",
+        "urn:ietf:params:scim:schemas:core:2.0:User:userName",
+        "emails.value",
+    ] {
+        let req = SearchRequest::<Filter> {
+            sort_by: Some(good.to_string()),
+            ..Default::default()
+        };
+        assert_eq!(req.validate(), Ok(()), "{good}");
+    }
+    for bad in [
+        "",
+        "user Name",
+        "name.",
+        "emails[type eq \"work\"]",
+        "userName eq \"x\"",
+        "1abc",
+    ] {
+        let req = SearchRequest::<Filter> {
+            sort_by: Some(bad.to_string()),
+            ..Default::default()
+        };
+        assert_eq!(req.validate().unwrap_err().path(), "sortBy", "{bad:?}");
+    }
+}
+
+/// The Table 6 accessors pass in-range values through unchanged.
+#[test]
+fn list_query_effective_accessors_pass_in_range_values_through() {
+    let q = ListQuery::<Filter> {
+        count: Some(25),
+        start_index: Some(4),
+        ..Default::default()
+    };
+    assert_eq!(
+        (q.effective_count(), q.effective_start_index()),
+        (Some(25), 4)
+    );
+    let q = ListQuery::<Filter> {
+        count: None,
+        start_index: None,
+        ..Default::default()
+    };
+    assert_eq!((q.effective_count(), q.effective_start_index()), (None, 1));
 }

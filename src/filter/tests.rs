@@ -727,7 +727,7 @@ fn chain_exceeding_term_limit_rejected(op: &str) {
     assert_too_many_terms(chain(op, n).parse::<Filter>(), n);
 }
 
-// R2-I1: the case that motivated the n-ary AST. A client resolving a
+// The case that motivated the n-ary AST. A client resolving a
 // batch of ids in one `or` chain is an ordinary request; 100 terms is
 // well past the old depth cap of 64 and must parse.
 #[test]
@@ -841,7 +841,7 @@ fn term_budget_spans_value_path_terms() {
         .expect("exactly MAX_FILTER_TERMS terms across a value path parses");
 }
 
-// Devin SEC-1: the limits are enforced while parsing, not on the finished
+// The limits are enforced while parsing, not on the finished
 // tree. Observable without an allocator hook: garbage *after* the point
 // where a limit is crossed is never reached, so the error is the limit
 // error rather than a syntax error. Post-parse enforcement would have to
@@ -873,9 +873,8 @@ fn depth_limit_fires_before_the_parser_reaches_the_rest_of_the_input() {
         .expect("MAX_FILTER_DEPTH nested nots parse");
 }
 
-// Redundant parentheses are nesting too: the red team's round-2 report
-// noted 5,000 of them parsed while a 65-term chain did not. Both limits
-// now mean what they say.
+// Redundant parentheses are nesting too: 5,000 of them used to parse while
+// a 65-term chain did not. Both limits now mean what they say.
 #[test]
 fn redundant_parentheses_count_as_nesting() {
     let ok = format!(
@@ -895,7 +894,7 @@ fn redundant_parentheses_count_as_nesting() {
     assert_depth_exceeded(deep.parse::<Filter>());
 }
 
-// Devin BUG-4: the type rules out the arities the grammar cannot write.
+// The type rules out the arities the grammar cannot write.
 #[test]
 fn operands_refuse_fewer_than_two() {
     let leaf = |n: &str| Filter::Attr(AttrExp::Present(AttrPath::with_name(n)));
@@ -937,8 +936,7 @@ fn value_path_chain_exceeding_term_limit_rejected() {
     assert_too_many_terms(format!("emails[{inner}].value").parse::<PatchPath>(), n);
 }
 
-// R3-M5: both operators, so the value-path half of the flattening — the
-// R2-I1 fix — is pinned and not only the `or` side.
+// Both operators, so the value-path half of the flattening is pinned and not only the `or` side.
 #[test_case("and" ; "and_chain")]
 #[test_case("or" ; "or_chain")]
 fn value_path_chain_at_term_limit_parses_flat(op: &str) {
@@ -994,7 +992,7 @@ fn flat_chain_at_term_limit_is_safe_on_a_small_stack() {
         .expect("flat chain at the term limit must not overflow a 256 KiB stack");
 }
 
-// Regression for R2-I1's hygiene half: a 100_000-term chain is rejected
+// A 100_000-term chain is rejected
 // with the term error rather than parsed, and neither the parse, the
 // count, nor the drop of the rejected AST recurses over the chain.
 #[test]
@@ -1070,7 +1068,7 @@ fn extremely_deep_input_rejected_without_panic() {
     assert_depth_exceeded(s.parse::<Filter>());
 }
 
-// R3-C1: before the parse-time depth budget, lalrpop reduced a deep `not (`
+// Before the parse-time depth budget, lalrpop reduced a deep `not (`
 // chain into a depth-N tree *before* rejecting a trailing token, and dropping
 // that tree through the derived recursive `Drop` overflowed the stack — an
 // abort, not a panic, so nothing upstream could catch it. The existing
@@ -1096,10 +1094,10 @@ fn deep_not_chain_with_a_trailing_token_is_rejected_on_a_small_stack() {
         .expect("a deep chain with a trailing token must not overflow a 256 KiB stack");
 }
 
-// The round-3 orchestrator's exact reproduction: 34_000 levels plus ` and`
-// aborted the process on a 2 MiB thread, tokio's default worker stack.
+// The reproduction that found it: 34_000 levels plus ` and` aborted the
+// process on a 2 MiB thread, tokio's default worker stack.
 #[test]
-fn red_team_r3_c1_reproduction_returns_an_error() {
+fn deep_not_chain_reproduction_on_a_tokio_sized_stack() {
     std::thread::Builder::new()
         .stack_size(2 * 1024 * 1024)
         .spawn(|| {
@@ -1114,7 +1112,7 @@ fn red_team_r3_c1_reproduction_returns_an_error() {
         .expect("must return Err, not abort");
 }
 
-// R3-H1's remaining half: `Operands` makes the degenerate nodes
+// `Operands` makes the degenerate nodes
 // unrepresentable; `all`/`any` give the fold-a-list case a constructor whose
 // empty result is a `None` the caller has to handle.
 #[test]
@@ -1140,7 +1138,7 @@ fn all_and_any_fold_a_list_without_an_empty_or_singleton_node() {
     );
 }
 
-// R3-M4: the `ValFilter` half of the precedence-preserving `Display`. An
+// The `ValFilter` half of the precedence-preserving `Display`. An
 // `or` under an `and` inside a value path keeps its parentheses, so the
 // string reparses to the same tree through both entry points.
 #[test_case("emails[(a pr or b pr) and c pr]", &["Or", "Attr"] ; "or_under_and_keeps_parens")]
@@ -1176,7 +1174,7 @@ fn value_path_mixed_operator_structure_preserved(src: &str, shape: &[&str]) {
     assert_eq!(serde_json::from_str::<PatchPath>(&json).unwrap(), p);
 }
 
-// R3-M5: `ValFilter::and` flattens on both sides exactly as the parser does.
+// `ValFilter::and` flattens on both sides exactly as the parser does.
 #[test]
 fn val_filter_and_flattens_like_the_parser() {
     let v = |n: &str| ValFilter::Attr(AttrExp::Present(AttrPath::with_name(n)));
@@ -1201,7 +1199,7 @@ fn val_filter_and_flattens_like_the_parser() {
     assert!(matches!(&*vp.filter, ValFilter::And(items) if items.len() == 4));
 }
 
-// R3-L1: one filter has one depth budget. A value path's inner filter
+// One filter has one depth budget. A value path's inner filter
 // continues the count, so cap-outer plus cap-inner is rejected — while
 // parsing by the syntactic count, and on a hand-built tree by the AST walk.
 #[test]
@@ -1231,7 +1229,7 @@ fn depth_budget_is_shared_across_a_value_path() {
     );
 }
 
-// R3-L2: the reported count is where the budget stopped, 1025, on every entry
+// The reported count is where the budget stopped, 1025, on every entry
 // point and however far past the limit the input runs.
 #[test]
 fn oversized_value_path_chains_report_the_same_count_on_every_entry_point() {
@@ -1247,7 +1245,7 @@ fn oversized_value_path_chains_report_the_same_count_on_every_entry_point() {
     assert_too_many_terms(inner.parse::<Filter>(), MAX_FILTER_TERMS + 1);
 }
 
-// R3-L6: a negated term costs one term like any other, so `not` cannot be
+// A negated term costs one term like any other, so `not` cannot be
 // used to slip past the term budget on either entry point.
 #[test]
 fn negated_terms_count_against_the_term_budget() {
@@ -1263,4 +1261,26 @@ fn negated_terms_count_against_the_term_budget() {
         .join(" or ");
     ok.parse::<Filter>()
         .expect("exactly MAX_FILTER_TERMS negated terms parse");
+}
+
+// RFC 7644 §3.4.2.2: "subAttr = "." ATTRNAME" and "ATTRNAME = ALPHA
+// *(nameChar)". The lexer admits the token shape, so the path parser must
+// refuse an empty or malformed segment rather than build an `AttrPath` with
+// `sub_attr: Some("")`.
+#[test_case("name. pr" ; "empty_sub_attribute")]
+#[test_case("name.1x pr" ; "sub_attribute_starting_with_a_digit")]
+#[test_case("name.-x pr" ; "sub_attribute_starting_with_a_dash")]
+#[test_case("urn:ietf:params:scim:schemas:core:2.0:User: pr" ; "urn_with_empty_name")]
+#[test_case("urn:ietf:params:scim:schemas:core:2.0:User:name. pr" ; "urn_with_empty_sub_attribute")]
+#[test_case("emails[value. pr]" ; "empty_sub_attribute_inside_a_value_path")]
+fn malformed_attribute_paths_are_rejected(src: &str) {
+    assert!(src.parse::<Filter>().is_err(), "{src:?} must not parse");
+}
+
+#[test_case("name.givenName pr" ; "sub_attribute")]
+#[test_case("name.given_name-2 pr" ; "name_chars")]
+#[test_case("urn:ietf:params:scim:schemas:core:2.0:User:name.familyName pr" ; "urn_prefixed")]
+fn well_formed_attribute_paths_parse(src: &str) {
+    src.parse::<Filter>()
+        .unwrap_or_else(|e| panic!("{src:?}: {e}"));
 }
