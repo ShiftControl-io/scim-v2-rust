@@ -2,6 +2,7 @@ use super::*;
 use crate::models::user::User;
 use crate::schema_urns;
 use crate::utils::validation::ValidationErrorKind;
+use test_case::test_case;
 
 /// The headline of the 1.0 `ListResponse` change: a homogeneous page
 /// deserializes into the concrete resource, so a caller that already knows
@@ -346,4 +347,38 @@ fn every_resource_arm_reports_its_urn_and_delegates_validation() {
     assert_eq!(rt.declared_schemas(), [schema_urns::RESOURCE_TYPE]);
     assert_eq!(rt.validate().unwrap_err().path(), "name");
     assert_eq!(rt.validate_context(Context::Response), Ok(()));
+}
+
+/// Any two resource-type URNs together are ambiguous, whichever pair, so the
+/// count that detects it has to be a sum over all four flags.
+#[test_case(schema_urns::USER, schema_urns::GROUP ; "user_group")]
+#[test_case(schema_urns::USER, schema_urns::SCHEMA ; "user_schema")]
+#[test_case(schema_urns::USER, schema_urns::RESOURCE_TYPE ; "user_resource_type")]
+#[test_case(schema_urns::GROUP, schema_urns::SCHEMA ; "group_schema")]
+#[test_case(schema_urns::GROUP, schema_urns::RESOURCE_TYPE ; "group_resource_type")]
+#[test_case(schema_urns::SCHEMA, schema_urns::RESOURCE_TYPE ; "schema_resource_type")]
+fn resource_rejects_every_ambiguous_urn_pair(a: &str, b: &str) {
+    let json = serde_json::json!({
+        "schemas": [a, b],
+        "id": "x",
+        "userName": "u",
+        "displayName": "d",
+        "name": "n",
+        "description": "desc",
+        "attributes": [],
+        "endpoint": "/x",
+        "schema": schema_urns::USER,
+        "meta": {}
+    });
+    let err = serde_json::from_value::<Resource<String>>(json).unwrap_err();
+    assert!(err.to_string().contains("ambiguous"), "{a} + {b}: {err}");
+}
+
+/// The structural fallback for a `ResourceType` needs both `endpoint` and
+/// `schema`; either alone is not a discriminator.
+#[test_case(serde_json::json!({"id": "User", "name": "User", "endpoint": "/Users"}) ; "endpoint_only")]
+#[test_case(serde_json::json!({"id": "User", "name": "User", "schema": "urn:x"}) ; "schema_only")]
+fn resource_without_schemas_needs_both_resource_type_markers(json: serde_json::Value) {
+    let err = serde_json::from_value::<Resource<String>>(json).unwrap_err();
+    assert!(err.to_string().contains("cannot determine"), "{err}");
 }
