@@ -31,6 +31,10 @@ below; 1.0 was the one moment they were free.
 - **`User<T>` and `Group<T>` need `T: Display` to validate**, so a response's
   `id` can be checked for RFC 7643 §3.1's "non-empty". `String`,
   `uuid::Uuid` and the integers qualify.
+- **`OperationTarget::WithPath.value` is `Option<Value>`**, so a PATCH
+  operation that omitted `value` is distinguishable from one that sent an
+  explicit `null` instead of both collapsing to null. RFC 7644 §3.5.2.1 makes
+  the member REQUIRED on an `add`, which `PatchOp::validate` now reports.
 - **`Compact<T>` requires the sealed `Compactable`**: resources and lists,
   never `PatchOp` or `SearchRequest`, whose `[]` means clear-all.
 - **The `serialize()` / `deserialize()` wrappers are gone.** Use `serde_json`.
@@ -61,7 +65,10 @@ below; 1.0 was the one moment they were free.
   measures the peak.
 - `sortBy` and `sortOrder` on `SearchRequest` and `ListQuery` (RFC 7644
   §3.4.2.3), plus `effective_count()` / `effective_start_index()` applying
-  §3.4.2.4 Table 6.
+  §3.4.2.4 Table 6. `ListQuery` validates the same sort and §3.9 selection
+  rules as `SearchRequest`, so a `GET` and a `POST /.search` agree on what a
+  client may ask for, and its `Default` omits both attribute selectors rather
+  than sending each as an empty string.
 - `ScimType`, the RFC 7644 §3.12 keywords; `ScimHttpError.scim_type` is an
   `Option<ScimType>`.
 - `Validate` for `SearchRequest`, `PatchOp`, `ScimHttpError`, `Schema`,
@@ -94,6 +101,8 @@ Conformance, each checked against the RFC text in `docs/rfcs/`:
   REQUIRED (RFC 7643 §6).
 - A negative `count` or a `startIndex` below 1 is interpreted, not rejected
   (RFC 7644 §3.4.2.4 Table 6).
+- An `add` operation with a path and no `value` passed validation; §3.5.2.1
+  makes the member REQUIRED.
 - `ListResponse::validate` checks `totalResults` against the page, both
   pagination markers on a short page, each resource's declared schema
   against the type it was parsed as, and each resource's own rules.

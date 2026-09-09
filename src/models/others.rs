@@ -228,8 +228,12 @@ pub struct ListQuery<F = Filter> {
     /// 0" — see [`effective_count`](Self::effective_count).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub count: Option<i64>,
+    /// RFC 7644 §3.9: a comma-separated list of attribute names to return,
+    /// "mutually exclusive" with `excludedAttributes`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attributes: Option<String>,
+    /// RFC 7644 §3.9: a comma-separated list of attribute names to omit,
+    /// mutually exclusive with `attributes`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub excluded_attributes: Option<String>,
 }
@@ -258,8 +262,12 @@ impl<F> Default for ListQuery<F> {
             sort_order: None,
             start_index: Some(1),
             count: Some(100),
-            attributes: Some("".to_string()),
-            excluded_attributes: Some("".to_string()),
+            // Omitted, not empty: RFC 7644 §3.9 makes the two mutually
+            // exclusive, so a default carrying both — as empty strings that
+            // select nothing — is a query the crate's own `validate` would
+            // have to reject.
+            attributes: None,
+            excluded_attributes: None,
         }
     }
 }
@@ -802,7 +810,14 @@ pub struct PatchOp {
 pub enum OperationTarget {
     WithPath {
         path: PatchPath,
-        value: Value,
+        /// `None` when the operation carried no `value` member at all, which
+        /// an `add` may not do — RFC 7644 §3.5.2.1: "The operation MUST
+        /// contain a "value" member whose content specifies the value to be
+        /// added". Kept distinct from `Some(Value::Null)` so the omission is
+        /// reportable by [`PatchOp::validate`] rather than collapsed into an
+        /// explicit null on the way in and emitted as one on the way out.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        value: Option<Value>,
     },
     WithoutPath {
         value: serde_json::Map<String, Value>,
@@ -824,7 +839,7 @@ impl<'de> Deserialize<'de> for OperationTarget {
             let path: PatchPath = path_str
                 .parse()
                 .map_err(|e| serde::de::Error::custom(format!("invalid SCIM path: {e}")))?;
-            let value = map.remove("value").unwrap_or(Value::Null);
+            let value = map.remove("value");
             Ok(OperationTarget::WithPath { path, value })
         } else {
             let value = match map.remove("value") {
@@ -857,6 +872,73 @@ pub enum PatchOperation {
     Replace(OperationTarget),
 }
 
+/// The RFC 7644 §3.4.2.3 sort rules, shared by the two query carriers:
+/// `sortOrder` is "the order in which the "sortBy" parameter is applied", so
+/// on its own it orders nothing, and §3.4.3 requires `sortBy` to "be in
+/// standard attribute notation (Section 3.10) form".
+#[cfg(feature = "filter")]
+fn validate_sort(sort_by: Option<&str>, sort_order_present: bool) -> Result<(), ValidationError> {
+    if sort_order_present && sort_by.is_none() {
+        return Err(ValidationError::invalid_value(
+            "sortOrder",
+            "present without sortBy; RFC 7644 §3.4.2.3 defines it as the order in which sortBy is applied",
+        ));
+    }
+    if let Some(sort_by) = sort_by {
+        // The grammar's own notion of an attribute path: `<path> pr` must
+        // parse to a bare presence test.
+        let is_attr_path = format!("{sort_by} pr")
+            .parse::<Filter>()
+            .is_ok_and(|f| matches!(f, Filter::Attr(AttrExp::Present(_))));
+        if !is_attr_path {
+            return Err(ValidationError::invalid_value(
+                "sortBy",
+                format!(
+                    "{sort_by:?} is not in standard attribute notation (RFC 7644 §3.4.3, §3.10)"
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// RFC 7644 §3.9 offers "either of the mutually exclusive URL query
+/// parameters "attributes" or "excludedAttributes"", so a request carrying
+/// both asserts two incompatible projections.
+#[cfg(feature = "filter")]
+fn validate_attribute_selection(
+    attributes_present: bool,
+    excluded_present: bool,
+) -> Result<(), ValidationError> {
+    if attributes_present && excluded_present {
+        return Err(ValidationError::invalid_value(
+            "excludedAttributes",
+            "may not be combined with attributes; RFC 7644 §3.9 makes them mutually exclusive",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(feature = "filter")]
+impl<F> Validate for ListQuery<F> {
+    /// The `GET` half of the rules [`SearchRequest`] enforces for `POST
+    /// /.search`: RFC 7644 §3.4.2.3's sort pair and §3.9's mutually exclusive
+    /// attribute selection. There is no `schemas` to check, since these are
+    /// query parameters rather than a body. An out-of-range `count` or
+    /// `startIndex` is interpreted rather than rejected (§3.4.2.4 Table 6) —
+    /// see [`effective_count`](Self::effective_count) and
+    /// [`effective_start_index`](Self::effective_start_index).
+    fn validate(&self) -> Result<(), ValidationError> {
+        validate_sort(self.sort_by.as_deref(), self.sort_order.is_some())?;
+        validate_attribute_selection(
+            self.attributes.as_deref().is_some_and(|a| !a.is_empty()),
+            self.excluded_attributes
+                .as_deref()
+                .is_some_and(|a| !a.is_empty()),
+        )
+    }
+}
+
 #[cfg(feature = "filter")]
 impl<F> Validate for SearchRequest<F> {
     /// RFC 7644 §3.4.3: the body carries the SearchRequest URN, and "the
@@ -872,43 +954,30 @@ impl<F> Validate for SearchRequest<F> {
     /// [`effective_start_index`](Self::effective_start_index) do.
     fn validate(&self) -> Result<(), ValidationError> {
         require_schema_urn(&self.schemas, schema_urns::SEARCH_REQUEST)?;
-        if self.sort_order.is_some() && self.sort_by.is_none() {
-            return Err(ValidationError::invalid_value(
-                "sortOrder",
-                "present without sortBy; RFC 7644 §3.4.2.3 defines it as the order in which sortBy is applied",
-            ));
-        }
-        if let Some(sort_by) = self.sort_by.as_deref() {
-            // The grammar's own notion of an attribute path: `<path> pr` must
-            // parse to a bare presence test.
-            let is_attr_path = format!("{sort_by} pr")
-                .parse::<Filter>()
-                .is_ok_and(|f| matches!(f, Filter::Attr(AttrExp::Present(_))));
-            if !is_attr_path {
-                return Err(ValidationError::invalid_value(
-                    "sortBy",
-                    format!(
-                        "{sort_by:?} is not in standard attribute notation (RFC 7644 §3.4.3, §3.10)"
-                    ),
-                ));
-            }
-        }
-        if !self.attributes.is_empty() && !self.excluded_attributes.is_empty() {
-            return Err(ValidationError::invalid_value(
-                "excludedAttributes",
-                "may not be combined with attributes; RFC 7644 §3.9 makes them mutually exclusive",
-            ));
-        }
-        Ok(())
+        validate_sort(self.sort_by.as_deref(), self.sort_order.is_some())?;
+        validate_attribute_selection(
+            !self.attributes.is_empty(),
+            !self.excluded_attributes.is_empty(),
+        )
     }
 }
 
 #[cfg(feature = "filter")]
 impl Validate for PatchOp {
     /// RFC 7644 §3.5.2: the body carries the PatchOp URN and "an array of one
-    /// or more PATCH operations". Each operation's own shape — `remove` needs
-    /// a path, pathless `add`/`replace` need an object — is enforced by the
-    /// [`PatchOperation`] type, so this only has to check the envelope.
+    /// or more PATCH operations". Most of each operation's shape — `remove`
+    /// needs a path, a pathless `add`/`replace` needs an object — is enforced
+    /// by the [`PatchOperation`] type. What the type cannot enforce is
+    /// §3.5.2.1's "The operation MUST contain a "value" member whose content
+    /// specifies the value to be added", since a path-carrying operation may
+    /// legitimately omit `value` when it is a `remove`.
+    ///
+    /// A `replace` with a path and no `value` is *not* rejected: §3.5.2.3
+    /// states its requirement only for the pathless form ("the "value"
+    /// attribute SHALL contain a list of one or more attributes that are to
+    /// be replaced"), which the type already enforces, and no MUST covers the
+    /// path form. An explicit `"value": null` counts as present, which is why
+    /// the field distinguishes the two.
     fn validate(&self) -> Result<(), ValidationError> {
         require_schema_urn(&self.schemas, schema_urns::PATCH_OP)?;
         if self.operations.is_empty() {
@@ -916,6 +985,13 @@ impl Validate for PatchOp {
                 "Operations",
                 "must contain at least one operation (RFC 7644 §3.5.2)",
             ));
+        }
+        for (i, operation) in self.operations.iter().enumerate() {
+            if let PatchOperation::Add(OperationTarget::WithPath { value: None, .. }) = operation {
+                return Err(ValidationError::missing_required(format!(
+                    "Operations[{i}].value"
+                )));
+            }
         }
         Ok(())
     }

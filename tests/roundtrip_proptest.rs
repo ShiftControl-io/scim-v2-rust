@@ -276,7 +276,7 @@ fn any_key_casing_deserializes_identically() {
                 schemas: vec![schema_urns::PATCH_OP.to_string()],
                 operations: vec![PatchOperation::Replace(OperationTarget::WithPath {
                     path: "nickName".parse().unwrap(),
-                    value: serde_json::json!("x"),
+                    value: Some(serde_json::json!("x")),
                 })],
             };
             let canonical = serde_json::to_value(&patch).unwrap();

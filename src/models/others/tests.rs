@@ -1,4 +1,5 @@
 use super::*;
+use crate::utils::validation::ValidationErrorKind;
 use test_case::test_case;
 
 /// The four `ListResponse::validate` bounds, each pinned
@@ -805,7 +806,10 @@ fn rfc7644_s3_5_2_3_patch_replace_street_address_via_filter() {
             && n == "type"
             && v == "work" =>
         {
-            assert_eq!(value.as_str(), Some("1010 Broadway Ave"));
+            assert_eq!(
+                value.as_ref().and_then(Value::as_str),
+                Some("1010 Broadway Ave")
+            );
         }
         _ => panic!("Expected Replace WithPath for addresses[type eq \"work\"].streetAddress"),
     }
@@ -1558,4 +1562,187 @@ fn search_request_accepts_either_selection_alone() {
         ..Default::default()
     };
     assert_eq!(only_excluded.validate(), Ok(()));
+}
+
+/// RFC 7644 §3.5.2.1: "The operation MUST contain a "value" member whose
+/// content specifies the value to be added". An omitted member and an
+/// explicit `null` are different things, and only the omission is the error.
+#[test]
+fn patch_op_validate_requires_a_value_on_add() {
+    let op = |json: &str| -> PatchOp {
+        serde_json::from_str(&format!(
+            r#"{{"schemas":["{}"],"Operations":[{json}]}}"#,
+            schema_urns::PATCH_OP
+        ))
+        .unwrap_or_else(|e| panic!("{json}: {e}"))
+    };
+
+    let err = op(r#"{"op":"add","path":"nickName"}"#)
+        .validate()
+        .expect_err("an add with no value member");
+    assert_eq!(err.path(), "Operations[0].value");
+    assert_eq!(err.kind(), &ValidationErrorKind::MissingRequiredAttribute);
+
+    // The index is the operation's own, so a server can point at it.
+    let err = op(r#"{"op":"remove","path":"nickName"},{"op":"add","path":"nickName"}"#)
+        .validate()
+        .unwrap_err();
+    assert_eq!(err.path(), "Operations[1].value");
+
+    // Present, including an explicit null, satisfies the MUST.
+    assert_eq!(
+        op(r#"{"op":"add","path":"nickName","value":"bj"}"#).validate(),
+        Ok(())
+    );
+    assert_eq!(
+        op(r#"{"op":"add","path":"nickName","value":null}"#).validate(),
+        Ok(())
+    );
+    // A `remove` needs no value, and §3.5.2.3 states its requirement only for
+    // the pathless form, which the type already enforces.
+    assert_eq!(
+        op(r#"{"op":"remove","path":"nickName"}"#).validate(),
+        Ok(())
+    );
+    assert_eq!(
+        op(r#"{"op":"replace","path":"nickName"}"#).validate(),
+        Ok(())
+    );
+    // A pathless add without a value never becomes a `PatchOp` at all.
+    assert!(
+        serde_json::from_str::<PatchOp>(&format!(
+            r#"{{"schemas":["{}"],"Operations":[{{"op":"add"}}]}}"#,
+            schema_urns::PATCH_OP
+        ))
+        .is_err()
+    );
+}
+
+/// An omitted `value` stays omitted on the way out, and an explicit `null`
+/// stays null, so a PATCH body round-trips rather than gaining a member.
+#[test]
+fn patch_operation_value_presence_round_trips() {
+    for (raw, expected) in [
+        (r#"{"op":"replace","path":"nickName"}"#, None),
+        (
+            r#"{"op":"replace","path":"nickName","value":null}"#,
+            Some(Value::Null),
+        ),
+        (
+            r#"{"op":"replace","path":"nickName","value":"x"}"#,
+            Some(Value::String("x".into())),
+        ),
+    ] {
+        let body = format!(
+            r#"{{"schemas":["{}"],"Operations":[{raw}]}}"#,
+            schema_urns::PATCH_OP
+        );
+        let patch: PatchOp = serde_json::from_str(&body).unwrap();
+        let PatchOperation::Replace(OperationTarget::WithPath { value, .. }) = &patch.operations[0]
+        else {
+            panic!("{raw}");
+        };
+        assert_eq!(value, &expected, "{raw}");
+        let back: PatchOp = serde_json::from_str(&serde_json::to_string(&patch).unwrap()).unwrap();
+        assert_eq!(back, patch, "{raw}");
+        let json = serde_json::to_value(&patch).unwrap();
+        assert_eq!(
+            json["Operations"][0].get("value").is_some(),
+            expected.is_some(),
+            "{raw}"
+        );
+    }
+}
+
+/// The `GET` query carrier enforces the same RFC 7644 §3.4.2.3 sort rules and
+/// §3.9 selection rule as the `POST /.search` body, so the two endpoints do
+/// not disagree about what a client may ask for.
+#[test]
+fn list_query_validate_mirrors_the_search_request_rules() {
+    let base = ListQuery::<Filter>::default;
+
+    assert_eq!(base().validate(), Ok(()), "the default query is conformant");
+
+    let sort_order_alone = ListQuery::<Filter> {
+        sort_order: Some(SortOrder::Descending),
+        ..base()
+    };
+    assert_eq!(sort_order_alone.validate().unwrap_err().path(), "sortOrder");
+
+    for good in [
+        "userName",
+        "name.familyName",
+        "urn:ietf:params:scim:schemas:core:2.0:User:userName",
+    ] {
+        let q = ListQuery::<Filter> {
+            sort_by: Some(good.to_string()),
+            sort_order: Some(SortOrder::Ascending),
+            ..base()
+        };
+        assert_eq!(q.validate(), Ok(()), "{good}");
+    }
+    for bad in ["", "user Name", "name.", "userName eq \"x\"", "1abc"] {
+        let q = ListQuery::<Filter> {
+            sort_by: Some(bad.to_string()),
+            ..base()
+        };
+        assert_eq!(
+            q.validate().map_err(|e| e.path().to_string()),
+            Err("sortBy".to_string()),
+            "{bad:?}"
+        );
+    }
+
+    let both = ListQuery::<Filter> {
+        attributes: Some("userName".to_string()),
+        excluded_attributes: Some("emails".to_string()),
+        ..base()
+    };
+    assert_eq!(both.validate().unwrap_err().path(), "excludedAttributes");
+    for (attributes, excluded) in [
+        (Some("userName".to_string()), None),
+        (None, Some("emails".to_string())),
+        (Some(String::new()), Some("emails".to_string())),
+    ] {
+        let q = ListQuery::<Filter> {
+            attributes,
+            excluded_attributes: excluded,
+            ..base()
+        };
+        assert_eq!(q.validate(), Ok(()));
+    }
+
+    // Out-of-range pagination is interpreted, not rejected (§3.4.2.4 Table 6).
+    let q = ListQuery::<Filter> {
+        count: Some(-1),
+        start_index: Some(0),
+        ..base()
+    };
+    assert_eq!(q.validate(), Ok(()));
+
+    // And the same rules reach a tolerant query, before and after conversion.
+    let tolerant: TolerantListQuery =
+        serde_json::from_str(r#"{"sortOrder":"descending","filter":"userName eq \"x\""}"#).unwrap();
+    assert_eq!(tolerant.validate().unwrap_err().path(), "sortOrder");
+    let strict: StrictListQuery = TolerantListQuery {
+        sort_by: Some("name.".to_string()),
+        ..serde_json::from_str(r#"{"filter":"userName eq \"x\""}"#).unwrap()
+    }
+    .try_into()
+    .expect("the filter parses");
+    assert_eq!(strict.validate().unwrap_err().path(), "sortBy");
+}
+
+/// RFC 7644 §3.9 makes `attributes` and `excludedAttributes` mutually
+/// exclusive, so the default query carries neither rather than both as empty
+/// selectors that would serialize into the query string.
+#[test]
+fn list_query_default_omits_both_attribute_selectors() {
+    let json = serde_json::to_value(ListQuery::<Filter>::default()).unwrap();
+    assert!(json.get("attributes").is_none(), "{json}");
+    assert!(json.get("excludedAttributes").is_none(), "{json}");
+    assert_eq!(json["startIndex"], 1);
+    assert_eq!(json["count"], 100);
+    let back: ListQuery<Filter> = serde_json::from_value(json).unwrap();
+    assert_eq!(back, ListQuery::default());
 }

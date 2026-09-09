@@ -370,6 +370,7 @@ match &query.filter {
 ### Handling a SCIM PATCH
 
 ```rust
+use scim_v2::Validate;
 use scim_v2::models::others::{PatchOp, PatchOperation, OperationTarget};
 
 let body = r#"{
@@ -380,17 +381,22 @@ let body = r#"{
 }"#;
 
 let patch: PatchOp = serde_json::from_str(body).expect("valid PatchOp");
+patch.validate()?; // an `add` with no `value` is rejected here (RFC 7644 §3.5.2.1)
+
 for op in &patch.operations {
     match op {
+        // `value` is `Option<Value>`: `None` is a member the body omitted,
+        // `Some(Value::Null)` an explicit JSON null.
         PatchOperation::Add(OperationTarget::WithPath { path, value }) =>
-            println!("add @ {path}: {value}"),
+            println!("add @ {path}: {value:?}"),
         PatchOperation::Replace(OperationTarget::WithPath { path, value }) =>
-            println!("replace @ {path}: {value}"),
+            println!("replace @ {path}: {value:?}"),
         PatchOperation::Remove { path, .. } =>
             println!("remove @ {path}"),
         _ => {}
     }
 }
+# Ok::<(), scim_v2::ValidationError>(())
 ```
 
 ## Using custom ID types
