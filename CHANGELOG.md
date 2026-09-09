@@ -107,7 +107,9 @@ Conformance, each checked against the RFC text in `docs/rfcs/`:
   a `replace` twice over.
 - `ListResponse::validate` checks `totalResults` against the page, both
   pagination markers on a short page, each resource's declared schema
-  against the type it was parsed as, and each resource's own rules.
+  against the type it was parsed as, and each resource's own rules. A
+  `Resources` member absent while `totalResults` is non-zero is refused
+  during deserialization, where the RFC's REQUIRED can still be seen.
 
 Robustness:
 

@@ -128,6 +128,11 @@ jobs:
         run: |
           set -euo pipefail
           title="Weekly drift check failed"
+          # The label exists in this repository, but the notification must not
+          # depend on repository state a fork or a deletion could change: this
+          # is the one step whose whole job is to report that something broke.
+          gh label create drift --repo "$REPO" --color D4C5F9 \
+            --description "Weekly dependency/toolchain drift check" 2>/dev/null || true
           existing="$(gh issue list --repo "$REPO" --state open --label drift \
                         --search "$title in:title" --json number --jq '.[0].number // empty')"
           body=$(printf '%s\n\n%s\n' \

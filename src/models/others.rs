@@ -585,11 +585,8 @@ impl<T: std::fmt::Display> ScimResource for Resource<T> {
 ///
 /// `R` is bounded by the sealed [`ScimResource`] trait, so a type that is not
 /// a SCIM resource is rejected at compile time.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[serde(
-    rename_all = "camelCase",
-    bound(deserialize = "R: ScimResource + DeserializeOwned")
-)]
+#[derive(Serialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct ListResponse<R: ScimResource = Resource<String>> {
     /// RFC 7644 §3.4.2: REQUIRED when partial results are returned due to
     /// pagination; omitted otherwise. Not enforced by the type — see
@@ -603,14 +600,76 @@ pub struct ListResponse<R: ScimResource = Resource<String>> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub start_index: Option<i64>,
     pub schemas: Vec<String>,
-    // RFC 7644 section 3.4.2: `Resources` is REQUIRED only if `totalResults` is
-    // non-zero, so a query returning no matches may omit it on the wire.
+    /// RFC 7644 §3.4.2: "REQUIRED if "totalResults" is non-zero", so a query
+    /// returning no matches may omit it. Absence *with* a non-zero
+    /// `totalResults` is refused during deserialization rather than by
+    /// [`validate`](Validate::validate), because presence is a fact about the
+    /// JSON and not about the value: an omitted member, `null` and `[]` all
+    /// have to land on the same empty `Vec` for the type to stay usable, and
+    /// carrying a hidden presence flag would make this struct
+    /// unconstructible by a literal. `OperationTarget` refuses a pathless
+    /// operation with no `value` at the same boundary and for the same
+    /// reason.
+    #[serde(rename = "Resources")]
+    pub resources: Vec<R>,
+}
+
+/// The wire shape of [`ListResponse`], with `Resources` presence preserved
+/// so the RFC 7644 §3.4.2 REQUIRED can be checked before it is erased.
+#[derive(Deserialize)]
+#[serde(
+    rename_all = "camelCase",
+    bound(deserialize = "R: ScimResource + DeserializeOwned")
+)]
+struct ListResponseWire<R: ScimResource> {
+    items_per_page: Option<i64>,
+    total_results: i64,
+    start_index: Option<i64>,
+    schemas: Vec<String>,
     #[serde(
         rename = "Resources",
-        default = "Vec::new",
-        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec"
+        default,
+        deserialize_with = "deserialize_present_resources"
     )]
-    pub resources: Vec<R>,
+    resources: Option<Vec<R>>,
+}
+
+/// `Resources` as it appeared: `None` only when the member was absent, since
+/// `null` is a form providers send for an empty page (RFC 7643 §2.5 makes it
+/// equivalent to `[]`).
+fn deserialize_present_resources<'de, D, R>(deserializer: D) -> Result<Option<Vec<R>>, D::Error>
+where
+    D: Deserializer<'de>,
+    R: DeserializeOwned,
+{
+    Ok(Some(
+        Option::<Vec<R>>::deserialize(deserializer)?.unwrap_or_default(),
+    ))
+}
+
+impl<'de, R> Deserialize<'de> for ListResponse<R>
+where
+    R: ScimResource + DeserializeOwned,
+{
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let wire = ListResponseWire::<R>::deserialize(deserializer)?;
+        // §3.4.2: `Resources` is "REQUIRED if "totalResults" is non-zero".
+        // A page claiming matches and carrying none is not a page a caller can
+        // act on, and after this point the absence is indistinguishable from
+        // a conformant empty `[]`.
+        let resources = match wire.resources {
+            Some(resources) => resources,
+            None if wire.total_results == 0 => Vec::new(),
+            None => return Err(serde::de::Error::missing_field("Resources")),
+        };
+        Ok(ListResponse {
+            items_per_page: wire.items_per_page,
+            total_results: wire.total_results,
+            start_index: wire.start_index,
+            schemas: wire.schemas,
+            resources,
+        })
+    }
 }
 
 impl<R: ScimResource> Validate for ListResponse<R> {

@@ -382,3 +382,52 @@ fn resource_without_schemas_needs_both_resource_type_markers(json: serde_json::V
     let err = serde_json::from_value::<Resource<String>>(json).unwrap_err();
     assert!(err.to_string().contains("cannot determine"), "{err}");
 }
+
+/// RFC 7644 §3.4.2: `Resources` is "REQUIRED if "totalResults" is
+/// non-zero". Absence is refused at the boundary, since after
+/// deserialization it is indistinguishable from a conformant empty page.
+#[test]
+fn resources_absence_is_refused_only_when_total_results_is_non_zero() {
+    let page = |body: &str| serde_json::from_str::<ListResponse<User<String>>>(body);
+    let urn = schema_urns::LIST_RESPONSE;
+
+    // Absent with matches claimed: refused, naming the member.
+    let err = page(&format!(
+        r#"{{"schemas":["{urn}"],"totalResults":5,"startIndex":1,"itemsPerPage":0}}"#
+    ))
+    .expect_err("Resources is REQUIRED when totalResults is non-zero");
+    assert!(err.to_string().contains("Resources"), "{err}");
+
+    // Absent with no matches: legal, and the empty page validates.
+    let empty = page(&format!(r#"{{"schemas":["{urn}"],"totalResults":0}}"#))
+        .expect("an empty page may omit Resources");
+    assert!(empty.resources.is_empty());
+    assert_eq!(empty.validate(), Ok(()));
+
+    // Present is always fine, `null` included, whatever the total: a page
+    // past the end of the results legitimately carries none.
+    for (total, raw) in [(0, "[]"), (0, "null"), (100, "[]"), (100, "null")] {
+        let list = page(&format!(
+            r#"{{"schemas":["{urn}"],"totalResults":{total},"startIndex":500,"itemsPerPage":0,"Resources":{raw}}}"#
+        ))
+        .unwrap_or_else(|e| panic!("totalResults {total} with Resources {raw}: {e}"));
+        assert!(list.resources.is_empty());
+        assert_eq!(
+            list.validate(),
+            Ok(()),
+            "totalResults {total}, Resources {raw}"
+        );
+    }
+
+    // A non-empty page still reads, and round-trips through the new impl.
+    let body = format!(
+        r#"{{"schemas":["{urn}"],"totalResults":1,"startIndex":1,"itemsPerPage":1,"Resources":[{{"schemas":["{}"],"id":"1","userName":"bjensen"}}]}}"#,
+        schema_urns::USER
+    );
+    let list = page(&body).expect("a real page");
+    assert_eq!(list.resources.len(), 1);
+    assert_eq!(list.resources[0].user_name, "bjensen");
+    let back: ListResponse<User<String>> =
+        serde_json::from_str(&serde_json::to_string(&list).unwrap()).unwrap();
+    assert_eq!(back, list);
+}
