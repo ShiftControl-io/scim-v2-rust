@@ -112,7 +112,9 @@ pub struct Member<T = String> {
     pub display: Option<String>,
 }
 
-impl<T> Validate for Group<T> {
+/// `T: Display` for the same reason as [`User`](crate::models::user::User):
+/// a response's `id` is checked for RFC 7643 §3.1's "non-empty".
+impl<T: std::fmt::Display> Validate for Group<T> {
     /// RFC 7643 §4.2 marks `displayName` REQUIRED; §3 marks `schemas` REQUIRED
     /// on every resource.
     fn validate(&self) -> Result<(), ValidationError> {
@@ -130,7 +132,9 @@ impl<T> Validate for Group<T> {
                 "id",
                 "MUST NOT be specified by the client on create (RFC 7643 §3.1)",
             )),
-            Context::Response if self.id.is_none() => Err(ValidationError::missing_required("id")),
+            Context::Response if self.id.as_ref().is_none_or(|id| id.to_string().is_empty()) => {
+                Err(ValidationError::missing_required("id"))
+            }
             _ => Ok(()),
         }
     }

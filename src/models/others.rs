@@ -9,7 +9,7 @@ use crate::models::resource_types::ResourceType;
 use crate::models::scim_schema::Schema;
 use crate::models::user::User;
 use crate::schema_urns;
-use crate::utils::validation::{Validate, ValidationError, require_schema_urn};
+use crate::utils::validation::{Context, Validate, ValidationError, require_schema_urn};
 
 #[cfg(feature = "filter")]
 /// Server-side variant of [`ListQuery`] that tolerates malformed filter
@@ -163,10 +163,32 @@ pub struct SearchRequest<F = Filter> {
     /// server SHALL treat it as [`SortOrder::Ascending`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sort_order: Option<SortOrder>,
+    /// RFC 7644 §3.4.2.4 Table 6: 1-based; "a value less than 1 SHALL be
+    /// interpreted as 1", so an out-of-range value is not an error — see
+    /// [`effective_start_index`](Self::effective_start_index).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub start_index: Option<i64>,
+    /// RFC 7644 §3.4.2.4 Table 6: "a negative value SHALL be interpreted as
+    /// 0", so it is not an error — see [`effective_count`](Self::effective_count).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub count: Option<i64>,
+}
+
+#[cfg(feature = "filter")]
+impl<F> SearchRequest<F> {
+    /// `startIndex` as RFC 7644 §3.4.2.4 Table 6 has a server read it: the
+    /// default 1 when absent, and 1 for any value below it.
+    pub fn effective_start_index(&self) -> i64 {
+        self.start_index.map_or(1, |s| s.max(1))
+    }
+
+    /// `count` as Table 6 has a server read it: `None` when absent (the
+    /// server's own maximum applies), and 0 for a negative value, which the
+    /// table says "indicates that no resource results are to be returned
+    /// except for totalResults".
+    pub fn effective_count(&self) -> Option<i64> {
+        self.count.map(|c| c.max(0))
+    }
 }
 
 #[cfg(feature = "filter")]
@@ -198,14 +220,33 @@ pub struct ListQuery<F = Filter> {
     /// set and this is absent.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sort_order: Option<SortOrder>,
+    /// RFC 7644 §3.4.2.4 Table 6: "a value less than 1 SHALL be interpreted
+    /// as 1" — see [`effective_start_index`](Self::effective_start_index).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub start_index: Option<i64>,
+    /// RFC 7644 §3.4.2.4 Table 6: "a negative value SHALL be interpreted as
+    /// 0" — see [`effective_count`](Self::effective_count).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub count: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attributes: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub excluded_attributes: Option<String>,
+}
+
+#[cfg(feature = "filter")]
+impl<F> ListQuery<F> {
+    /// `startIndex` as RFC 7644 §3.4.2.4 Table 6 has a server read it: the
+    /// default 1 when absent, and 1 for any value below it.
+    pub fn effective_start_index(&self) -> i64 {
+        self.start_index.map_or(1, |s| s.max(1))
+    }
+
+    /// `count` as Table 6 has a server read it: `None` when absent, and 0 for
+    /// a negative value.
+    pub fn effective_count(&self) -> Option<i64> {
+        self.count.map(|c| c.max(0))
+    }
 }
 
 #[cfg(feature = "filter")]
@@ -423,7 +464,7 @@ mod sealed {
 /// struct MyResource;
 /// impl scim_v2::models::others::sealed::Sealed for MyResource {}
 /// ```
-pub trait ScimResource: sealed::Sealed {
+pub trait ScimResource: sealed::Sealed + Validate {
     /// The RFC 7643 schema URN for this resource's type.
     fn schema_urn(&self) -> &'static str;
 
@@ -439,7 +480,7 @@ pub trait ScimResource: sealed::Sealed {
 }
 
 impl<T> sealed::Sealed for User<T> {}
-impl<T> ScimResource for User<T> {
+impl<T: std::fmt::Display> ScimResource for User<T> {
     fn declared_schemas(&self) -> &[String] {
         &self.schemas
     }
@@ -450,7 +491,7 @@ impl<T> ScimResource for User<T> {
 }
 
 impl<T> sealed::Sealed for Group<T> {}
-impl<T> ScimResource for Group<T> {
+impl<T: std::fmt::Display> ScimResource for Group<T> {
     fn declared_schemas(&self) -> &[String] {
         &self.schemas
     }
@@ -483,7 +524,28 @@ impl ScimResource for ResourceType {
 }
 
 impl<T> sealed::Sealed for Resource<T> {}
-impl<T> ScimResource for Resource<T> {
+impl<T: std::fmt::Display> Validate for Resource<T> {
+    /// Delegates to the wrapped resource's own rules.
+    fn validate(&self) -> Result<(), ValidationError> {
+        match self {
+            Resource::User(u) => u.validate(),
+            Resource::Group(g) => g.validate(),
+            Resource::Schema(s) => s.validate(),
+            Resource::ResourceType(r) => r.validate(),
+        }
+    }
+
+    fn validate_context(&self, ctx: Context) -> Result<(), ValidationError> {
+        match self {
+            Resource::User(u) => u.validate_context(ctx),
+            Resource::Group(g) => g.validate_context(ctx),
+            Resource::Schema(s) => s.validate_context(ctx),
+            Resource::ResourceType(r) => r.validate_context(ctx),
+        }
+    }
+}
+
+impl<T: std::fmt::Display> ScimResource for Resource<T> {
     fn declared_schemas(&self) -> &[String] {
         match self {
             Resource::User(u) => &u.schemas,
@@ -554,6 +616,11 @@ impl<R: ScimResource> Validate for ListResponse<R> {
     ///   larger than the number of resources returned".
     /// * A present `startIndex` is at least 1 (§3.4.2: "the 1-based index of
     ///   the first result") and a present `itemsPerPage` is not negative.
+    /// * Every resource declares the schema of the type it was parsed as, and
+    ///   passes its own [`Validate::validate`]; a failure is reported under
+    ///   `Resources[i]`. [`validate_as`](Validate::validate_as) carries the
+    ///   [`Context`] into each resource too, so a `Response` page needs an
+    ///   `id` on every entry.
     /// * When the response carries a *partial* result set — fewer entries in
     ///   `Resources` than `totalResults` — both `startIndex` and `itemsPerPage`
     ///   are present. §3.4.2 makes them REQUIRED "when partial results are
@@ -663,9 +730,10 @@ impl<R: ScimResource> Validate for ListResponse<R> {
         // `Resource`'s own deserializer dispatches on that URN specifically
         // "to prevent type confusion"; without this, a Group payload carrying
         // a `userName` deserialized cleanly into `ListResponse<User<String>>`
-        // and both validators returned Ok. Whether an *absent* `schemas` is
-        // acceptable is each resource's own `Validate`'s call (only `Schema`
-        // tolerates it, after RFC 7643 §8.7's own examples), not this one's.
+        // and both validators returned Ok. Then each resource's own rules, with
+        // its index in the path: a page is not conformant if what it carries
+        // is not (whether an *absent* `schemas` is acceptable is decided
+        // there — only `Schema` tolerates it, after RFC 7643 §8.7's examples).
         for (i, resource) in self.resources.iter().enumerate() {
             let declared = resource.declared_schemas();
             if !declared.is_empty() {
@@ -679,6 +747,9 @@ impl<R: ScimResource> Validate for ListResponse<R> {
                     ));
                 }
             }
+            resource
+                .validate()
+                .map_err(|e| e.under(&format!("Resources[{i}]")))?;
         }
 
         // §3.4.2 defines `startIndex` as "The 1-based index of the first
@@ -699,6 +770,19 @@ impl<R: ScimResource> Validate for ListResponse<R> {
             ));
         }
 
+        Ok(())
+    }
+
+    /// The direction applies to every resource on the page: for
+    /// [`Context::Response`] each one needs its `id` (RFC 7643 §3.1) and may
+    /// not carry `password`. A list response is only ever a response, but the
+    /// context is the caller's to state, as everywhere else.
+    fn validate_context(&self, ctx: Context) -> Result<(), ValidationError> {
+        for (i, resource) in self.resources.iter().enumerate() {
+            resource
+                .validate_context(ctx)
+                .map_err(|e| e.under(&format!("Resources[{i}]")))?;
+        }
         Ok(())
     }
 }
@@ -777,19 +861,16 @@ pub enum PatchOperation {
 impl<F> Validate for SearchRequest<F> {
     /// RFC 7644 §3.4.3: the body carries the SearchRequest URN. §3.4.2.3:
     /// `sortOrder` without `sortBy` orders nothing, so it is rejected rather
-    /// than silently ignored.
+    /// than silently ignored. A negative `count` or a `startIndex` below 1 is
+    /// *not* an error: §3.4.2.4 Table 6 says each "SHALL be interpreted" as 0
+    /// and 1 respectively, which [`effective_count`](Self::effective_count)
+    /// and [`effective_start_index`](Self::effective_start_index) do.
     fn validate(&self) -> Result<(), ValidationError> {
         require_schema_urn(&self.schemas, schema_urns::SEARCH_REQUEST)?;
         if self.sort_order.is_some() && self.sort_by.is_none() {
             return Err(ValidationError::invalid_value(
                 "sortOrder",
                 "present without sortBy; RFC 7644 §3.4.2.3 defines it as the order in which sortBy is applied",
-            ));
-        }
-        if let Some(count) = self.count.filter(|c| *c < 0) {
-            return Err(ValidationError::invalid_value(
-                "count",
-                format!("must not be negative, got {count}"),
             ));
         }
         Ok(())

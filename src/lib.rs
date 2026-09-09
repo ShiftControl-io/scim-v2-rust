@@ -56,7 +56,8 @@
 //!
 //! A SCIM client reading `GET /Users`. A page deserializes straight into the
 //! resource type, the lenient parsers absorb what real providers send (here
-//! Entra's `"active": "True"`), and `validate()` checks the envelope.
+//! Entra's `"active": "True"`), and `validate()` checks the envelope and every
+//! resource on the page.
 //!
 //! ```rust
 //! # #[cfg(feature = "models")] {

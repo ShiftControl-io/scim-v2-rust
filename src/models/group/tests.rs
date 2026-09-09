@@ -294,3 +294,34 @@ fn group_deserialization_handles_missing_optional_fields() {
     assert!(group.members.is_empty());
     assert!(group.meta.is_none());
 }
+
+/// Devin round 2, BUG-2: RFC 7643 §3.1's "non-empty id" on a Group response.
+#[test]
+fn response_rejects_an_empty_id() {
+    let group = |id: Option<&str>| -> Group<String> {
+        let id = id.map_or(String::new(), |i| format!(r#","id":"{i}""#));
+        serde_json::from_str(&format!(
+            r#"{{"schemas":["{}"],"displayName":"Tour Guides"{id}}}"#,
+            crate::schema_urns::GROUP
+        ))
+        .unwrap()
+    };
+    assert_eq!(
+        group(Some(""))
+            .validate_as(Context::Response)
+            .unwrap_err()
+            .path(),
+        "id"
+    );
+    assert_eq!(
+        group(None)
+            .validate_as(Context::Response)
+            .unwrap_err()
+            .path(),
+        "id"
+    );
+    assert_eq!(
+        group(Some("e9e30dba")).validate_as(Context::Response),
+        Ok(())
+    );
+}

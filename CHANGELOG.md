@@ -377,6 +377,36 @@ such; the rest are fixed here. Tests 385 → 405 at `--all-features`.
   and `--features schemas,case-insensitive` — for nine configurations.
 - **R3-I1 — `Context::as_str` had no coverage.** One assertion per variant.
 
+### Fixed (Devin review, round 2)
+
+Devin re-reviewed at `1b91363` and raised five items; all five changed code.
+Tests 405 → 411 at `--all-features`.
+
+- **A negative `count` was a validation error.** RFC 7644 §3.4.2.4 Table 6
+  says a negative `count` "SHALL be interpreted as 0" and a `startIndex`
+  below 1 as 1, so both are valid input with a defined reading, not errors.
+  `SearchRequest::validate` accepts them, and `effective_count()` /
+  `effective_start_index()` on `SearchRequest` and `ListQuery` apply the
+  table for a server.
+- **An empty `id` passed a `Response` check.** RFC 7643 §3.1: "MUST include a
+  non-empty id value". `User<T>` and `Group<T>` now require `T: Display` on
+  their `Validate` impls and reject an id that prints as empty, so
+  `Some("")` fails `validate_as(Response)`, `Valid` and `Strict<_,
+  Response>`; `String`, `uuid::Uuid` and the integers all satisfy the bound.
+- **An enterprise extension body without its URN passed.** §3: `schemas`
+  names "the namespaces of the SCIM schemas that define the attributes
+  present", so a present `enterprise_user` now requires the enterprise URN
+  in `schemas`. The other direction stays lenient per §3.3.
+- **`ListResponse::validate` stopped at the envelope.** It now runs each
+  resource's own `validate()`, and `validate_as(ctx)` carries the context
+  into every resource, so a `Response` page needs an `id` on each entry.
+  Failures are reported under `Resources[i]`. `ScimResource` gains
+  `Validate` as a supertrait and `Resource<T>` implements it by delegation.
+- **Nested `AuthenticationScheme` errors lost their kind.** New
+  `ValidationError::under(parent)` relocates an error beneath a container
+  while keeping kind and detail; `ServiceProviderConfig` and `ListResponse`
+  use it.
+
 ### Added (resilience and conformance pass)
 
 - **Direction-aware validation.** `Validate` gains `validate_as(Context)` on

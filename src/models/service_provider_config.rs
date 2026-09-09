@@ -224,12 +224,9 @@ impl Validate for ServiceProviderConfig {
             return Err(ValidationError::missing_required("authenticationSchemes"));
         }
         for (i, scheme) in self.authentication_schemes.iter().enumerate() {
-            if let Err(e) = scheme.validate() {
-                return Err(ValidationError::missing_required(format!(
-                    "authenticationSchemes[{i}].{}",
-                    e.path()
-                )));
-            }
+            scheme
+                .validate()
+                .map_err(|e| e.under(&format!("authenticationSchemes[{i}]")))?;
         }
         at_most_one_primary(
             &self.authentication_schemes,

@@ -1438,3 +1438,43 @@ fn deep_not_chain_in_a_search_request_is_rejected_not_fatal() {
         .join()
         .expect("must return, not abort");
 }
+
+/// Devin round 2, BUG-1: RFC 7644 §3.4.2.4 Table 6 says a negative `count`
+/// "SHALL be interpreted as 0" and a `startIndex` below 1 as 1, so neither is
+/// a validation error; the effective accessors apply the table.
+#[test]
+fn search_request_out_of_range_pagination_is_interpreted_not_rejected() {
+    let req = SearchRequest::<Filter> {
+        count: Some(-7),
+        start_index: Some(0),
+        ..Default::default()
+    };
+    assert_eq!(req.validate(), Ok(()));
+    assert_eq!(req.effective_count(), Some(0));
+    assert_eq!(req.effective_start_index(), 1);
+    let req = SearchRequest::<Filter> {
+        count: None,
+        start_index: None,
+        ..Default::default()
+    };
+    assert_eq!(req.effective_count(), None);
+    assert_eq!(req.effective_start_index(), 1);
+    let req = SearchRequest::<Filter> {
+        count: Some(10),
+        start_index: Some(5),
+        ..Default::default()
+    };
+    assert_eq!(
+        (req.effective_count(), req.effective_start_index()),
+        (Some(10), 5)
+    );
+    let q = ListQuery::<Filter> {
+        count: Some(-1),
+        start_index: Some(-3),
+        ..Default::default()
+    };
+    assert_eq!(
+        (q.effective_count(), q.effective_start_index()),
+        (Some(0), 1)
+    );
+}

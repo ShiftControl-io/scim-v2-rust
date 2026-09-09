@@ -319,14 +319,35 @@ pub struct X509Certificate {
     pub primary: Option<bool>,
 }
 
-impl<T> Validate for User<T> {
+/// `T: Display` so that a response's `id` can be checked for RFC 7643 §3.1's
+/// "non-empty" and not only for presence; every identifier type in practice
+/// (`String`, `uuid::Uuid`, the integers) prints itself.
+impl<T: std::fmt::Display> Validate for User<T> {
     /// RFC 7643 §4.1 marks `userName` REQUIRED; §3 marks `schemas` REQUIRED on
-    /// every resource. Every other User attribute is optional, so those two are
-    /// the whole check.
+    /// every resource and says it names "the namespaces of the SCIM schemas
+    /// that define the attributes present", so an enterprise extension body
+    /// needs its URN declared. The other direction stays lenient — §3.3 calls
+    /// an extension URI an indication that its attributes *may* exist — so a
+    /// declared URN with no body is fine. Every other User attribute is
+    /// optional.
     fn validate(&self) -> Result<(), ValidationError> {
         require_schema_urn(&self.schemas, crate::schema_urns::USER)?;
         if self.user_name.is_empty() {
             return Err(ValidationError::missing_required("userName"));
+        }
+        if self.enterprise_user.is_some()
+            && !self
+                .schemas
+                .iter()
+                .any(|s| s == crate::schema_urns::ENTERPRISE_USER)
+        {
+            return Err(ValidationError::invalid_value(
+                "schemas",
+                format!(
+                    "enterprise extension attributes are present but {} is not declared (RFC 7643 §3)",
+                    crate::schema_urns::ENTERPRISE_USER
+                ),
+            ));
         }
         // RFC 7643 §2.4: at most one `primary: true` per multi-valued attribute.
         at_most_one_primary(&self.emails, |e| e.primary, "emails")?;
@@ -357,9 +378,9 @@ impl<T> Validate for User<T> {
                 }
             }
             Context::Response => {
-                // `id` is generic over `T`, so only presence can be checked here;
-                // emptiness of a `String` id is a caller concern.
-                if self.id.is_none() {
+                // §3.1: "MUST include a non-empty id value". Emptiness is judged
+                // through `Display`, which is what lets `T` stay generic.
+                if self.id.as_ref().is_none_or(|id| id.to_string().is_empty()) {
                     return Err(ValidationError::missing_required("id"));
                 }
                 if self.password.is_some() {

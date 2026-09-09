@@ -1,6 +1,7 @@
 use super::*;
 use crate::models::user::User;
 use crate::schema_urns;
+use crate::utils::validation::ValidationErrorKind;
 
 /// The headline of the 1.0 `ListResponse` change: a homogeneous page
 /// deserializes into the concrete resource, so a caller that already knows
@@ -53,12 +54,11 @@ fn typed_list_response_validate_rejects_a_schema_mismatch() {
     assert_eq!(err.scim_type_str(), "invalidValue");
 }
 
-/// `ListResponse::validate` judges the envelope and, when a resource
-/// declares `schemas`, the discriminator. An absent `schemas` is the
-/// resource's own `Validate`'s business — `User::validate` rejects this one
-/// — so it is not reported as a `ListResponse` failure.
+/// Devin round 2, ANALYSIS-1: `ListResponse::validate` now reaches into
+/// each resource, so a resource without `schemas` fails the page under its
+/// index rather than slipping through an envelope-only check.
 #[test]
-fn typed_list_response_validate_leaves_an_absent_discriminator_to_the_resource() {
+fn typed_list_response_validate_reports_a_resource_missing_schemas() {
     let list: ListResponse<User<String>> = ListResponse {
         schemas: vec![schema_urns::LIST_RESPONSE.to_string()],
         total_results: 1,
@@ -70,11 +70,46 @@ fn typed_list_response_validate_leaves_an_absent_discriminator_to_the_resource()
             ..Default::default()
         }],
     };
-    assert!(
-        list.validate().is_ok(),
-        "the envelope check does not judge an omitted `schemas`"
+    let err = list
+        .validate()
+        .expect_err("a resource without schemas fails the page");
+    assert_eq!(err.path(), "Resources[0].schemas");
+    assert_eq!(err.kind(), &ValidationErrorKind::MissingRequiredAttribute);
+}
+
+/// Devin round 2, ANALYSIS-1: the page carries each resource's own rules
+/// and, through `validate_as`, the direction — a `Response` page needs an
+/// `id` on every entry.
+#[test]
+fn list_response_validation_reaches_into_each_resource() {
+    let user = |name: &str, id: Option<&str>| User::<String> {
+        schemas: vec![schema_urns::USER.to_string()],
+        user_name: name.to_string(),
+        id: id.map(str::to_string),
+        ..Default::default()
+    };
+    let page = |resources: Vec<User<String>>| ListResponse::<User<String>> {
+        schemas: vec![schema_urns::LIST_RESPONSE.to_string()],
+        total_results: resources.len() as i64,
+        start_index: Some(1),
+        items_per_page: Some(resources.len() as i64),
+        resources,
+    };
+    let err = page(vec![user("a", Some("1")), user("", Some("2"))])
+        .validate()
+        .expect_err("second resource has no userName");
+    assert_eq!(err.path(), "Resources[1].userName");
+
+    let ok = page(vec![user("a", Some("1")), user("b", None)]);
+    assert_eq!(ok.validate(), Ok(()), "direction-agnostic: id not required");
+    let err = ok
+        .validate_as(Context::Response)
+        .expect_err("a response needs ids");
+    assert_eq!(err.path(), "Resources[1].id");
+    assert_eq!(
+        page(vec![user("a", Some("1"))]).validate_as(Context::Response),
+        Ok(())
     );
-    assert_eq!(list.resources[0].validate().unwrap_err().path(), "schemas");
 }
 
 /// The `schemas` array may carry URNs this crate does not model — a

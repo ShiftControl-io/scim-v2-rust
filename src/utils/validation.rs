@@ -60,6 +60,15 @@ impl ValidationError {
         }
     }
 
+    /// The same failure, located under `parent` — `Resources[2]`,
+    /// `authenticationSchemes[0]` — so a container can report a nested
+    /// resource's error with its full wire path and its kind and detail
+    /// intact, rather than flattening every nested failure into one kind.
+    pub fn under(mut self, parent: &str) -> Self {
+        self.path = format!("{parent}.{}", self.path);
+        self
+    }
+
     /// The SCIM wire path of the offending attribute.
     pub fn path(&self) -> &str {
         &self.path

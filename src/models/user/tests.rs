@@ -1099,3 +1099,85 @@ mod rfc7644_samples {
         );
     }
 }
+
+/// Devin round 2, BUG-2: RFC 7643 §3.1 says a representation "MUST include a
+/// non-empty id value". `Some("")` is not one, through `validate_as`, `Valid`
+/// and `Strict<_, Response>`; a non-string id is judged through `Display`.
+#[test]
+fn response_rejects_an_empty_id() {
+    use crate::utils::validation::{Response, Strict, Valid};
+    let empty = User {
+        id: Some(String::new()),
+        ..base_user()
+    };
+    assert_eq!(
+        empty.validate_as(Context::Response).unwrap_err().path(),
+        "id"
+    );
+    assert_eq!(
+        Valid::new(empty.clone(), Context::Response)
+            .unwrap_err()
+            .path(),
+        "id"
+    );
+    let body = serde_json::to_string(&empty).unwrap();
+    let err = serde_json::from_str::<Strict<User<String>, Response>>(&body).unwrap_err();
+    assert!(err.to_string().contains("id"), "{err}");
+
+    let real = User {
+        id: Some("2819c223".to_string()),
+        ..base_user()
+    };
+    assert_eq!(real.validate_as(Context::Response), Ok(()));
+
+    let uuid = User::<uuid::Uuid> {
+        schemas: vec![crate::schema_urns::USER.to_string()],
+        user_name: "bjensen".to_string(),
+        id: Some(uuid::Uuid::nil()),
+        ..Default::default()
+    };
+    assert_eq!(uuid.validate_as(Context::Response), Ok(()));
+}
+
+/// Devin round 2, BUG-3: RFC 7643 §3 — `schemas` names the namespaces of the
+/// attributes present, so an enterprise extension body needs its URN
+/// declared. The other direction stays lenient (§3.3: the URI indicates
+/// attributes that *may* exist).
+#[test]
+fn enterprise_extension_body_requires_its_urn() {
+    use crate::models::enterprise_user::EnterpriseUser;
+    use crate::utils::validation::{CreateRequest, Strict};
+
+    let undeclared = User {
+        enterprise_user: Some(EnterpriseUser {
+            department: Some("Tour Operations".to_string()),
+            ..Default::default()
+        }),
+        ..base_user()
+    };
+    let err = undeclared
+        .validate()
+        .expect_err("extension body without its URN");
+    assert_eq!(err.path(), "schemas");
+    assert!(err.to_string().contains("enterprise"), "{err}");
+    let body = serde_json::to_string(&undeclared).unwrap();
+    assert!(serde_json::from_str::<Strict<User<String>, CreateRequest>>(&body).is_err());
+
+    let declared = User {
+        schemas: vec![
+            crate::schema_urns::USER.to_string(),
+            crate::schema_urns::ENTERPRISE_USER.to_string(),
+        ],
+        ..undeclared
+    };
+    assert_eq!(declared.validate(), Ok(()));
+
+    let urn_without_body = User {
+        schemas: vec![
+            crate::schema_urns::USER.to_string(),
+            crate::schema_urns::ENTERPRISE_USER.to_string(),
+        ],
+        ..base_user()
+    };
+    assert_eq!(urn_without_body.validate(), Ok(()));
+}
