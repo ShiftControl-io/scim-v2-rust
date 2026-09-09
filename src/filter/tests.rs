@@ -1284,3 +1284,101 @@ fn well_formed_attribute_paths_parse(src: &str) {
     src.parse::<Filter>()
         .unwrap_or_else(|e| panic!("{src:?}: {e}"));
 }
+
+// `Operands` behaves as the collection it wraps: ownership out, in-place
+// mutation of elements, and iteration by value and by reference.
+#[test]
+fn operands_iterate_mutate_and_unwrap_like_a_vec() {
+    let leaf = |n: &str| Filter::Attr(AttrExp::Present(AttrPath::with_name(n)));
+    let mut ops = Operands::new(vec![leaf("a"), leaf("b"), leaf("c")]).unwrap();
+    assert_eq!((&ops).into_iter().count(), 3);
+    assert_eq!(
+        ops.iter().map(ToString::to_string).collect::<Vec<_>>(),
+        ["a pr", "b pr", "c pr"]
+    );
+    ops[1] = leaf("z");
+    if let Filter::Attr(AttrExp::Present(path)) = &mut ops[2] {
+        path.name = "y".to_string();
+    }
+    assert_eq!(
+        Filter::And(ops.clone()).to_string(),
+        "a pr and z pr and y pr"
+    );
+    let owned: Vec<String> = ops.clone().into_iter().map(|f| f.to_string()).collect();
+    assert_eq!(owned, ["a pr", "z pr", "y pr"]);
+    let v = ops.into_vec();
+    assert_eq!(v.len(), 3);
+    assert_eq!(v[0], leaf("a"));
+}
+
+// The AST depth walk is exact at the boundary on both sides of a value path:
+// `outer` nested nots, the value-path node, then `inner` nested nots. With a
+// shared budget the deepest node sits at outer + 2 + inner.
+#[test_case(32, 30 ; "exactly_at_the_limit")]
+#[test_case(0, MAX_FILTER_DEPTH - 2 ; "all_inside")]
+#[test_case(MAX_FILTER_DEPTH - 3, 1 ; "all_outside")]
+fn hand_built_depth_at_the_limit_passes(outer: usize, inner: usize) {
+    let f = nested_value_path(outer, inner);
+    assert_eq!(outer + 2 + inner, MAX_FILTER_DEPTH, "test shape");
+    assert_eq!(filter_depth_exceeds(&f, MAX_FILTER_DEPTH), None);
+}
+
+#[test_case(33, 30 ; "one_over_split")]
+#[test_case(0, MAX_FILTER_DEPTH - 1 ; "one_over_inside")]
+#[test_case(MAX_FILTER_DEPTH - 2, 1 ; "one_over_outside")]
+fn hand_built_depth_one_over_the_limit_is_rejected(outer: usize, inner: usize) {
+    let f = nested_value_path(outer, inner);
+    assert_eq!(outer + 2 + inner, MAX_FILTER_DEPTH + 1, "test shape");
+    assert_eq!(
+        filter_depth_exceeds(&f, MAX_FILTER_DEPTH),
+        Some(MAX_FILTER_DEPTH + 1)
+    );
+}
+
+/// `outer` `Filter::Not`s around `emails[...]` whose inner filter is `inner`
+/// nested `ValFilter::Not`s around `type eq "work"`, built past the parser so
+/// the syntactic budget cannot pre-empt the AST walk.
+fn nested_value_path(outer: usize, inner: usize) -> Filter {
+    let leaf = ValFilter::Attr(AttrExp::Comparison(
+        AttrPath::with_name("type"),
+        CompareOp::Eq,
+        CompValue::Str("work".to_string()),
+    ));
+    let inner_filter = (0..inner).fold(leaf, |f, _| ValFilter::Not(Box::new(f)));
+    let vp = Filter::ValuePath(ValuePath {
+        attr: AttrPath::with_name("emails"),
+        filter: Box::new(inner_filter),
+    });
+    (0..outer).fold(vp, |f, _| Filter::Not(Box::new(f)))
+}
+
+// The syntactic budget bounds brackets, not AST levels: each `not (` costs one
+// bracket but an `or` over an `and` beneath it adds two more AST levels, so
+// 63 nested nots around `a pr or b pr and c pr` pass the parser's count and
+// reach AST depth 66. The post-parse walk must catch that on both entry
+// points, which is why it still exists.
+#[test]
+fn ast_depth_over_the_limit_within_the_syntactic_budget_is_rejected() {
+    let n = MAX_FILTER_DEPTH - 1;
+    let inner = format!(
+        "{}a pr or b pr and c pr{}",
+        "not (".repeat(n),
+        ")".repeat(n)
+    );
+    assert_depth_exceeded(inner.parse::<Filter>());
+    assert_depth_exceeded(format!("emails[{inner}]").parse::<Filter>());
+    assert_depth_exceeded(format!("emails[{inner}].value").parse::<PatchPath>());
+    // One `not` fewer fits: 62 + Or + And + Attr = 65 … still over; two fewer fits.
+    let n = MAX_FILTER_DEPTH - 3;
+    let inner = format!(
+        "{}a pr or b pr and c pr{}",
+        "not (".repeat(n),
+        ")".repeat(n)
+    );
+    inner
+        .parse::<Filter>()
+        .expect("61 nots + or + and + attr = 64 fits");
+    format!("emails[{inner}].value")
+        .parse::<PatchPath>()
+        .expect("fits through PatchPath too");
+}

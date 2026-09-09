@@ -1537,3 +1537,18 @@ fn list_query_effective_accessors_pass_in_range_values_through() {
     };
     assert_eq!((q.effective_count(), q.effective_start_index()), (None, 1));
 }
+
+/// Either selection alone is fine; only the combination is the §3.9 error.
+#[test]
+fn search_request_accepts_either_selection_alone() {
+    let only_attributes = SearchRequest::<Filter> {
+        attributes: vec!["userName".to_string()],
+        ..Default::default()
+    };
+    assert_eq!(only_attributes.validate(), Ok(()));
+    let only_excluded = SearchRequest::<Filter> {
+        excluded_attributes: vec!["emails".to_string()],
+        ..Default::default()
+    };
+    assert_eq!(only_excluded.validate(), Ok(()));
+}
