@@ -50,20 +50,23 @@ fn colliding_keys_are_rejected() {
         let err = canonicalize_keys(&mut v).expect_err(raw);
         assert_ne!(err.first, err.second);
         // All three entry points, not only `from_str`.
-        assert!(
-            from_str::<crate::models::user::User<String>>(raw).is_err(),
-            "from_str must surface the collision: {raw}"
-        );
-        assert!(
-            from_value::<crate::models::user::User<String>>(serde_json::from_str(raw).unwrap())
-                .is_err(),
-            "from_value must surface the collision: {raw}"
-        );
-        assert!(
-            serde_json::from_str::<CaseInsensitive<crate::models::user::User<String>>>(raw)
-                .is_err(),
-            "CaseInsensitive must surface the collision: {raw}"
-        );
+        #[cfg(feature = "models")]
+        {
+            assert!(
+                from_str::<crate::models::user::User<String>>(raw).is_err(),
+                "from_str must surface the collision: {raw}"
+            );
+            assert!(
+                from_value::<crate::models::user::User<String>>(serde_json::from_str(raw).unwrap())
+                    .is_err(),
+                "from_value must surface the collision: {raw}"
+            );
+            assert!(
+                serde_json::from_str::<CaseInsensitive<crate::models::user::User<String>>>(raw)
+                    .is_err(),
+                "CaseInsensitive must surface the collision: {raw}"
+            );
+        }
     }
 }
 
@@ -133,6 +136,7 @@ fn canonicalizes_known_keys_and_leaves_unknown_ones() {
 
 /// The probe that motivated the module: a fully upper-cased User fails the
 /// plain derive with `missing field userName` and parses here.
+#[cfg(feature = "models")]
 #[test]
 fn an_upper_cased_user_parses() {
     let raw = r#"{"SCHEMAS":["urn:ietf:params:scim:schemas:core:2.0:User"],"USERNAME":"bjensen","DISPLAYNAME":"B"}"#;

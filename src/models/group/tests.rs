@@ -208,8 +208,14 @@ fn group_deserialization_succeeds_for_valid_full_json() {
     // Check meta
     let meta = group.meta.unwrap();
     assert_eq!(meta.resource_type, Some("Group".to_string()));
-    assert_eq!(meta.created, Some("2010-01-23T04:56:22Z".to_string()));
-    assert_eq!(meta.last_modified, Some("2011-05-13T04:42:34Z".to_string()));
+    assert_eq!(
+        meta.created.as_ref().map(crate::ScimDateTime::as_str),
+        Some("2010-01-23T04:56:22Z")
+    );
+    assert_eq!(
+        meta.last_modified.as_ref().map(crate::ScimDateTime::as_str),
+        Some("2011-05-13T04:42:34Z")
+    );
     assert_eq!(meta.version, Some("W/\"3694e05e9dff592\"".to_string()));
     assert_eq!(
         meta.location,

@@ -122,7 +122,7 @@ pub(crate) fn strip_unassigned(value: &mut Value) {
 /// body, for the same reason.
 ///
 /// ```compile_fail
-/// use scim_v2::{models::others::PatchOp, utils::compact::Compact};
+/// use scim_v2::{models::others::PatchOp, compact::Compact};
 ///
 /// fn emit(op: &PatchOp) -> String {
 ///     serde_json::to_string(&Compact(op)).unwrap()
@@ -131,7 +131,7 @@ pub(crate) fn strip_unassigned(value: &mut Value) {
 ///
 /// ```
 /// # #[cfg(feature = "models")] {
-/// use scim_v2::{models::user::User, utils::compact::Compact};
+/// use scim_v2::{models::user::User, compact::Compact};
 ///
 /// let user = User::<String> {
 ///     schemas: vec!["urn:ietf:params:scim:schemas:core:2.0:User".to_string()],

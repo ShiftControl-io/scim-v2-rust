@@ -18,7 +18,7 @@ below; 1.0 was the one moment they were free.
   RFC 7643 §2.5 makes absent, `null` and `[]` one state, so all three
   deserialize to an empty `Vec`. An empty attribute serializes as `[]`, since
   RFC 7644 §3.5.1 gives `[]` the meaning "clear all values" that omission
-  lacks; `utils::compact::Compact(&value)` omits them in a response. Suggested
+  lacks; `compact::Compact(&value)` omits them in a response. Suggested
   by @travipross in #48.
 - **`ListResponse` is generic over the resource, not the ID type**:
   `ListResponse<User<String>>` deserializes straight into `Vec<User<String>>`,
@@ -47,16 +47,31 @@ below; 1.0 was the one moment they were free.
 - **`SCIMError`, `FilterActionError`, `Resource` and `MemberType` are
   `#[non_exhaustive]`.** The grammar enums stay exhaustive on purpose.
 - **`SearchRequest::excluded_attributes` is `pub`.** It never was.
+- **`meta.created` and `meta.lastModified` are `ScimDateTime`, not `String`.**
+  RFC 7643 §2.3.5 requires a valid `xsd:dateTime` with both a date and a time,
+  and §3.1 makes `meta` provider-assigned, so a malformed timestamp is now
+  unconstructable rather than caught by whoever consumes your responses. The
+  accepted grammar is exactly XSD 1.1 §3.3.7.2, day-of-month rule included;
+  no date-time dependency is taken, and the module docs say what that costs.
+  Suggested by @sidrubs in #49.
+- **`utils::case` is `case_insensitive` and `utils::compact` is `compact`**,
+  both at the crate root, with `CaseInsensitive` and `Compact` re-exported
+  there too. The old paths made a reader parse `utils` to learn nothing.
+- **The `case-insensitive` feature is gone**, and the module it gated is
+  always compiled. It never selected any behaviour — the choice is made per
+  call site by whether you call `case_insensitive::from_str` — so the flag
+  bought nothing and cost a round of reasoning about feature unification.
+  Raised by @Paul-E in #51.
 
 ### Added
 
-- **Feature flags** `filter`, `models`, `schemas` and `case-insensitive`, all
-  on by default and all additive. `default-features = false, features =
-  ["filter"]` gives a server the grammar alone and drops eight crates.
+- **Feature flags** `filter`, `models` and `schemas`, all on by default and
+  all additive. `default-features = false, features = ["filter"]` gives a
+  server the grammar alone and drops eight crates.
 - **Direction-aware validation**: `validate_as(Context)` with
   `CreateRequest`, `ReplaceRequest` and `Response`; `Valid<T>` as proof that
   a value passed; `Strict<T, M>` to deserialize and validate in one step.
-- **Case-insensitive attribute names** (RFC 7643 §2.1) through `utils::case`
+- **Case-insensitive attribute names** (RFC 7643 §2.1) through `case_insensitive`
   and `CaseInsensitive<T>`. Two spellings of one attribute in one object are
   an `AmbiguousKey` error, and the rejected value is left untouched.
 - **Filter limits**: `MAX_FILTER_DEPTH` (64) and `MAX_FILTER_TERMS` (1024),
@@ -119,7 +134,7 @@ Robustness:
 - A deep `not (` chain with one trailing token aborted the process, and a
   long flat `or` chain was rejected as too deep. Both are gone with the n-ary
   AST and the parse-time limits.
-- `utils::case` rewrote the RFC's own `Resources` and `Operations` keys, and
+- `case_insensitive` rewrote the RFC's own `Resources` and `Operations` keys, and
   resolved colliding keys last-write-wins.
 - `Bulk` and `Filter` had different defaults depending on the constructor.
 - `SCIMError` implements `std::error::Error`.

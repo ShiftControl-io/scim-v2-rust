@@ -9,11 +9,10 @@
 #![cfg(all(feature = "models", feature = "filter"))]
 
 use proptest::prelude::*;
+use scim_v2::ScimDateTime;
 use scim_v2::models::enterprise_user::{EnterpriseUser, Manager};
 use scim_v2::models::group::{Group, Member, MemberType};
 use scim_v2::models::others::{ListResponse, Resource};
-// Only the case-folding property builds a PatchOp.
-#[cfg(feature = "case-insensitive")]
 use scim_v2::models::others::{OperationTarget, PatchOp, PatchOperation};
 use scim_v2::models::scim_schema::Meta;
 use scim_v2::models::user::{
@@ -24,6 +23,29 @@ use scim_v2::schema_urns;
 
 fn opt_str() -> impl Strategy<Value = Option<String>> {
     proptest::option::of("[a-zA-Z0-9 @._-]{0,24}")
+}
+// `meta` timestamps are `ScimDateTime`, so the generator builds them from
+// their parts rather than from arbitrary text: an invalid one is
+// unconstructable, and a round-trip can only be checked on values that exist.
+// The day stops at 28 so no month length or leap rule is in play here; those
+// live in the parser's own tests.
+prop_compose! {
+    fn date_time()(year in 1u32..=9999, month in 1u32..=12, day in 1u32..=28,
+                   hour in 0u32..=23, minute in 0u32..=59, second in 0u32..=59,
+                   offset in prop::option::of(-14i32..=14)) -> ScimDateTime {
+        let zone = match offset {
+            None => String::new(),
+            Some(0) => "Z".to_string(),
+            Some(h) if h < 0 => format!("-{:02}:00", -h),
+            Some(h) => format!("+{h:02}:00"),
+        };
+        format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}{zone}")
+            .parse()
+            .expect("built from the grammar")
+    }
+}
+fn opt_date_time() -> impl Strategy<Value = Option<ScimDateTime>> {
+    proptest::option::of(date_time())
 }
 fn opt_bool() -> impl Strategy<Value = Option<bool>> {
     proptest::option::of(any::<bool>())
@@ -83,7 +105,8 @@ prop_compose! {
     }
 }
 prop_compose! {
-    fn meta()(resource_type in opt_str(), created in opt_str(), last_modified in opt_str(),
+    fn meta()(resource_type in opt_str(), created in opt_date_time(),
+              last_modified in opt_date_time(),
               version in opt_str(), location in opt_str()) -> Meta {
         Meta { resource_type, created, last_modified, version, location }
     }
@@ -225,7 +248,6 @@ fn heterogeneous_list_response_round_trips() {
 
 /// RFC 7643 §2.1: any casing of any known key deserializes to the same value
 /// as the canonical casing.
-#[cfg(feature = "case-insensitive")]
 #[test]
 fn any_key_casing_deserializes_identically() {
     fn recase(v: &serde_json::Value, upper: bool) -> serde_json::Value {
@@ -253,7 +275,7 @@ fn any_key_casing_deserializes_identically() {
             // A resource.
             let u = users[0].clone();
             let canonical = serde_json::to_value(&u).unwrap();
-            let back: User<String> = scim_v2::utils::case::from_value(recase(&canonical, upper))
+            let back: User<String> = scim_v2::case_insensitive::from_value(recase(&canonical, upper))
                 .expect("recased User must deserialize");
             prop_assert_eq!(back, u);
 
@@ -267,7 +289,7 @@ fn any_key_casing_deserializes_identically() {
             };
             let canonical = serde_json::to_value(&list).unwrap();
             let back: ListResponse<User<String>> =
-                scim_v2::utils::case::from_value(recase(&canonical, upper)).expect("recased ListResponse");
+                scim_v2::case_insensitive::from_value(recase(&canonical, upper)).expect("recased ListResponse");
             prop_assert_eq!(back.resources.len(), list.resources.len());
             prop_assert_eq!(back, list);
 
@@ -280,7 +302,7 @@ fn any_key_casing_deserializes_identically() {
                 })],
             };
             let canonical = serde_json::to_value(&patch).unwrap();
-            let back: PatchOp = scim_v2::utils::case::from_value(recase(&canonical, upper)).expect("recased PatchOp");
+            let back: PatchOp = scim_v2::case_insensitive::from_value(recase(&canonical, upper)).expect("recased PatchOp");
             prop_assert_eq!(back.operations.len(), 1);
         })
     });

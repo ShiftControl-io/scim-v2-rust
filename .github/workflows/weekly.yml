@@ -71,8 +71,7 @@ jobs:
                    "--no-default-features --features models" \
                    "--no-default-features --features schemas" \
                    "--no-default-features --features filter,models" \
-                   "--no-default-features --features case-insensitive" \
-                   "--no-default-features --features schemas,case-insensitive"; do
+                   "--no-default-features --features schemas"; do
             echo "::group::cargo test $f"
             # shellcheck disable=SC2086
             cargo test $f

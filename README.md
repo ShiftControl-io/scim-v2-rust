@@ -85,7 +85,7 @@ scim_v2 = "1"
 
 ### Feature flags
 
-All four are on by default, and all four are additive — a feature only ever
+All three are on by default, and all three are additive — a feature only ever
 compiles more, never changes what an existing call does.
 
 | Feature | What it does |
@@ -93,7 +93,6 @@ compiles more, never changes what an existing call does.
 | `filter` | the filter and PATCH-path parsers |
 | `models` | every resource and protocol message |
 | `schemas` | the embedded RFC 7643 schema definitions and `get_schemas` |
-| `case-insensitive` | `utils::case`: canonicalise attribute-name case before deserializing, per RFC 7643 §2.1 |
 
 Wire-behaviour choices — lenient booleans, compact output, case folding — are
 **types**, not features: `Compact<&T>`, `CaseInsensitive<T>`, `Strict<T, M>`.
@@ -251,7 +250,7 @@ empty array `[]` for a multi-valued attribute, to clear all values", while an
 omitted attribute is merely "not asserted" and the server may keep or default
 it. Since these models are request bodies as well as representations, `[]` is
 what keeps a conformant clear-all expressible. A server serializing a response
-that wants the compact form wraps the value in `utils::compact::Compact(&user)`
+that wants the compact form wraps the value in `compact::Compact(&user)`
 — a wrapper rather than a feature, because Cargo features unify across the
 dependency graph and a transitive crate could otherwise change what you put on
 the wire.
@@ -269,6 +268,37 @@ for body in [
 }
 # Ok::<(), serde_json::Error>(())
 ```
+
+### Timestamps
+
+`meta.created` and `meta.lastModified` are `ScimDateTime`, not `String`. RFC
+7643 §2.3.5 requires a valid `xsd:dateTime` carrying both a date and a time,
+and §3.1 makes every `meta` sub-attribute readOnly and provider-assigned, so
+the party most likely to write a malformed one is a server built on this
+crate. The type is what stops it: the only ways to make one all validate.
+
+```rust
+use scim_v2::ScimDateTime;
+
+let created: ScimDateTime = "2010-01-23T04:56:22Z".parse().unwrap();
+assert_eq!(created.as_str(), "2010-01-23T04:56:22Z");
+
+// Exactly the XSD 1.1 §3.3.7.2 lexical space, day-of-month rule included.
+assert!("2000-02-29T00:00:00Z".parse::<ScimDateTime>().is_ok());
+assert!("1900-02-29T00:00:00Z".parse::<ScimDateTime>().is_err());
+assert!("2010-01-23".parse::<ScimDateTime>().is_err());
+
+// The offset is optional in XSD, so check before handing it to an RFC 3339
+// parser, which requires one.
+assert!(created.has_offset());
+```
+
+It validates a lexical form and stops there — no arithmetic, no ordering, no
+time zone conversion. That is deliberate: `time`, `chrono` and `jiff` are all
+pre-1.0, and putting one of their types in a 1.0 signature would tie this
+crate's stability promise to theirs, so converting is left to you and is one
+line (`OffsetDateTime::parse(created.as_str(), &Rfc3339)`). The module docs
+carry the full list of what you give up.
 
 ### Parsing a SCIM filter
 

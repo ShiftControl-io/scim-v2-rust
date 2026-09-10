@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use crate::models::datetime::ScimDateTime;
 use crate::utils::error::SCIMError;
 use crate::utils::validation::{Validate, ValidationError, require_schema_urn};
 #[cfg(feature = "schemas")]
@@ -9,10 +10,12 @@ use crate::{ENTERPRISE_USER_SCHEMA, GROUP_SCHEMA, USER_SCHEMA};
 pub struct Meta {
     #[serde(rename = "resourceType", skip_serializing_if = "Option::is_none")]
     pub resource_type: Option<String>,
+    /// RFC 7643 §2.3.5 makes this an `xsd:dateTime`; [`ScimDateTime`] is the
+    /// only thing that can hold one, so it cannot be written malformed.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub created: Option<String>,
+    pub created: Option<ScimDateTime>,
     #[serde(rename = "lastModified", skip_serializing_if = "Option::is_none")]
-    pub last_modified: Option<String>,
+    pub last_modified: Option<ScimDateTime>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

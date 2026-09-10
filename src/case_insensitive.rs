@@ -18,10 +18,34 @@
 //!
 //! The Java SCIM SDK does the same by enabling Jackson's
 //! `ACCEPT_CASE_INSENSITIVE_PROPERTIES`; scim2-models lowercases every key in
-//! a pre-validator citing §2.1. Nothing in this crate calls it implicitly:
-//! the plain derives stay exact-match, and you reach for [`CaseInsensitive`]
-//! or [`from_str`] / [`from_value`] where a peer's casing cannot be trusted.
-//! Gated behind the `case-insensitive` feature (on by default).
+//! a pre-validator citing §2.1.
+//!
+//! # Choosing it
+//!
+//! Nothing here happens implicitly. The derives stay exact-match, and the
+//! choice is made per call site by which of these you reach for:
+//!
+//! ```
+//! use scim_v2::models::user::User;
+//!
+//! let body = r#"{"schemas":["urn:ietf:params:scim:schemas:core:2.0:User"],"USERNAME":"bjensen"}"#;
+//!
+//! // Exact-match, the serde default: `USERNAME` is not `userName`.
+//! assert!(serde_json::from_str::<User>(body).is_err());
+//!
+//! // Canonicalised first, per §2.1.
+//! let user: User = scim_v2::case_insensitive::from_str(body).unwrap();
+//! assert_eq!(user.user_name, "bjensen");
+//! ```
+//!
+//! [`CaseInsensitive<T>`] is the primitive and the one to reach for in a
+//! signature — a `serde` front end such as an `axum` extractor can name it
+//! directly, and it is re-exported as [`scim_v2::CaseInsensitive`]. [`from_str`]
+//! and [`from_value`] are shorthand for wrapping and unwrapping it, for the
+//! common case of having the bytes in hand.
+//!
+//! [`CaseInsensitive<T>`]: CaseInsensitive
+//! [`scim_v2::CaseInsensitive`]: crate::CaseInsensitive
 
 use std::collections::HashMap;
 use std::sync::OnceLock;

@@ -175,6 +175,29 @@ fn comment_text(path: &Path) -> String {
     out
 }
 
+/// The message of every `#[error("…")]` attribute, one per line, with the
+/// literal's own delimiters removed and `\"` unescaped so an inner quotation
+/// reads as one. A user-facing message is source too, and a rule mis-cited
+/// there is worse than one mis-cited in a comment, because it ships.
+fn error_messages(src: &str) -> String {
+    let mut out = String::new();
+    let mut rest = src;
+    while let Some(i) = rest.find("#[error(") {
+        rest = &rest[i + "#[error(".len()..];
+        let Some(end) = rest.find(")]") else { break };
+        let body = rest[..end].trim();
+        rest = &rest[end..];
+        // Only a plain string literal; `#[error(transparent)]` and messages
+        // with trailing format arguments are not citations.
+        let Some(literal) = body.strip_prefix('"').and_then(|b| b.strip_suffix('"')) else {
+            continue;
+        };
+        out.push_str(&literal.replace("\\\"", "\"").replace('\n', " "));
+        out.push('\n');
+    }
+    out
+}
+
 /// Every `(rfc numbers, quoted text)` pair: a quotation of at least twenty
 /// characters and two spaces with an `RFC 764x` mention within 240 characters
 /// before or after it in the same comment block. All RFCs mentioned in that
@@ -293,7 +316,9 @@ fn every_rfc_quotation_in_the_source_is_verbatim() {
     let mut checked = 0;
     let mut failures = Vec::new();
     for file in &files {
-        for (numbers, sections, quote) in citations(&comment_text(file)) {
+        let src = fs::read_to_string(file).expect("readable source file");
+        let text = format!("{}\n{}", comment_text(file), error_messages(&src));
+        for (numbers, sections, quote) in citations(&text) {
             checked += 1;
             if !quotation_is_verbatim(&rfcs, &numbers, &sections, &quote) {
                 let where_ = if sections.is_empty() {
@@ -409,6 +434,23 @@ fn the_matcher_itself_is_load_bearing() {
         ))
         .is_empty()
     );
+
+    // An error message's quotation is extracted the same way a comment's is,
+    // through the literal's own escaping.
+    let msg = error_messages(
+        "#[error(\n    \"bad; RFC 7643 §3.1: \\\"MUST include a non-empty id value\\\"\"\n)]",
+    );
+    let (numbers, sections, quote) = &citations(&msg)[0];
+    assert_eq!(numbers, &["7643".to_string()]);
+    assert_eq!(sections, &["3.1".to_string()]);
+    assert!(quotation_is_verbatim(&rfcs, numbers, sections, quote));
+    // And a wrong one in an error message fails, which is the point.
+    let bad =
+        error_messages("#[error(\"bad; RFC 7643 §3.1: \\\"MUST include a purple elephant\\\"\")]");
+    let (n2, s2, q2) = &citations(&bad)[0];
+    assert!(!quotation_is_verbatim(&rfcs, n2, s2, q2));
+    // Non-literal forms are skipped rather than misread.
+    assert_eq!(error_messages("#[error(transparent)]"), "");
 }
 
 fn comment_text_from(src: &str) -> String {

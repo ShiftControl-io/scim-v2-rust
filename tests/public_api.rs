@@ -13,7 +13,7 @@ use scim_v2::filter::Filter;
 use scim_v2::models::errors::ScimType;
 use scim_v2::models::others::{ListResponse, Resource, SearchRequest};
 use scim_v2::models::user::User;
-use scim_v2::{Validate, schema_urns};
+use scim_v2::{CaseInsensitive, Compact, ScimDateTime, Validate, schema_urns};
 
 /// Every field of `SearchRequest` is reachable and reaches the wire.
 /// `excluded_attributes` in particular was never `pub` before 1.0.
@@ -111,4 +111,26 @@ fn a_cleared_multi_valued_attribute_reaches_the_wire_downstream() {
         serde_json::json!([]),
         "an unassigned multi-valued attribute must serialize as [] per RFC 7644 §3.5.1"
     );
+}
+
+/// The three types a consumer names most often are reachable from the crate
+/// root, without knowing which module defines them. `CaseInsensitive` in
+/// particular goes in a handler signature, where a four-segment path is noise.
+#[test]
+fn the_common_types_are_re_exported_at_the_root() {
+    let body = r#"{"schemas":["urn:ietf:params:scim:schemas:core:2.0:User"],"USERNAME":"bjensen"}"#;
+
+    let wrapped: CaseInsensitive<User> = serde_json::from_str(body).expect("§2.1: any casing");
+    assert_eq!(wrapped.into_inner().user_name, "bjensen");
+
+    let user: User = scim_v2::case_insensitive::from_str(body).expect("§2.1: any casing");
+    let compact = serde_json::to_value(Compact(&user)).expect("Compact serializes");
+    assert!(
+        compact.get("emails").is_none(),
+        "RFC 7643 §2.5: an unassigned attribute may be omitted for compactness"
+    );
+
+    let created: ScimDateTime = "2010-01-23T04:56:22Z".parse().expect("valid dateTime");
+    assert_eq!(created.as_str(), "2010-01-23T04:56:22Z");
+    assert!("2010-01-23".parse::<ScimDateTime>().is_err());
 }

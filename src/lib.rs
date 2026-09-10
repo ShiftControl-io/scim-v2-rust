@@ -163,25 +163,62 @@
 //! | Accepted on input | Emitted | Why |
 //! |---|---|---|
 //! | `"true"` / `"True"` for a boolean | `true` | Entra; RFC 7643 §2.3.2 defines the JSON literal |
-//! | `null`, `[]` or absence for a multi-valued attribute | `[]` (or omitted via `utils::compact::Compact`) | RFC 7643 §2.5 equivalence; RFC 7644 §3.5.1 gives `[]` clear-all meaning |
+//! | `null`, `[]` or absence for a multi-valued attribute | `[]` (or omitted via `compact::Compact`) | RFC 7643 §2.5 equivalence; RFC 7644 §3.5.1 gives `[]` clear-all meaning |
 //! | `Add` / `ADD` for a PATCH `op` | `add` | RFC 7644 §3.5.2 spells it lowercase; Entra does not |
 //! | `Ascending`, `GROUP` for `sortOrder` / `members.type` | `ascending`, `Group` | schema `caseExact: false` |
 //! | a `members.type` or `scimType` outside the RFC's list | preserved verbatim | RFC 7643 §7: canonical values are *suggested* |
-//! | attribute names in any case, via `utils::case` (`case-insensitive` feature) | canonical camelCase | RFC 7643 §2.1: "Attribute names are case insensitive" |
+//! | attribute names in any case, via [`case_insensitive`] | canonical camelCase | RFC 7643 §2.1: "Attribute names are case insensitive" |
+//!
+//! Leniency stops at the attribute *names*, and it is never implicit: the
+//! derives stay exact-match and a caller who cannot trust a peer's casing
+//! reaches for [`case_insensitive`] at the call site.
+//!
+//! ```
+//! use scim_v2::models::user::User;
+//!
+//! let body = r#"{"schemas":["urn:ietf:params:scim:schemas:core:2.0:User"],"USERNAME":"bjensen"}"#;
+//!
+//! assert!(serde_json::from_str::<User>(body).is_err()); // exact-match
+//! let user: User = scim_v2::case_insensitive::from_str(body).unwrap(); // §2.1
+//! assert_eq!(user.user_name, "bjensen");
+//! ```
+//!
+//! ## Timestamps
+//!
+//! `meta.created` and `meta.lastModified` are [`ScimDateTime`], not `String`.
+//! RFC 7643 §2.3.5 requires a valid `xsd:dateTime` including both a date and a
+//! time, and §3.1 makes every `meta` sub-attribute readOnly and
+//! provider-assigned — so the party most likely to write a malformed one is a
+//! service provider built on this crate, and the type is what stops it.
+//!
+//! ```
+//! use scim_v2::ScimDateTime;
+//!
+//! let created: ScimDateTime = "2010-01-23T04:56:22Z".parse().unwrap();
+//! assert!("2010-02-30T04:56:22Z".parse::<ScimDateTime>().is_err());
+//! assert_eq!(created.as_str(), "2010-01-23T04:56:22Z");
+//! ```
+//!
+//! It validates a lexical form and nothing more: no arithmetic, no ordering,
+//! no time zone conversion. The crate takes no date-time dependency because
+//! `time`, `chrono` and `jiff` are all pre-1.0, and a pre-1.0 type in a 1.0
+//! signature would tie this crate's stability to theirs. [The module
+//! docs](models::datetime) give the full limits and the one-line bridge to
+//! whichever library you already use.
 //!
 //! ## Feature flags
 //!
-//! All four are on by default and all four are additive: a feature only ever
-//! compiles more. Wire-behaviour choices are wrapper types, because Cargo
-//! unifies features across the dependency graph and a transitive crate could
-//! otherwise flip them for everyone.
+//! All three are on by default and all three are additive: a feature only ever
+//! compiles more. Behaviour choices are never features — they are wrapper
+//! types ([`CaseInsensitive`], [`Compact`]) or a call-site choice, because
+//! Cargo unifies features across the dependency graph and a transitive crate
+//! could otherwise flip them for everyone.
 //!
 //! | Feature | Provides |
 //! |---------|----------|
 //! | `filter` | `filter` and its parser. Off: eight fewer crates (`lalrpop-util`, `fluent-uri`, `regex-automata`, `regex-syntax`, `aho-corasick`, `borrow-or-share`, `ref-cast`, `ref-cast-impl`) |
 //! | `models` | every resource and protocol message |
 //! | `schemas` | the embedded RFC 7643 schema definitions and the `get_schemas` lookup; ~48 KB of `include_str!` |
-//! | `case-insensitive` | `utils::case`, which canonicalises attribute-name case before deserializing (RFC 7643 §2.1) |
 //!
 //! Dropping `filter` takes the dependency tree from 22 crates to 14 and removes
 //! a regex engine from the supply chain, which is the point; it also shortens
@@ -219,6 +256,7 @@ pub(crate) const ENTERPRISE_USER_SCHEMA: &str = include_str!("schemas/enterprise
 /// The RFC 7643 resource models and RFC 7644 protocol messages.
 #[cfg(feature = "models")]
 pub mod models {
+    pub mod datetime;
     pub mod enterprise_user;
     pub mod errors;
     pub mod group;
@@ -237,16 +275,24 @@ pub(crate) mod filter_parser;
 pub mod filter;
 pub mod schema_urns;
 
+#[cfg(feature = "models")]
+pub use models::datetime::{ParseScimDateTimeError, ScimDateTime};
+
+pub use case_insensitive::CaseInsensitive;
+pub use compact::Compact;
+
 pub use utils::validation::{
     Context, ContextMarker, CreateRequest, ReplaceRequest, Response, Strict, Valid, Validate,
     ValidationError, ValidationErrorKind, at_most_one_primary, require_schema_urn,
 };
 
+/// Case-insensitive attribute names, per RFC 7643 §2.1.
+pub mod case_insensitive;
+/// Compact serialization: omit unassigned multi-valued attributes.
+pub mod compact;
+
 /// Declaring the utils module which contains the error submodule
 pub mod utils {
-    #[cfg(feature = "case-insensitive")]
-    pub mod case;
-    pub mod compact;
     pub mod error;
     #[cfg(feature = "models")]
     pub(crate) mod serde;

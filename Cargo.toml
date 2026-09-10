@@ -18,7 +18,7 @@ rust-version = "1.86"
 [features]
 # On unless a consumer sets `default-features = false`. The lists on the
 # individual features below say what each one *implies*, not whether it is on.
-default = ["filter", "models", "schemas", "case-insensitive"]
+default = ["filter", "models", "schemas"]
 # RFC 7644 §3.4.2.2 filter and §3.5.2 PATCH-path parsing. Turning this off
 # drops eight crates: lalrpop-util, fluent-uri, regex-automata, regex-syntax,
 # aho-corasick, borrow-or-share, ref-cast and ref-cast-impl.
@@ -29,15 +29,6 @@ models = []
 # `models`, since `get_schemas` and `get_resource_types` return model types.
 schemas = ["models"]
 
-# `utils::case` — RFC 7643 §2.1 says attribute names are case-insensitive, so
-# `CaseInsensitive<T>` and `utils::case::from_str` canonicalise key case before
-# deserializing. On by default, and additive like the others: it compiles a
-# module a consumer has to name to use, so nothing changes for one that never
-# does, however the rest of the graph is built. Wire-behaviour switches such as
-# lenient booleans or compact output are deliberately types, not features —
-# Cargo unifies features across the whole graph, so a feature would let any
-# transitive crate flip them for everyone. See `utils::compact::Compact`.
-case-insensitive = ["models"]
 
 # Caret requirements at major.minor; rationale in CONTRIBUTING.md § Dependencies.
 [dependencies]
