@@ -68,6 +68,12 @@ below; 1.0 was the one moment they were free.
 - **Feature flags** `filter`, `models` and `schemas`, all on by default and
   all additive. `default-features = false, features = ["filter"]` gives a
   server the grammar alone and drops eight crates.
+- **`ScimDateTime::xsd_equivalent` and `xsd_partial_cmp`** implement the XSD
+  1.1 §3.3.7.1 relation, so the same instant written in two offsets compares
+  equal even though `==` stays textual. `Ord` is absent on purpose: a value
+  with an offset and one without are ·incomparable· unless the second falls
+  entirely to one side after `±14:00` is imputed to it, and the comparison
+  answers `None` there rather than inventing an order.
 - **Direction-aware validation**: `validate_as(Context)` with
   `CreateRequest`, `ReplaceRequest` and `Response`; `Valid<T>` as proof that
   a value passed; `Strict<T, M>` to deserialize and validate in one step.

@@ -174,6 +174,7 @@
 //! reaches for [`case_insensitive`] at the call site.
 //!
 //! ```
+//! # #[cfg(feature = "models")] {
 //! use scim_v2::models::user::User;
 //!
 //! let body = r#"{"schemas":["urn:ietf:params:scim:schemas:core:2.0:User"],"USERNAME":"bjensen"}"#;
@@ -181,31 +182,37 @@
 //! assert!(serde_json::from_str::<User>(body).is_err()); // exact-match
 //! let user: User = scim_v2::case_insensitive::from_str(body).unwrap(); // §2.1
 //! assert_eq!(user.user_name, "bjensen");
+//! # }
 //! ```
 //!
 //! ## Timestamps
 //!
-//! `meta.created` and `meta.lastModified` are [`ScimDateTime`], not `String`.
+//! `meta.created` and `meta.lastModified` are `ScimDateTime`, not `String`.
 //! RFC 7643 §2.3.5 requires a valid `xsd:dateTime` including both a date and a
 //! time, and §3.1 makes every `meta` sub-attribute readOnly and
 //! provider-assigned — so the party most likely to write a malformed one is a
 //! service provider built on this crate, and the type is what stops it.
 //!
 //! ```
+//! # #[cfg(feature = "models")] {
 //! use scim_v2::ScimDateTime;
 //!
 //! let created: ScimDateTime = "2010-01-23T04:56:22Z".parse().unwrap();
 //! assert!("2010-02-30T04:56:22Z".parse::<ScimDateTime>().is_err());
 //! assert_eq!(created.as_str(), "2010-01-23T04:56:22Z");
+//! # }
 //! ```
 //!
-//! It validates a lexical form and nothing more: no arithmetic, no ordering,
-//! no time zone conversion. The crate takes no date-time dependency because
+//! It validates a lexical form: no arithmetic, no time zone conversion, and
+//! no normalising. `==` is textual, so ask about instants with
+//! `ScimDateTime::xsd_equivalent` and `ScimDateTime::xsd_partial_cmp`,
+//! which implement §3.3.7.1 and answer `None` where the spec says two values
+//! are ·incomparable·. The crate takes no date-time dependency because
 //! none of them fits — XSD makes the offset optional, and `time`, `chrono`
 //! and `jiff` each split offset-bearing and offset-less values across two
 //! different types, so a field typed as one of them would reject conformant
 //! input or invent an offset. [The module docs](models::datetime) give the
-//! full limits and how to convert.
+//! full limits and how to convert (`models::datetime`).
 //!
 //! ## Feature flags
 //!
@@ -287,9 +294,7 @@ pub use utils::validation::{
     ValidationError, ValidationErrorKind, at_most_one_primary, require_schema_urn,
 };
 
-/// Case-insensitive attribute names, per RFC 7643 §2.1.
 pub mod case_insensitive;
-/// Compact serialization: omit unassigned multi-valued attributes.
 pub mod compact;
 
 /// Declaring the utils module which contains the error submodule

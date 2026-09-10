@@ -293,8 +293,23 @@ assert!("2010-01-23".parse::<ScimDateTime>().is_err());
 assert!(created.has_offset());
 ```
 
-It validates a lexical form and stops there — no arithmetic, no ordering, no
-time zone conversion. That is deliberate. XSD makes the offset optional, and
+`==` compares the text, because the spelling is what this type carries. To ask
+whether two values name the same instant, use `xsd_equivalent`, or
+`xsd_partial_cmp` for order; both implement XSD 1.1 §3.3.7.1, and the latter
+answers `None` for the pairs the spec calls incomparable, which is why there is
+no `Ord`.
+
+```rust
+use scim_v2::ScimDateTime;
+
+let z: ScimDateTime = "2010-01-23T04:56:22Z".parse().unwrap();
+let pst: ScimDateTime = "2010-01-22T20:56:22-08:00".parse().unwrap();
+assert!(z != pst); // different spelling
+assert!(z.xsd_equivalent(&pst)); // same instant
+```
+
+Beyond that it validates a lexical form and stops — no arithmetic, no time
+zone conversion. That is deliberate. XSD makes the offset optional, and
 `time`, `chrono` and `jiff` each split offset-bearing from offset-less values
 across two different types (`OffsetDateTime`/`PrimitiveDateTime`,
 `DateTime<Tz>`/`NaiveDateTime`, `Timestamp`/`civil::DateTime`), so a field

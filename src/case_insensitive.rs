@@ -26,6 +26,7 @@
 //! choice is made per call site by which of these you reach for:
 //!
 //! ```
+//! # #[cfg(feature = "models")] {
 //! use scim_v2::models::user::User;
 //!
 //! let body = r#"{"schemas":["urn:ietf:params:scim:schemas:core:2.0:User"],"USERNAME":"bjensen"}"#;
@@ -36,12 +37,13 @@
 //! // Canonicalised first, per §2.1.
 //! let user: User = scim_v2::case_insensitive::from_str(body).unwrap();
 //! assert_eq!(user.user_name, "bjensen");
+//! # }
 //! ```
 //!
 //! [`CaseInsensitive<T>`] is the primitive and the one to reach for in a
 //! signature — a `serde` front end such as an `axum` extractor can name it
-//! directly, and it is re-exported as [`scim_v2::CaseInsensitive`]. [`from_str`]
-//! and [`from_value`] are shorthand for wrapping and unwrapping it, for the
+//! directly, and it is re-exported as [`scim_v2::CaseInsensitive`].
+//! [`from_str()`] and [`from_value()`] are shorthand for wrapping and unwrapping it, for the
 //! common case of having the bytes in hand.
 //!
 //! [`CaseInsensitive<T>`]: CaseInsensitive

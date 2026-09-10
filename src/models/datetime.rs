@@ -11,14 +11,24 @@
 //! # What this type deliberately does not do
 //!
 //! It validates and carries a lexical form. It does not represent an instant.
-//! There is no arithmetic, no ordering, no comparison across time zone
-//! offsets, no conversion to UTC, and no normalisation to a canonical
-//! spelling. `PartialEq` compares the text, so `2010-01-23T04:56:22Z` and
-//! `2010-01-22T20:56:22-08:00` are the same instant and are *not* equal here.
-//! [`Ord`] is intentionally not implemented: XSD 1.1 §3.3.7.1 notes that a
-//! value carrying an offset and one without are ordered by imputing both
-//! `+14:00` and `−14:00` to the latter, so "many such combinations will be
-//! ·incomparable·" and dateTime has only a partial order.
+//! There is no arithmetic, no conversion to UTC, and no normalisation to a
+//! canonical spelling.
+//!
+//! `PartialEq` and `Hash` compare the *text*, so `2010-01-23T04:56:22Z` and
+//! `2010-01-22T20:56:22-08:00` are the same instant and are not equal here.
+//! That is deliberate: the spelling is the value this type carries, and
+//! byte-identity is what keeps `Eq` and `Hash` consistent with it. Ask about
+//! instants with [`ScimDateTime::xsd_equivalent`] and
+//! [`ScimDateTime::xsd_partial_cmp`], which implement the spec's own relation.
+//!
+//! [`Ord`] is deliberately absent, because `dateTime` has no total order. XSD
+//! 1.1 §3.3.7.1: "Since the order of a dateTime value having a
+//! ·timezoneOffset· relative to another value whose ·timezoneOffset· is absent
+//! is determined by imputing time zone offsets of both +14:00 and −14:00 to
+//! the value with no time zone offset, many such combinations will be
+//! ·incomparable· because the two imputed time zone offsets yield different
+//! orders." A comparison that answers [`None`] is the honest result; sorting a
+//! feed that mixes the two needs a normalising rule this crate cannot know.
 //!
 //! Those are the things a date-time library would give you, and this crate
 //! does not depend on one. The reason is fit, not weight.
@@ -56,6 +66,7 @@
 //! [`ScimDateTime::has_offset`] and decide what your caller should do with a
 //! timestamp that names no instant — the crate will not guess for you.
 
+use std::cmp::Ordering;
 use std::fmt;
 use std::str::FromStr;
 
@@ -112,6 +123,52 @@ impl ScimDateTime {
             return false;
         };
         time.ends_with('Z') || time.contains('+') || time.contains('-')
+    }
+
+    /// Whether two values name the same instant, per XSD 1.1 §3.3.7.1.
+    ///
+    /// Unlike `==`, which compares the text, this compares position on the
+    /// time line, so one moment written two ways is equivalent. Values that
+    /// are ·incomparable· are not equivalent.
+    ///
+    /// ```
+    /// # use scim_v2::ScimDateTime;
+    /// let z: ScimDateTime = "2010-01-23T04:56:22Z".parse().unwrap();
+    /// let pst: ScimDateTime = "2010-01-22T20:56:22-08:00".parse().unwrap();
+    /// assert!(z != pst); // same instant, different spelling
+    /// assert!(z.xsd_equivalent(&pst));
+    /// ```
+    pub fn xsd_equivalent(&self, other: &Self) -> bool {
+        self.xsd_partial_cmp(other) == Some(Ordering::Equal)
+    }
+
+    /// Order per XSD 1.1 §3.3.7.1, or [`None`] when the two are
+    /// ·incomparable·.
+    ///
+    /// Two values that both carry an offset, or both omit one, always compare.
+    /// One of each compares only when the offset-less value falls entirely on
+    /// one side of the other after offsets of `+14:00` and `−14:00` are
+    /// imputed to it, which is the spec's own rule and the reason [`Ord`] is
+    /// absent.
+    ///
+    /// ```
+    /// # use scim_v2::ScimDateTime;
+    /// # use std::cmp::Ordering;
+    /// let fixed: ScimDateTime = "2010-01-23T12:00:00Z".parse().unwrap();
+    /// let near: ScimDateTime = "2010-01-23T12:00:00".parse().unwrap();
+    /// let far: ScimDateTime = "2010-01-25T12:00:00".parse().unwrap();
+    /// assert_eq!(fixed.xsd_partial_cmp(&near), None); // inside ±14:00
+    /// assert_eq!(fixed.xsd_partial_cmp(&far), Some(Ordering::Less));
+    /// ```
+    pub fn xsd_partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        let a = Parts::of(&self.0);
+        let b = Parts::of(&other.0);
+        match (a.offset_minutes, b.offset_minutes) {
+            // Both anchored to UTC, or both floating: one time line.
+            (Some(_), Some(_)) | (None, None) => Some(a.cmp_on_timeline(&b)),
+            (Some(_), None) => a.cmp_to_floating(&b),
+            (None, Some(_)) => b.cmp_to_floating(&a).map(Ordering::reverse),
+        }
     }
 }
 
@@ -172,6 +229,149 @@ impl<'de> Deserialize<'de> for ScimDateTime {
         let s = String::deserialize(deserializer)?;
         Self::try_from(s).map_err(serde::de::Error::custom)
     }
+}
+
+/// One value split into the properties XSD 1.1 §D.2.1 models it with, enough
+/// of them to place it on the time line. Only ever built from a string that
+/// has already passed [`is_date_time`], so the shape is assumed, not checked.
+///
+/// §D.2.1: "Values for the six primary properties are always stored in their
+/// 'local' values (the values shown in the lexical representations), rather
+/// than converted to ·UTC·." The offset is applied when placing the value,
+/// never when storing it.
+struct Parts<'a> {
+    /// Days from 1970-01-01, with `24:00:00` already rolled into the next day.
+    days: i128,
+    /// Seconds since local midnight, `0..86_400`.
+    second_of_day: i64,
+    /// Fractional-second digits, without the point. Trailing zeros are not
+    /// significant, so these are compared zero-padded.
+    fraction: &'a str,
+    /// Minutes east of UTC, absent when the value carries no offset.
+    offset_minutes: Option<i32>,
+}
+
+impl<'a> Parts<'a> {
+    fn of(s: &'a str) -> Self {
+        let b = s.as_bytes();
+        let mut i = usize::from(b[0] == b'-');
+        let year_start = i;
+        while b[i].is_ascii_digit() {
+            i += 1;
+        }
+        let mut year: i128 = s[year_start..i]
+            .bytes()
+            .fold(0, |acc, d| acc * 10 + i128::from(d - b'0'));
+        if b[0] == b'-' {
+            year = -year;
+        }
+        let num = |at: usize| i64::from(b[at] - b'0') * 10 + i64::from(b[at + 1] - b'0');
+        let (month, day) = (num(i + 1) as u32, num(i + 4) as u32);
+        i += 6; // "-MM-DD"
+
+        let (mut days, second_of_day) = (days_from_civil(year, month, day), 0);
+        let second_of_day = if b[i..].starts_with(b"T24:00:00") {
+            i += 9;
+            days += 1; // §3.3.7.2's endOfDayFrag is the next day's midnight
+            second_of_day
+        } else {
+            i += 1; // 'T'
+            let v = num(i) * 3600 + num(i + 3) * 60 + num(i + 6);
+            i += 8;
+            v
+        };
+
+        let fraction = if b.get(i) == Some(&b'.') {
+            let start = i + 1;
+            i = start;
+            while i < b.len() && b[i].is_ascii_digit() {
+                i += 1;
+            }
+            &s[start..i]
+        } else {
+            ""
+        };
+
+        let offset_minutes = match b.get(i) {
+            None => None,
+            Some(b'Z') => Some(0),
+            Some(sign) => {
+                let magnitude = (num(i + 1) * 60 + num(i + 4)) as i32;
+                Some(if *sign == b'-' { -magnitude } else { magnitude })
+            }
+        };
+
+        Self {
+            days,
+            second_of_day,
+            fraction,
+            offset_minutes,
+        }
+    }
+
+    /// Seconds from the epoch, with any offset applied. §3.3.7.1: "dateTime
+    /// values are ordered by their ·timeOnTimeline· value."
+    fn timeline(&self) -> i128 {
+        let offset = i128::from(self.offset_minutes.unwrap_or(0)) * 60;
+        self.days * 86_400 + i128::from(self.second_of_day) - offset
+    }
+
+    fn cmp_on_timeline(&self, other: &Self) -> Ordering {
+        cmp_instant(
+            self.timeline(),
+            self.fraction,
+            other.timeline(),
+            other.fraction,
+        )
+    }
+
+    /// `self` carries an offset and `floating` does not, so `floating` is not
+    /// one instant but every instant an offset in `±14:00` would give it.
+    /// §3.3.7.1 imputes both bounds and calls the pair ·incomparable· when
+    /// they disagree, which is what [`None`] means here.
+    fn cmp_to_floating(&self, floating: &Self) -> Option<Ordering> {
+        /// The widest offset §3.3.7.2 admits, in seconds.
+        const IMPUTED: i128 = 14 * 3600;
+
+        let here = self.timeline();
+        let local = floating.timeline();
+        let (earliest, latest) = (local - IMPUTED, local + IMPUTED);
+        match (
+            cmp_instant(here, self.fraction, earliest, floating.fraction),
+            cmp_instant(here, self.fraction, latest, floating.fraction),
+        ) {
+            (Ordering::Less, Ordering::Less) => Some(Ordering::Less),
+            (Ordering::Greater, Ordering::Greater) => Some(Ordering::Greater),
+            _ => None,
+        }
+    }
+}
+
+/// Whole seconds first, then fractional digits zero-padded to a common
+/// length, since trailing zeros in `secondFrag` are not significant.
+fn cmp_instant(a_secs: i128, a_frac: &str, b_secs: i128, b_frac: &str) -> Ordering {
+    a_secs.cmp(&b_secs).then_with(|| {
+        let width = a_frac.len().max(b_frac.len());
+        let pad = |f: &str| {
+            let mut owned = f.to_owned();
+            owned.extend(std::iter::repeat_n('0', width - f.len()));
+            owned
+        };
+        pad(a_frac).cmp(&pad(b_frac))
+    })
+}
+
+/// Days from 1970-01-01 in the proleptic Gregorian calendar, which is the
+/// calendar XSD 1.1 §D.2.1 uses, with a `year` of 0 meaning 1 BCE. Howard
+/// Hinnant's `days_from_civil`, in `i128` because `yearFrag` is unbounded.
+fn days_from_civil(year: i128, month: u32, day: u32) -> i128 {
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let year_of_era = y - era * 400;
+    let month_position = (i128::from(month) + 9) % 12;
+    let day_of_year = (153 * month_position + 2) / 5 + i128::from(day) - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era * 146_097 + day_of_era - 719_468
 }
 
 /// The XSD 1.1 Part 2 §3.3.7.2 `dateTimeLexicalRep` production, which that

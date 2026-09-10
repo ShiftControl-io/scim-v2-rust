@@ -1,6 +1,8 @@
 //! The accept/reject surface of RFC 7643 §2.3.5, which defers to XSD 1.1 Part
 //! 2 §3.3.7.2 for the lexical space and §3.3.7.1 for the day-of-month rule.
 
+use std::cmp::Ordering;
+
 use super::*;
 
 /// Every shape the published `dateTimeLexicalRep` admits.
@@ -151,4 +153,142 @@ fn handles_multibyte_input_without_panicking() {
     for s in ["2010-01-23T04:56:22Ω", "２０１０-01-23T04:56:22Z", "🕒"] {
         assert!(s.parse::<ScimDateTime>().is_err(), "should reject {s:?}");
     }
+}
+
+/// XSD 1.1 §3.3.7.1 orders values by their position on the time line, which
+/// is not what `==` does. Both behaviours are deliberate and they disagree.
+#[test]
+fn equivalence_is_by_instant_where_equality_is_by_text() {
+    let same_instant = [
+        ("2010-01-23T04:56:22Z", "2010-01-22T20:56:22-08:00"),
+        ("2010-01-23T04:56:22Z", "2010-01-23T04:56:22+00:00"),
+        ("2010-01-23T04:56:22Z", "2010-01-23T10:26:22+05:30"),
+        ("2010-01-23T24:00:00Z", "2010-01-24T00:00:00Z"), // end of day
+        ("2010-01-23T04:56:22.1Z", "2010-01-23T04:56:22.100Z"), // trailing zeros
+        ("2010-01-23T00:00:00+14:00", "2010-01-22T10:00:00Z"), // the ceiling
+        ("2010-01-23T00:00:00-14:00", "2010-01-23T14:00:00Z"),
+    ];
+    for (a, b) in same_instant {
+        let (x, y) = (parse(a), parse(b));
+        assert!(x.xsd_equivalent(&y), "{a} and {b} are one instant");
+        assert!(y.xsd_equivalent(&x), "equivalence is symmetric");
+        assert_eq!(x.xsd_partial_cmp(&y), Some(Ordering::Equal));
+        if a != b {
+            assert_ne!(x, y, "== stays textual: {a} vs {b}");
+        }
+    }
+}
+
+/// Values that both carry an offset, or both omit one, sit on a single time
+/// line and always compare.
+#[test]
+fn like_values_are_totally_ordered() {
+    let ascending = [
+        "-0001-12-31T23:59:59Z",
+        "0000-01-01T00:00:00Z", // year zero is 1 BCE, and a leap year
+        "0000-02-29T00:00:00Z",
+        "1969-12-31T23:59:59Z", // either side of the unix epoch
+        "1970-01-01T00:00:00Z",
+        "2010-01-23T04:56:22.09Z", // fractions order within a second
+        "2010-01-23T04:56:22.1Z",
+        "2010-01-23T04:56:22.11Z",
+        "2010-02-28T23:59:59Z", // and across a month boundary
+        "2010-03-01T00:00:00Z",
+        "12345-01-01T00:00:00Z",
+    ];
+    for window in ascending.windows(2) {
+        let (earlier, later) = (parse(window[0]), parse(window[1]));
+        assert_eq!(
+            earlier.xsd_partial_cmp(&later),
+            Some(Ordering::Less),
+            "{} < {}",
+            window[0],
+            window[1]
+        );
+        assert_eq!(later.xsd_partial_cmp(&earlier), Some(Ordering::Greater));
+        assert!(!earlier.xsd_equivalent(&later));
+    }
+
+    // Offset-less values compare to each other the same way.
+    assert_eq!(
+        parse("2010-01-23T04:56:22").xsd_partial_cmp(&parse("2010-01-23T04:56:23")),
+        Some(Ordering::Less)
+    );
+}
+
+/// The case that costs `dateTime` its total order: one value anchored, one
+/// floating. §3.3.7.1 imputes `+14:00` and `−14:00` to the floating one and
+/// calls the pair ·incomparable· when the two imputations disagree.
+#[test]
+fn an_offset_less_value_compares_only_outside_the_imputed_range() {
+    let anchored = parse("2010-01-23T12:00:00Z");
+    for (floating, expected) in [
+        ("2010-01-23T12:00:00", None),                 // same wall time
+        ("2010-01-23T23:59:59", None),                 // inside +14:00
+        ("2010-01-24T02:00:00", None),                 // exactly +14:00: bounds touch
+        ("2010-01-22T22:00:00", None),                 // exactly -14:00
+        ("2010-01-24T02:00:01", Some(Ordering::Less)), // one second past it
+        ("2010-01-22T21:59:59", Some(Ordering::Greater)),
+        ("2010-01-25T12:00:00", Some(Ordering::Less)),
+        ("2010-01-21T12:00:00", Some(Ordering::Greater)),
+    ] {
+        let other = parse(floating);
+        assert_eq!(
+            anchored.xsd_partial_cmp(&other),
+            expected,
+            "{} vs {floating}",
+            anchored.as_str()
+        );
+        assert_eq!(
+            other.xsd_partial_cmp(&anchored),
+            expected.map(Ordering::reverse),
+            "and the reverse"
+        );
+        assert!(
+            !anchored.xsd_equivalent(&other),
+            "never equivalent: {floating}"
+        );
+    }
+}
+
+/// The relation's own properties, over generated values rather than a table:
+/// reflexive, symmetric under reversal, and never disagreeing with byte
+/// equality, which is the invariant that lets both `==` and `xsd_equivalent`
+/// exist on one type.
+#[test]
+fn the_relation_is_reflexive_and_symmetric() {
+    let corpus: Vec<ScimDateTime> = [
+        "2010-01-23T04:56:22Z",
+        "2010-01-23T04:56:22",
+        "2010-01-22T20:56:22-08:00",
+        "2010-01-23T24:00:00.000+14:00",
+        "-0044-03-15T12:00:00",
+        "0000-02-29T00:00:00Z",
+        "12345-06-07T08:09:10.5-14:00",
+        "1970-01-01T00:00:00Z",
+    ]
+    .iter()
+    .map(|s| parse(s))
+    .collect();
+
+    for a in &corpus {
+        assert_eq!(a.xsd_partial_cmp(a), Some(Ordering::Equal), "reflexive");
+        assert!(a.xsd_equivalent(a));
+        for b in &corpus {
+            assert_eq!(
+                a.xsd_partial_cmp(b).map(Ordering::reverse),
+                b.xsd_partial_cmp(a),
+                "{} vs {}",
+                a.as_str(),
+                b.as_str()
+            );
+            if a == b {
+                assert!(a.xsd_equivalent(b), "byte-equal implies equivalent");
+            }
+        }
+    }
+}
+
+fn parse(s: &str) -> ScimDateTime {
+    s.parse().unwrap_or_else(|e| panic!("{s}: {e}"))
 }
