@@ -285,16 +285,21 @@ fn is_date_time(s: &str) -> bool {
 
 /// Days in `month`, applying the XSD 1.1 §3.3.7.1 "Constraint: Day-of-month
 /// Values": 30 for months 4, 6, 9 and 11, and February by the proleptic
-/// Gregorian leap rule. The year arrives as digits because `yearFrag` admits
-/// arbitrarily many of them; only its residue mod 400 matters here, and that
-/// residue is the same for a year and its negation.
+/// Gregorian leap rule.
+///
+/// The year arrives as digits because `yearFrag` admits arbitrarily many of
+/// them. Only the last four are read: 10000 is a multiple of 400, so a year
+/// and its last four digits agree modulo 400, and therefore modulo 4 and 100
+/// as well. That keeps the value under `u32` for any length of year, and the
+/// answer is the same for a year and its negation, since divisibility is.
 fn days_in_month(year: &[u8], month: u32) -> u32 {
     match month {
         4 | 6 | 9 | 11 => 30,
         2 => {
-            let y = year
+            let tail = &year[year.len().saturating_sub(4)..];
+            let y = tail
                 .iter()
-                .fold(0u32, |acc, d| (acc * 10 + u32::from(d - b'0')) % 400);
+                .fold(0u32, |acc, d| acc * 10 + u32::from(d - b'0'));
             if y % 400 == 0 || (y % 4 == 0 && y % 100 != 0) {
                 29
             } else {
