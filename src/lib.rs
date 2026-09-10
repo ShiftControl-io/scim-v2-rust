@@ -201,10 +201,11 @@
 //!
 //! It validates a lexical form and nothing more: no arithmetic, no ordering,
 //! no time zone conversion. The crate takes no date-time dependency because
-//! `time`, `chrono` and `jiff` are all pre-1.0, and a pre-1.0 type in a 1.0
-//! signature would tie this crate's stability to theirs. [The module
-//! docs](models::datetime) give the full limits and the one-line bridge to
-//! whichever library you already use.
+//! none of them fits — XSD makes the offset optional, and `time`, `chrono`
+//! and `jiff` each split offset-bearing and offset-less values across two
+//! different types, so a field typed as one of them would reject conformant
+//! input or invent an offset. [The module docs](models::datetime) give the
+//! full limits and how to convert.
 //!
 //! ## Feature flags
 //!

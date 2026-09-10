@@ -19,6 +19,8 @@ fn accepts_the_lexical_space() {
         "2010-01-23T24:00:00Z",   // endOfDayFrag
         "2010-01-23T24:00:00.0Z", // which may carry a zero fraction
         "2010-01-23T24:00:00.000",
+        "2010-01-23T24:00:00",    // end of day with no offset at all
+        "10000-02-29T00:00:00Z",  // five digits, divisible by 400
         "0000-01-01T00:00:00Z",   // year zero is 1 BCE in XSD 1.1
         "-0001-01-01T00:00:00Z",  // and years may be negative
         "12345-01-01T00:00:00Z",  // yearFrag is four digits *or more*
@@ -66,6 +68,15 @@ fn rejects_everything_outside_it() {
         "2010-01-23T04:56:22Z ",     // no trailing anything
         "2010-01-23T04:56:22ZZ",     //
         " 2010-01-23T04:56:22Z",     // no leading anything
+        "10100-02-29T00:00:00Z",     // five digits, by 100 and not by 400
+        // One non-digit in a two-digit field, positioned so a parser that
+        // only rejects when *both* halves are non-digits would read it as a
+        // legal value: ';' is '0' + 11.
+        "2010-0;-23T04:56:22Z",
+        "2010-01-23T0;:56:22Z",
+        "2010-01-23T04:0;:22Z",
+        "2010-01-23T04:56:0;Z",
+        "2010-01-23T04:56:22+0;:00",
         "2010-01-23T04:56:22+05:30:00",
         "yesterday",
     ] {
@@ -127,6 +138,11 @@ fn constructs_only_through_validating_paths() {
     assert!(ScimDateTime::try_from("nope").is_err());
     let err = ScimDateTime::try_from(String::from("nope")).expect_err("invalid");
     assert_eq!(err.value, "nope");
+
+    // The accessors hand back the value, not a placeholder.
+    let ts: ScimDateTime = "2010-01-23T04:56:22Z".parse().expect("valid");
+    assert_eq!(AsRef::<str>::as_ref(&ts), "2010-01-23T04:56:22Z");
+    assert_eq!(ts.into_string(), "2010-01-23T04:56:22Z");
 }
 
 /// Non-ASCII input must not panic on a byte index inside a character.

@@ -20,15 +20,27 @@
 //! `+14:00` and `−14:00` to the latter, so "many such combinations will be
 //! ·incomparable·" and dateTime has only a partial order.
 //!
-//! Those are the things a date-time library would give you. This crate does
-//! not depend on one, and the reason is semver rather than weight: `time`,
-//! `chrono` and `jiff` are all still pre-1.0, so putting one of their types in
-//! a 1.0 public signature would tie this crate's stability promise to a crate
-//! that has not made one, and a consumer who upgraded to a later major of that
-//! crate would hold a structurally different type than the one in these
-//! signatures, with no way to bridge the two.
+//! Those are the things a date-time library would give you, and this crate
+//! does not depend on one. The reason is fit, not weight.
 //!
-//! So the conversion is yours to make, and it is one line:
+//! XSD 1.1 §3.3.7.1 leaves `·timezoneOffset·` **optional**, and none of
+//! `time`, `chrono` or `jiff` has a single type that spans that. Each splits
+//! the two cases apart — `OffsetDateTime` beside `PrimitiveDateTime`,
+//! `DateTime<Tz>` beside `NaiveDateTime`, `Timestamp` beside
+//! `civil::DateTime` — so a field typed as any one of them either rejects a
+//! conformant offset-less value or invents an offset the wire never sent, and
+//! a faithful mapping needs a sum type across two of them. Extended years and
+//! the `24:00:00` end-of-day form narrow the fit further. A type that models
+//! the value space badly is worse than a string.
+//!
+//! Two smaller reasons stack on top. The value is a lexical form and this
+//! crate round-trips it byte for byte; parsing to an instant and formatting
+//! back would rewrite a provider's `meta`. And there is no consensus library
+//! to pick — putting one in `Meta`'s signature picks it for every consumer,
+//! including those already using another.
+//!
+//! So the conversion is yours to make, which for an offset-bearing value is
+//! one line:
 //!
 //! ```
 //! # use scim_v2::ScimDateTime;
@@ -39,10 +51,10 @@
 //! assert_eq!(ts.as_str(), "2010-01-23T04:56:22Z");
 //! ```
 //!
-//! Note when you do: XSD leaves the offset optional and this type follows the
-//! spec, so `as_str` may return a value with no offset, which RFC 3339 parsers
-//! reject. Reach for [`ScimDateTime::has_offset`] first if your caller needs
-//! an unambiguous instant.
+//! It is not one line for the rest. `as_str` may return a value with no
+//! offset, which every RFC 3339 parser rejects, so check
+//! [`ScimDateTime::has_offset`] and decide what your caller should do with a
+//! timestamp that names no instant — the crate will not guess for you.
 
 use std::fmt;
 use std::str::FromStr;
@@ -96,9 +108,8 @@ impl ScimDateTime {
     ///
     /// [`as_str`]: Self::as_str
     pub fn has_offset(&self) -> bool {
-        let time = match self.0.rfind('T') {
-            Some(i) => &self.0[i + 1..],
-            None => return false,
+        let Some(time) = self.0.rsplit('T').next() else {
+            return false;
         };
         time.ends_with('Z') || time.contains('+') || time.contains('-')
     }

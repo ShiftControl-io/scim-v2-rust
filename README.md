@@ -294,11 +294,14 @@ assert!(created.has_offset());
 ```
 
 It validates a lexical form and stops there — no arithmetic, no ordering, no
-time zone conversion. That is deliberate: `time`, `chrono` and `jiff` are all
-pre-1.0, and putting one of their types in a 1.0 signature would tie this
-crate's stability promise to theirs, so converting is left to you and is one
-line (`OffsetDateTime::parse(created.as_str(), &Rfc3339)`). The module docs
-carry the full list of what you give up.
+time zone conversion. That is deliberate. XSD makes the offset optional, and
+`time`, `chrono` and `jiff` each split offset-bearing from offset-less values
+across two different types (`OffsetDateTime`/`PrimitiveDateTime`,
+`DateTime<Tz>`/`NaiveDateTime`, `Timestamp`/`civil::DateTime`), so a field
+typed as any one of them would reject conformant input or invent an offset the
+provider never sent. Converting is left to you: one line when `has_offset()`
+is true (`OffsetDateTime::parse(created.as_str(), &Rfc3339)`), and your own
+decision when it is false. The module docs carry the full list.
 
 ### Parsing a SCIM filter
 
