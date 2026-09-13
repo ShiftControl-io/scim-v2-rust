@@ -8,18 +8,20 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Models, parsers and validators for the System for Cross-domain Identity
-Management (SCIM) 2.0 protocol — [RFC 7642](https://www.rfc-editor.org/rfc/rfc7642),
+Management (SCIM) 2.0 protocol. [RFC 7642](https://www.rfc-editor.org/rfc/rfc7642),
 [RFC 7643](https://www.rfc-editor.org/rfc/rfc7643) and
-[RFC 7644](https://www.rfc-editor.org/rfc/rfc7644).
+[RFC 7644](https://www.rfc-editor.org/rfc/rfc7644) define the protocol.
 
 ## Quick start
 
-A SCIM server receiving `POST /Users`. `Strict` deserializes the body and
-validates it for the direction it is travelling in one step, so a
-non-conformant request never becomes a `User` at all; the error names the
-offending attribute by its wire path and carries the RFC 7644 §3.12 `scimType`,
-ready for a `400`. `Valid` is the type-level proof that a value passed, and
-`Context::Response` checks the rules that apply on the way back out.
+This example shows a SCIM server that receives `POST /Users`. `Strict` does two
+operations in one step. `Strict` deserializes the body, and validates the body
+for the direction of travel. A non-conformant request does not become a `User`.
+The error names the attribute that failed, by the wire path of the attribute.
+The error also carries the RFC 7644 §3.12 `scimType` value. A server returns
+that value in a `400` response. `Valid` is the type-level proof that a value
+passed validation. `Context::Response` checks the rules that apply to the
+response.
 
 ```rust
 use scim_v2::{Context, CreateRequest, Strict, Valid};
@@ -55,26 +57,28 @@ assert!(json.contains(r#""id":"2819c223-7f76-453a-919d-413861904646""#));
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-Reading a list response, parsing a filter, handling a PATCH and the rest are
-under [Usage](#usage) and [For SCIM servers](#for-scim-servers) below.
+The sections [Usage](#usage) and [For SCIM servers](#for-scim-servers) below
+show the other operations. These operations include a read of a list response,
+a parse of a filter, and a PATCH operation.
 
 ## Scope
 
-This crate is deliberately narrow. It models the wire format, parses the two
-grammars the RFC defines, and checks the attributes the RFC marks REQUIRED.
+This crate is narrow by design. The crate models the wire format. The crate
+parses the two grammars that the RFC defines. The crate checks the attributes
+that the RFC marks REQUIRED.
 
 - **Resources** — `User`, `Group`, `EnterpriseUser`, `Schema`, `ResourceType`,
   `ServiceProviderConfig`.
 - **Protocol messages** — `ListResponse`, `SearchRequest`, `ListQuery`,
   `PatchOp`, `ScimHttpError`.
-- **Filter and PATCH-path parsing** — the full RFC 7644 §3.4.2.2 filter
+- **Filter and PATCH-path parsers** — the full RFC 7644 §3.4.2.2 filter
   grammar and the §3.5.2 PATCH path rule, with a depth guard.
-- **Validation** — the `Validate` trait, reporting failures by SCIM wire path
-  so a server can echo them in an RFC 7644 §3.12 response.
+- **Validation** — the `Validate` trait. The trait reports a failure by the
+  SCIM wire path. A server returns that path in an RFC 7644 §3.12 response.
 
-It performs no I/O, evaluates no filter against storage, and does not wrap
-`serde` — use `serde_json` directly for that. Parsing a filter gives you the
-AST; mapping that AST onto your storage is your call.
+The crate performs no I/O. The crate evaluates no filter against storage. The
+crate does not wrap `serde`. Use `serde_json` directly. A parse of a filter
+gives you the AST. You map that AST onto your storage.
 
 ## Installation
 
@@ -85,8 +89,9 @@ scim_v2 = "1"
 
 ### Feature flags
 
-All three are on by default, and all three are additive — a feature only ever
-compiles more, never changes what an existing call does.
+All three features are on by default. All three features are additive. A
+feature only adds code to the compilation. A feature does not change what an
+existing call does.
 
 | Feature | What it does |
 |---------|--------------|
@@ -94,37 +99,40 @@ compiles more, never changes what an existing call does.
 | `models` | every resource and protocol message |
 | `schemas` | the embedded RFC 7643 schema definitions and `get_schemas` |
 
-Wire-behaviour choices — lenient booleans, compact output, case folding — are
-**types**, not features: `Compact<&T>`, `CaseInsensitive<T>`, `Strict<T, M>`.
-Cargo unifies features across the whole dependency graph, so a feature switch
-would let any transitive crate change what every other consumer puts on the
-wire; a wrapper type is a decision the caller makes at the call site.
+Lenient booleans and case folding are wire-behaviour choices.
+These choices are **types**, not features: `CaseInsensitive<T>`
+and `Strict<T, M>`. Cargo unifies features across the whole dependency graph.
+A feature switch would let any transitive crate change what every other
+consumer puts on the wire. A wrapper type is a decision that the caller makes
+at the call site.
 
-Turning off `filter` drops eight crates — `lalrpop-util`, `fluent-uri`,
-`regex-automata`, `regex-syntax`, `aho-corasick`, `borrow-or-share`,
-`ref-cast`, `ref-cast-impl` — taking the tree from 22 to 14 and removing a
-regex engine from the supply chain. A SCIM server that has its own resource
-model and wants only the grammar:
+If you turn off `filter`, the build drops eight crates: `lalrpop-util`,
+`fluent-uri`, `regex-automata`, `regex-syntax`, `aho-corasick`,
+`borrow-or-share`, `ref-cast` and `ref-cast-impl`. The dependency tree goes
+from 22 crates to 14 crates. The build also removes a regex engine from the
+supply chain. The example below is for a SCIM server that has its own resource
+model and wants only the grammar.
 
 ```toml
 scim_v2 = { version = "1", default-features = false, features = ["filter"] }
 ```
 
-`SearchRequest`, `ListQuery` and `PatchOp` each carry a parsed filter or PATCH
-path, so they need both `models` and `filter`.
+`SearchRequest`, `ListQuery` and `PatchOp` each carry a parsed filter or a
+parsed PATCH path. These three types need both `models` and `filter`.
 
-The MSRV is **1.86**, set by `lalrpop-util`, whose whole 0.23 line requires it.
-`rust-version` is a package-wide floor that Cargo enforces before compiling
-anything and is not conditional on features, so 1.86 applies to every
-configuration — including `--no-default-features`, where the *code* would
-compile on 1.85. Cargo has no way to express a per-feature MSRV, so 1.86 is
-the floor in practice.
+The MSRV is **1.86**. `lalrpop-util` sets this floor, because the whole 0.23
+line of `lalrpop-util` requires 1.86. `rust-version` is a package-wide floor.
+Cargo enforces `rust-version` before it compiles anything, and features do not
+change the floor. The floor of 1.86 applies to every configuration. One such
+configuration is `--no-default-features`, where the *code* would compile on
+1.85. Cargo has no way to express a per-feature MSRV. Therefore 1.86 is the
+floor in practice.
 
 ## Usage
 
 ### Deserializing a resource
 
-Every model is a plain `serde` type, so use `serde_json` directly.
+Every model is a plain `serde` type. Use `serde_json` directly.
 
 ```rust
 use scim_v2::models::user::User;
@@ -137,31 +145,37 @@ assert_eq!(user.user_name, "jdoe@example.com");
 
 ### Validation — read this before shipping a server
 
-**Deserializing a model does not validate it.** The parsers are deliberately
-lenient so that a real provider's payload can always be read, and that means
-`serde_json::from_str::<User>(..)` will happily give you a `User` with an empty
-`userName`, two `primary: true` emails, an `id` the client had no business
-sending, or a `schemas` naming the wrong resource. If you store that and later
-build a response from it, you ship a non-conformant response; if it carried a
-`password`, you may echo it back.
+**Deserialization of a model does not validate the model.** The parsers are
+lenient by design. This design lets the crate read a real provider's payload
+every time. Therefore `serde_json::from_str::<User>(..)` gives you a `User`
+that holds an empty `userName`, or two `primary: true` emails, or an `id` that
+the client must not send, or a `schemas` value that names the wrong resource.
+If you store such a `User`, and you later build a response from it, you send a
+non-conformant response. If the `User` holds a `password`, you can return the
+`password` to the client.
 
-Nearly every SCIM attribute is optional, so `serde` cannot express the
-RFC's REQUIRED rules on its own. `Validate` does, and it names the offending
-attribute by its **wire** path — `userName`, not `user_name` — so a server can
-return it in the RFC 7644 §3.12 error.
+Nearly every SCIM attribute is optional. Therefore `serde` alone cannot express
+the REQUIRED rules of the RFC. `Validate` expresses these rules. `Validate`
+names the attribute that failed by the **wire** path of the attribute, for
+example `userName` and not `user_name`. A server returns that path in the RFC
+7644 §3.12 error.
 
-There are three ways to run it, from least to most enforced:
+There are three ways to run `Validate`. The list below goes from the least
+enforced way to the most enforced way.
 
-1. `value.validate()` — the direction-agnostic checks. Easy to forget.
+1. `value.validate()` — the direction-agnostic checks. A caller can forget
+   this call.
 2. `value.validate_as(Context::CreateRequest)` — adds the rules that depend on
-   direction: `id` MUST NOT be on a create, MUST be on a response, `password`
-   MUST NOT be on a response.
-3. `Valid<T>` and `Strict<T, M>` — make forgetting impossible. A handler that
-   takes `Valid<User>` cannot receive an unvalidated one, and `Strict<User,
-   CreateRequest>` rejects a non-conformant body at deserialization.
+   the direction: a create request MUST NOT carry `id`, a response MUST carry
+   `id`, and a response MUST NOT carry `password`.
+3. `Valid<T>` and `Strict<T, M>` — these two types make the omission
+   impossible. A handler that takes `Valid<User>` cannot receive an
+   unvalidated `User`. `Strict<User, CreateRequest>` rejects a non-conformant
+   body at deserialization.
 
-For a server, use 3. For a client reading responses, 1 or 2 is usually enough,
-since a non-conformant *provider* is theirs to fix, not yours.
+For a server, use method 3. For a client that reads responses, method 1 or
+method 2 is usually sufficient. The operator of a non-conformant *provider*
+must fix the provider. The fix is not your responsibility.
 
 ```rust
 use scim_v2::{Validate, models::{errors::ScimType, user::User}};
@@ -181,7 +195,8 @@ let body = err.to_http_error();
 assert_eq!(body.scim_type, Some(ScimType::InvalidValue));
 ```
 
-The enforced form, which is what a server's request handler should take:
+The example below shows the enforced form. A server's request handler should
+take this form.
 
 ```rust
 use scim_v2::{Context, CreateRequest, Strict, Valid, models::user::User};
@@ -211,9 +226,9 @@ assert!(Valid::new(user, Context::Response).is_err());
 
 ### Reading a list response
 
-`ListResponse` is generic over the resource. When the endpoint returns one
-kind — as `GET /Users` does — name it, and the resources deserialize
-directly with no enum to match through.
+`ListResponse` is generic over the resource. An endpoint such as `GET /Users`
+returns one kind of resource. Name that kind in the type. The resources then
+deserialize directly, and you do not match through an enum.
 
 ```rust
 use scim_v2::{Validate, models::{others::ListResponse, user::User}};
@@ -234,26 +249,25 @@ assert_eq!(list.resources[0].user_name, "bjensen");
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-For a heterogeneous page — which RFC 7644 §3.4.3 allows when querying the root
-`/.search` endpoint — use `ListResponse<Resource<String>>` and match on the
-`Resource` variant.
+RFC 7644 §3.4.3 allows a heterogeneous page for a query on the root `/.search`
+endpoint. For such a page, use `ListResponse<Resource<String>>` and match on
+the `Resource` variant.
 
 ### Multi-valued attributes
 
-RFC 7643 §2.5 makes an unassigned attribute, an explicit `null`, and an empty
-array equivalent in state, so multi-valued attributes are `Vec<T>` rather than
-`Option<Vec<T>>`, and all three wire forms deserialize to an empty `Vec`.
+RFC 7643 §2.5 makes three wire forms equivalent in state: an unassigned
+attribute, an explicit `null`, and an empty array. Therefore a multi-valued
+attribute is a `Vec<T>` and not an `Option<Vec<T>>`. All three wire forms
+deserialize to an empty `Vec`.
 
-On the way out an empty `Vec` is emitted as `[]`, never as `null` and not by
-omission. That is deliberate: RFC 7644 §3.5.1 says a client "MAY specify … an
-empty array `[]` for a multi-valued attribute, to clear all values", while an
-omitted attribute is merely "not asserted" and the server may keep or default
-it. Since these models are request bodies as well as representations, `[]` is
-what keeps a conformant clear-all expressible. A server serializing a response
-that wants the compact form wraps the value in `compact::Compact(&user)`
-— a wrapper rather than a feature, because Cargo features unify across the
-dependency graph and a transitive crate could otherwise change what you put on
-the wire.
+Serialization writes an empty `Vec` as `[]`. Serialization never writes `null`,
+and never omits the attribute. This behaviour is deliberate. RFC 7644 §3.5.1
+says that a client "MAY specify … an empty array `[]` for a multi-valued
+attribute, to clear all values". An omitted attribute is only "not asserted",
+and the server may keep the value or apply a default. These models are request
+bodies as well as representations. `[]` keeps a conformant clear-all
+expressible. An attribute that nobody assigned is absent, and `Multi<T>`
+leaves it off the wire without any wrapper.
 
 ```rust
 use scim_v2::models::user::User;
@@ -269,13 +283,70 @@ for body in [
 # Ok::<(), serde_json::Error>(())
 ```
 
+### Proxying between providers
+
+A bridge is a service provider on the way in and a client on the way out:
+
+```text
+JumpCloud ──PUT──▶ [ you as service provider │ you as client ] ──PUT──▶ CyberArk
+ (client)            deserialize → mutate → serialize           (service provider)
+```
+
+Both roles use the same types. In a response, the three wire forms above are
+equivalent. In a request, they are not. RFC 7644 §3.5.1 makes an omitted
+readWrite attribute "not asserted by the client", and it gives the client a
+deterministic alternative: clients "MAY specify "null" for a single-valued
+attribute, or an empty array "[]" for a multi-valued attribute, to clear all
+values".
+
+`Multi<T>` keeps those two apart, so a bridge needs no wrapper and no extra
+call. A message that arrives and leaves unchanged is unchanged:
+
+```rust
+use scim_v2::models::user::User;
+
+// JumpCloud clears the emails and says nothing about phone numbers.
+let inbound = r#"{"schemas":["urn:ietf:params:scim:schemas:core:2.0:User"],"userName":"BJENSEN","emails":[]}"#;
+
+let mut user: User<String> = serde_json::from_str(inbound)?;
+user.user_name = user.user_name.to_lowercase();
+let outbound = serde_json::to_value(&user)?;
+
+assert_eq!(outbound["userName"], "bjensen");
+assert_eq!(outbound["emails"], serde_json::json!([])); // the clear survives
+assert!(outbound.get("phoneNumbers").is_none()); // never asserted, still absent
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+| upstream sent | §3.5.1 meaning | `Multi<T>` state | goes downstream as |
+|---|---|---|---|
+| `"emails": null` | clear all values | cleared | `[]` |
+| `"emails": []` | clear all values | cleared | `[]` |
+| no `phoneNumbers` member | not asserted | absent | omitted |
+
+A server applying a `PUT` asks the field directly:
+
+```rust
+# use scim_v2::models::user::User;
+# let (mut stored, body) = (User::<String>::default(), User::<String>::default());
+if body.emails.is_asserted() {
+    stored.emails = body.emails; // set these, or clear all when empty
+}
+// absent: the client asserted nothing, so leave the stored value alone
+```
+
+Everything else reads as before. `Multi<T>` derefs to `[T]`, so `user.emails.len()`,
+`user.emails.iter()`, `user.emails[0]` and `for email in &user.emails` are
+unchanged. A reader that does not care about the distinction never sees it.
+
 ### Timestamps
 
-`meta.created` and `meta.lastModified` are `ScimDateTime`, not `String`. RFC
-7643 §2.3.5 requires a valid `xsd:dateTime` carrying both a date and a time,
-and §3.1 makes every `meta` sub-attribute readOnly and provider-assigned, so
-the party most likely to write a malformed one is a server built on this
-crate. The type is what stops it: the only ways to make one all validate.
+`meta.created` and `meta.lastModified` are `ScimDateTime` values, not `String`
+values. RFC 7643 §2.3.5 requires a valid `xsd:dateTime` that carries both a
+date and a time. RFC 7643 §3.1 makes every `meta` sub-attribute readOnly and
+provider-assigned. Therefore a server built on this crate is the party most
+likely to write a malformed timestamp. The `ScimDateTime` type stops that
+error. Every way to make a `ScimDateTime` validates the value.
 
 ```rust
 use scim_v2::ScimDateTime;
@@ -293,11 +364,11 @@ assert!("2010-01-23".parse::<ScimDateTime>().is_err());
 assert!(created.has_offset());
 ```
 
-`==` compares the text, because the spelling is what this type carries. To ask
-whether two values name the same instant, use `xsd_equivalent`, or
-`xsd_partial_cmp` for order; both implement XSD 1.1 §3.3.7.1, and the latter
-answers `None` for the pairs the spec calls incomparable, which is why there is
-no `Ord`.
+`==` compares the text. This type carries the spelling of a timestamp. To find
+whether two values name the same instant, use `xsd_equivalent`. To order two
+values, use `xsd_partial_cmp`. Both methods implement XSD 1.1 §3.3.7.1.
+`xsd_partial_cmp` answers `None` for the pairs that the spec calls
+incomparable. For that reason, `ScimDateTime` has no `Ord`.
 
 ```rust
 use scim_v2::ScimDateTime;
@@ -308,19 +379,20 @@ assert!(z != pst); // different spelling
 assert!(z.xsd_equivalent(&pst)); // same instant
 ```
 
-Beyond that it validates a lexical form and stops — no arithmetic, no time
-zone conversion. That is deliberate. XSD makes the offset optional, and
-`time`, `chrono` and `jiff` each split offset-bearing from offset-less values
-across two different types (`OffsetDateTime`/`PrimitiveDateTime`,
-`DateTime<Tz>`/`NaiveDateTime`, `Timestamp`/`civil::DateTime`), so a field
-typed as any one of them would reject conformant input or invent an offset the
-provider never sent. Converting is left to you: one line when `has_offset()`
-is true (`OffsetDateTime::parse(created.as_str(), &Rfc3339)`), and your own
-decision when it is false. The module docs carry the full list.
+`ScimDateTime` validates a lexical form and stops. The type does no arithmetic
+and no time zone conversion. This limit is deliberate. XSD makes the offset
+optional. `time`, `chrono` and `jiff` each split offset-bearing values from
+offset-less values across two different types
+(`OffsetDateTime`/`PrimitiveDateTime`, `DateTime<Tz>`/`NaiveDateTime`,
+`Timestamp`/`civil::DateTime`). A field with any one of those types would
+reject conformant input, or would invent an offset that the provider never
+sent. You do the conversion. When `has_offset()` is true, the conversion is one
+line: `OffsetDateTime::parse(created.as_str(), &Rfc3339)`. When `has_offset()`
+is false, you make your own decision. The module docs carry the full list.
 
 ### Parsing a SCIM filter
 
-`Filter` implements `FromStr`, so `.parse()` is all you need.
+`Filter` implements `FromStr`. Use `.parse()`.
 
 ```rust
 use scim_v2::filter::Filter;
@@ -337,46 +409,51 @@ assert!("userName garbage".parse::<Filter>().is_err());
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-You get the parsed expression; **evaluating it against your storage is your
-job**. That split is deliberate — the grammar is the fiddly, spec-bound part,
-and how a filter maps onto SQL, LDAP or an in-memory index is specific to your
-server. What this crate saves you is the grammar.
+You get the parsed expression. **You evaluate that expression against your
+storage.** This split is deliberate. The grammar is the difficult part, and the
+RFC binds it. The map from a filter onto SQL, LDAP or an in-memory index is
+specific to your server. This crate does the grammar work for you.
 
-Filters are rejected if they nest deeper than `filter::MAX_FILTER_DEPTH` (64)
-or hold more than `filter::MAX_FILTER_TERMS` (1024) attribute expressions,
-whether they arrive via `.parse()` or deserialization. Both limits are enforced
-*while* parsing, so an input that crosses one is rejected at that point with the
-rest unread, and peak memory for a hostile filter is bounded by the limits rather
-than by its length. Without the depth bound, pathologically nested input like
-`not (not (… (title pr) …))` builds an AST that overflows the stack on the *next*
-`Display`, `==`, `{:?}`, serialize or drop — a remote DoS with no bad allocation
-in sight. `and`/`or` are n-ary (`Filter::And(Operands<Filter>)`, at least two
-operands by construction), so a long flat chain such as a hundred-id `or` lookup
-is depth 2 and parses; only the term bound applies to it.
+The parser rejects a filter that nests deeper than `filter::MAX_FILTER_DEPTH`
+(64). The parser also rejects a filter that holds more than
+`filter::MAX_FILTER_TERMS` (1024) attribute expressions. Both rejections apply
+to a filter from `.parse()` and to a filter from deserialization. The parser
+enforces both limits *while* it parses. The parser rejects an input that
+crosses a limit at that point, and does not read the rest of the input. The
+limits bound the peak memory for a hostile filter, and the length of the filter
+does not. Without the depth bound, pathologically nested input such as
+`not (not (… (title pr) …))` builds an AST. That AST overflows the stack on the
+*next* `Display`, `==`, `{:?}`, serialize or drop operation. The result is a
+remote DoS, and no bad allocation is visible in the input. `and` and `or` are
+n-ary: `Filter::And(Operands<Filter>)` holds at least two operands by
+construction. Therefore a long flat chain, such as an `or` lookup over a
+hundred ids, has a depth of 2 and parses. Only the term bound applies to such a
+chain.
 
 ## For SCIM servers
 
 ### Accepting requests
 
-Take `Strict<T, CreateRequest>` (or `ReplaceRequest`) in your handlers, as
-shown under [Validation](#validation--read-this-before-shipping-a-server).
-A body that fails the RFC's rules never becomes a `T`, and the error names the
-attribute so you can return it in `scimType: invalidValue`. If a peer's
-attribute-name casing cannot be trusted, wrap in `CaseInsensitive<..>` first
-(RFC 7643 §2.1 makes names case-insensitive; most clients are camelCase, not
-all).
+Take `Strict<T, CreateRequest>` (or `ReplaceRequest`) in your handlers. The
+section [Validation](#validation--read-this-before-shipping-a-server) shows
+this form. A body that fails the rules of the RFC does not become a `T`. The
+error names the attribute, and you return that name in
+`scimType: invalidValue`. If you cannot trust the case of a peer's attribute
+name, wrap the type in `CaseInsensitive<..>` first. RFC 7643 §2.1 makes an
+attribute name case-insensitive. Most clients use camelCase, but not all
+clients do.
 
 ### Tolerant filter parsing
 
-A client that sends a malformed `filter=` should get RFC 7644 §3.12
-`invalidFilter` back, not a generic 400 — but if the filter fails to parse
-during deserialization, the whole query envelope fails with it and you lose
-`startIndex` and `count` along the way.
+A client that sends a malformed `filter=` should get the RFC 7644 §3.12
+`invalidFilter` error back, and not a generic 400. But a filter that fails to
+parse during deserialization makes the whole query envelope fail. You then lose
+`startIndex` and `count`.
 
 `TolerantListQuery` and `TolerantSearchRequest` keep the envelope. Deserialize
-into the tolerant variant, then `.into_strict()` and map the resulting
-`InvalidFilterError` onto your error response; what you hold afterwards is a
-`StrictListQuery` / `StrictSearchRequest` with a fully-parsed `Filter`.
+the body into the tolerant variant. Then call `.into_strict()`, and map the
+`InvalidFilterError` onto your error response. You then hold a
+`StrictListQuery` or a `StrictSearchRequest` with a fully-parsed `Filter`.
 
 ```rust
 use scim_v2::models::others::{StrictListQuery, TolerantListQuery};
@@ -397,8 +474,8 @@ fn handle(body: &str) -> Result<StrictListQuery, MyScimError> {
 # }
 ```
 
-If you need to inspect the variant directly (for example, to log the raw input
-without aborting), match on `MaybeFilter` before converting:
+You can also examine the variant directly, for example to log the raw input and
+continue. Match on `MaybeFilter` before the conversion.
 
 ```rust
 use scim_v2::filter::MaybeFilter;
@@ -449,12 +526,12 @@ for op in &patch.operations {
 
 ## Using custom ID types
 
-`User`, `Group`, `Member` and `Resource` are generic over their ID type,
-defaulting to `String`. Substitute `uuid::Uuid`, `i64`, or any
-`Serialize + DeserializeOwned` type.
+`User`, `Group`, `Member` and `Resource` are generic over the ID type. The
+default ID type is `String`. Substitute `uuid::Uuid`, `i64`, or any type that
+implements `Serialize + DeserializeOwned`.
 
-`ListResponse` is generic over the *resource*, not the ID type, so the ID type
-travels inside it: `ListResponse<User<Uuid>>`.
+`ListResponse` is generic over the *resource*, and not over the ID type. The ID
+type travels inside the resource: `ListResponse<User<Uuid>>`.
 
 ```rust
 use scim_v2::models::user::User;
@@ -466,27 +543,31 @@ let user: User<Uuid> = User {
 };
 ```
 
-For more examples and usage details, refer to the documentation of each function and struct.
+For more examples and usage details, read the documentation of each function
+and struct.
 
 ## Regenerating the filter parser
 
-The SCIM filter parser (`src/filter_parser.rs`) is pre-generated from `src/filter_parser.lalrpop`
-using [LALRPOP](https://github.com/lalrpop/lalrpop). The generated file is committed
-to the repository so no build script is required.
+[LALRPOP](https://github.com/lalrpop/lalrpop) generates the SCIM filter parser
+(`src/filter_parser.rs`) from `src/filter_parser.lalrpop` before a build. The
+repository holds the generated file. A build script is not necessary.
 
-If you modify `src/filter_parser.lalrpop`, regenerate `src/filter_parser.rs` by running:
+If you modify `src/filter_parser.lalrpop`, regenerate `src/filter_parser.rs`.
+Run these commands:
 
 ```sh
 cargo install lalrpop
 lalrpop src/filter_parser.lalrpop
 ```
 
-Commit both `src/filter_parser.lalrpop` and the updated `src/filter_parser.rs` together.
+Commit both `src/filter_parser.lalrpop` and the updated
+`src/filter_parser.rs` together.
 
 ## Contributing
 
-Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) — note that
-**all commits must be signed**; CI rejects unsigned or unverifiable commits.
+Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md).
+**You must sign every commit.** CI rejects an unsigned commit and an
+unverifiable commit.
 
 ## License
 

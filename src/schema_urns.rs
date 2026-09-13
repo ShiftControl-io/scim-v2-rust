@@ -1,7 +1,8 @@
-//! Canonical SCIM schema URNs defined by RFC 7643 and RFC 7644.
+//! Canonical SCIM schema URNs.
 //!
-//! These are the protocol-level identifiers servers and clients use in the
-//! `schemas` attribute to declare the type of a resource or message.
+//! RFC 7643 and RFC 7644 define these URNs. A server or a client writes the
+//! URN into the `schemas` attribute. The URN declares the type of the
+//! resource or the message.
 
 pub const USER: &str = "urn:ietf:params:scim:schemas:core:2.0:User";
 pub const GROUP: &str = "urn:ietf:params:scim:schemas:core:2.0:Group";

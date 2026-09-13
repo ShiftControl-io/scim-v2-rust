@@ -1,18 +1,20 @@
 use serde::{Deserialize, Deserializer};
 
-/// Reduce a JSON value to its *assigned* attributes, recursively, dropping
-/// `null` and `[]`.
+/// Reduce a JSON value to its *assigned* attributes. Remove `null` and `[]`
+/// recursively.
 ///
-/// RFC 7643 §2.5: "Unassigned attributes, the null value, or an empty array
-/// ... SHALL be considered to be equivalent in state", and such attributes
-/// "MAY be omitted for compactness". This crate emits `[]` rather than
-/// omitting, because RFC 7644 §3.5.1 gives `[]` operational meaning on a
-/// request body, while the RFC's own sample payloads omit. Comparing raw bytes
-/// against those fixtures would therefore test a formatting choice rather than
-/// fidelity, so round-trip assertions reduce both sides first.
+/// RFC 7643 §2.5 states: "Unassigned attributes, the null value, or an
+/// empty array ... SHALL be considered to be equivalent in state". The RFC
+/// also permits a server to omit these attributes: "MAY be omitted for
+/// compactness". This crate emits `[]` instead of omitting the attribute.
+/// RFC 7644 §3.5.1 gives `[]` an operational meaning in a request body. The
+/// RFC's own sample payloads omit the attribute instead. A raw byte
+/// comparison against those fixtures tests formatting, not fidelity. Each
+/// round-trip assertion therefore reduces both sides first.
 ///
-/// Only `null` and `[]` are removed. Every attribute carrying real data
-/// survives on both sides, which is what those assertions are for.
+/// This function removes only `null` and `[]`. Every attribute that carries
+/// real data survives on both sides. The round-trip assertions check this
+/// survival.
 #[cfg(test)]
 pub(crate) fn drop_unassigned(v: serde_json::Value) -> serde_json::Value {
     use serde_json::Value;
@@ -28,16 +30,16 @@ pub(crate) fn drop_unassigned(v: serde_json::Value) -> serde_json::Value {
     }
 }
 
-/// Deserializes a multi-valued attribute, collapsing an explicit `null` to an
+/// Deserializes a multi-valued attribute. Collapses an explicit `null` to an
 /// empty `Vec`.
 ///
 /// RFC 7643 §2.5: "Unassigned attributes, the null value, or an empty array
 /// (in the case of a multi-valued attribute) SHALL be considered to be
 /// equivalent in state." `#[serde(default)]` alone covers only the *absent*
-/// case and rejects `"roles": null` with `invalid type: null, expected a
-/// sequence`, which real providers do send. Pair this with
-/// `#[serde(default = "Vec::new")]` so all three wire forms land on the same
-/// in-memory value.
+/// case. It rejects `"roles": null` with the error `invalid type: null,
+/// expected a sequence`. Real providers do send this value. Pair this
+/// function with `#[serde(default = "Vec::new")]` so all three wire forms
+/// map to the same in-memory value.
 pub(crate) fn deserialize_null_as_empty_vec<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
 where
     D: Deserializer<'de>,
@@ -46,9 +48,11 @@ where
     Ok(Option::<Vec<T>>::deserialize(deserializer)?.unwrap_or_default())
 }
 
-/// Deserializes to a boolean from either a boolean, string representation of boolean, or null.
+/// Deserializes a boolean value from a JSON boolean, a string that
+/// represents a boolean, or a JSON null.
 ///
-/// Note: Must be paired with `#[serde(default)]` in order to handle missing fields.
+/// Pair this deserializer with `#[serde(default)]` to handle a missing
+/// field.
 pub(crate) fn deserialize_optional_lenient_bool<'de, D>(
     deserializer: D,
 ) -> Result<Option<bool>, D::Error>

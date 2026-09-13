@@ -1,10 +1,12 @@
 use thiserror::Error;
 
-/// Errors produced by this crate's parsing, serialization and lookup paths.
+/// This enum defines the errors that this crate's parsing, serialization
+/// and lookup paths return.
 ///
-/// Marked `#[non_exhaustive]`: RFC 7644 §3.12 defines SCIM detail error
-/// keywords that this crate does not yet model, so variants will be added in
-/// minor releases. Match with a trailing `_ =>` arm.
+/// This enum carries the `#[non_exhaustive]` attribute. RFC 7644 §3.12
+/// defines SCIM detail error keywords that this crate does not yet model.
+/// New variants can appear in a minor release. Add a trailing `_ =>` arm to
+/// every match on this enum.
 #[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum SCIMError {

@@ -292,3 +292,97 @@ fn the_relation_is_reflexive_and_symmetric() {
 fn parse(s: &str) -> ScimDateTime {
     s.parse().unwrap_or_else(|e| panic!("{s}: {e}"))
 }
+
+/// The comparison tests only ever assert *relative* order, which a day count
+/// that is wrong by a constant, or wrong but monotone, satisfies just as well.
+/// So the calendar arithmetic is pinned against absolute values computed
+/// independently: `date.toordinal()` for the years Python can represent, and a
+/// separately written leap-count formula that agrees with it everywhere they
+/// overlap for year 0 and earlier.
+#[test]
+fn the_day_count_matches_the_proleptic_gregorian_calendar() {
+    for ((year, month, day), expected) in [
+        ((1970, 1, 1), 0), // the epoch this count is anchored to
+        ((1970, 1, 2), 1),
+        ((1969, 12, 31), -1), // and immediately before it
+        ((1969, 7, 20), -165),
+        ((2010, 1, 23), 14632),
+        ((1900, 2, 28), -25509), // 1900 is not a leap year
+        ((1900, 3, 1), -25508),
+        ((2000, 2, 29), 11016), // 2000 is
+        ((2000, 3, 1), 11017),
+        ((2400, 2, 29), 157113),
+        ((9999, 12, 31), 2_932_896),
+        ((12345, 1, 1), 3_789_391), // years past four digits
+        ((1, 1, 1), -719_162),
+        ((1, 3, 1), -719_103),
+        ((0, 1, 1), -719_528), // year 0 is 1 BCE, and a leap year
+        ((0, 2, 29), -719_469),
+        ((0, 3, 1), -719_468),
+        ((-1, 1, 1), -719_893), // year -1 is 2 BCE, and is not
+        ((-1, 3, 1), -719_834),
+        ((-4, 2, 29), -720_930),
+    ] {
+        assert_eq!(
+            days_from_civil(year, month, day),
+            expected,
+            "{year:05}-{month:02}-{day:02}"
+        );
+    }
+
+    // Consecutive days differ by one across every boundary the rule turns on.
+    for (before, after) in [
+        ((2000, 2, 28), (2000, 2, 29)),
+        ((2000, 2, 29), (2000, 3, 1)),
+        ((1900, 2, 28), (1900, 3, 1)),
+        ((1999, 12, 31), (2000, 1, 1)),
+        ((0, 12, 31), (1, 1, 1)),
+        ((-1, 12, 31), (0, 1, 1)),
+    ] {
+        assert_eq!(
+            days_from_civil(after.0, after.1, after.2)
+                - days_from_civil(before.0, before.1, before.2),
+            1,
+            "{before:?} then {after:?}"
+        );
+    }
+}
+
+/// Same reasoning as the day-count test, one level up: a parser that read the
+/// year or the clock wrongly but monotonically would keep every ordering
+/// assertion above true. These pin parsed values to absolute positions on the
+/// time line, in seconds from 1970-01-01T00:00:00Z.
+#[test]
+fn parsing_places_a_value_at_the_right_instant() {
+    for (raw, expected) in [
+        ("1970-01-01T00:00:00Z", 0),
+        ("1970-01-01T00:00:01Z", 1),
+        ("1970-01-01T00:01:00Z", 60),
+        ("1970-01-01T01:00:00Z", 3600),
+        ("1970-01-02T00:00:00Z", 86_400),
+        ("1969-12-31T23:59:59Z", -1),
+        ("2010-01-23T04:56:22Z", 1_264_222_582),
+        ("2010-01-23T04:56:22", 1_264_222_582), // no offset: local, unshifted
+        ("2010-01-23T04:56:22+05:30", 1_264_202_782), // east is earlier in UTC
+        ("2010-01-23T04:56:22-08:00", 1_264_251_382),
+        ("2010-01-23T24:00:00Z", 1_264_291_200), // rolls to the next midnight
+        ("2010-01-24T00:00:00Z", 1_264_291_200),
+        ("0000-01-01T00:00:00Z", -62_167_219_200),
+        ("-0001-12-31T23:59:59Z", -62_167_219_201),
+    ] {
+        assert_eq!(Parts::of(raw).timeline(), expected, "{raw}");
+    }
+}
+
+/// `Parts::of` walks the fraction to the end of the string, so a value whose
+/// last character is a fractional digit is the case that runs that loop out.
+#[test]
+fn a_trailing_fraction_compares_without_running_off_the_end() {
+    let earlier = parse("2010-01-23T04:56:22.09");
+    let later = parse("2010-01-23T04:56:22.1");
+    assert_eq!(earlier.xsd_partial_cmp(&later), Some(Ordering::Less));
+    assert!(!earlier.xsd_equivalent(&later));
+    assert!(parse("2010-01-23T04:56:22.10").xsd_equivalent(&later));
+    assert_eq!(Parts::of("2010-01-23T04:56:22.5").fraction, "5");
+    assert_eq!(Parts::of("2010-01-23T04:56:22").fraction, "");
+}

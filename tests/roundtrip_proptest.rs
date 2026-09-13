@@ -9,7 +9,6 @@
 #![cfg(all(feature = "models", feature = "filter"))]
 
 use proptest::prelude::*;
-use scim_v2::ScimDateTime;
 use scim_v2::models::enterprise_user::{EnterpriseUser, Manager};
 use scim_v2::models::group::{Group, Member, MemberType};
 use scim_v2::models::others::{ListResponse, Resource};
@@ -20,6 +19,7 @@ use scim_v2::models::user::{
     X509Certificate,
 };
 use scim_v2::schema_urns;
+use scim_v2::{Multi, ScimDateTime};
 
 fn opt_str() -> impl Strategy<Value = Option<String>> {
     proptest::option::of("[a-zA-Z0-9 @._-]{0,24}")
@@ -123,20 +123,31 @@ prop_compose! {
         EnterpriseUser { employee_number, cost_center, organization, division, department, manager }
     }
 }
+/// A `Multi<T>` across all three states: absent, cleared, and set. A
+/// round-trip must return the same state, so the property covers the RFC 7644
+/// §3.5.1 distinction rather than only the values.
+fn multi<S>(inner: S, max: usize) -> impl Strategy<Value = Multi<S::Value>>
+where
+    S: Strategy,
+    S::Value: std::fmt::Debug,
+{
+    proptest::option::of(proptest::collection::vec(inner, 0..max)).prop_map(Multi::from)
+}
+
 prop_compose! {
     fn user()(id in opt_str(), external_id in opt_str(), user_name in "[a-z][a-z0-9.@-]{0,20}",
               name in proptest::option::of(name()), display_name in opt_str(), nick_name in opt_str(),
               title in opt_str(), user_type in opt_str(), preferred_language in opt_str(),
               locale in opt_str(), timezone in opt_str(), active in opt_bool(), password in opt_str(),
-              emails in proptest::collection::vec(email(), 0..3),
-              phone_numbers in proptest::collection::vec(phone(), 0..3),
-              addresses in proptest::collection::vec(address(), 0..2),
-              roles in proptest::collection::vec(role(), 0..2),
-              ims in proptest::collection::vec(im(), 0..2),
-              photos in proptest::collection::vec(photo(), 0..2),
-              groups in proptest::collection::vec(user_group(), 0..2),
-              entitlements in proptest::collection::vec(entitlement(), 0..2),
-              x509_certificates in proptest::collection::vec(cert(), 0..2),
+              emails in multi(email(), 3),
+              phone_numbers in multi(phone(), 3),
+              addresses in multi(address(), 2),
+              roles in multi(role(), 2),
+              ims in multi(im(), 2),
+              photos in multi(photo(), 2),
+              groups in multi(user_group(), 2),
+              entitlements in multi(entitlement(), 2),
+              x509_certificates in multi(cert(), 2),
               meta in proptest::option::of(meta()),
               enterprise_user in proptest::option::of(enterprise())) -> User<String> {
         User {
@@ -160,7 +171,7 @@ prop_compose! {
 }
 prop_compose! {
     fn group()(id in opt_str(), external_id in opt_str(), display_name in "[A-Za-z ]{1,20}",
-               members in proptest::collection::vec(member(), 0..4),
+               members in multi(member(), 4),
                meta in proptest::option::of(meta())) -> Group<String> {
         Group { schemas: vec![schema_urns::GROUP.to_string()], id, external_id, display_name, members, meta }
     }

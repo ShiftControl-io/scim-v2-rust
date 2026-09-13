@@ -6,7 +6,7 @@ fn validate_and_validate_context() {
         id: None,
         external_id: None,
         display_name: "Tour Guides".to_string(),
-        members: Vec::new(),
+        members: Multi::absent(),
         meta: None,
     };
     assert!(base.validate().is_ok());
@@ -109,31 +109,38 @@ fn unknown_member_type_round_trips_instead_of_failing() {
 /// all mean unassigned, and unassigned is omitted on the way out.
 /// Guards the `deserialize_null_as_empty_vec` wiring, which
 /// `#[serde(default)]` alone does not provide.
+/// All three wire forms read alike, because RFC 7643 §2.5 makes them one
+/// state in a resource. They do not write alike: RFC 7644 §3.5.1 makes an
+/// absent member "not asserted by the client", so only the forms the client
+/// actually sent go back out.
 #[test]
-fn members_treat_absent_null_and_empty_alike() {
+fn members_read_alike_and_write_back_what_arrived() {
     let urn = crate::schema_urns::GROUP;
-    for (label, raw) in [
+    for (label, raw, expected) in [
         (
             "absent",
             format!(r#"{{"schemas":["{urn}"],"displayName":"Tour Guides"}}"#),
+            None,
         ),
         (
             "null",
             format!(r#"{{"schemas":["{urn}"],"displayName":"Tour Guides","members":null}}"#),
+            Some(serde_json::json!([])),
         ),
         (
             "empty",
             format!(r#"{{"schemas":["{urn}"],"displayName":"Tour Guides","members":[]}}"#),
+            Some(serde_json::json!([])),
         ),
     ] {
         let group: Group = serde_json::from_str(&raw)
             .unwrap_or_else(|e| panic!("{label} form must deserialize: {e}"));
-        assert!(group.members.is_empty(), "{label}: members");
+        assert!(group.members.is_empty(), "{label}: reads as empty");
         let out = serde_json::to_value(&group).unwrap();
         assert_eq!(
-            out["members"],
-            serde_json::json!([]),
-            "{label}: unassigned members serialize as [], keeping a §3.5.1 clear-all expressible"
+            out.get("members"),
+            expected.as_ref(),
+            "{label}: writes back"
         );
     }
 }

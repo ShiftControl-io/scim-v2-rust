@@ -78,18 +78,27 @@ fn schemas_round_trips_and_absence_is_tolerated() {
 /// `canonicalValues`, `subAttributes` and `referenceTypes` are
 /// multi-valued, so RFC 7643 §2.5 applies: absent, `null` and `[]` are one
 /// state, and unassigned is omitted on the way out.
+/// The same rule on a `Schema` sub-attribute: one read state, two write
+/// instructions.
 #[test]
-fn multi_valued_sub_attributes_treat_absent_null_and_empty_alike() {
-    for raw in [
-        r#"{"name":"a","type":"string","multiValued":false,"description":"d","required":false,"caseExact":false,"mutability":"readWrite","returned":"default","uniqueness":"none"}"#,
-        r#"{"name":"a","type":"string","multiValued":false,"description":"d","required":false,"caseExact":false,"mutability":"readWrite","returned":"default","uniqueness":"none","canonicalValues":null,"referenceTypes":null}"#,
-        r#"{"name":"a","type":"string","multiValued":false,"description":"d","required":false,"caseExact":false,"mutability":"readWrite","returned":"default","uniqueness":"none","canonicalValues":[],"referenceTypes":[]}"#,
+fn multi_valued_sub_attributes_write_back_what_arrived() {
+    const BASE: &str = r#""name":"a","type":"string","multiValued":false,"description":"d","required":false,"caseExact":false,"mutability":"readWrite","returned":"default","uniqueness":"none""#;
+    for (raw, expected) in [
+        (format!("{{{BASE}}}"), None),
+        (
+            format!(r#"{{{BASE},"canonicalValues":null,"referenceTypes":null}}"#),
+            Some(serde_json::json!([])),
+        ),
+        (
+            format!(r#"{{{BASE},"canonicalValues":[],"referenceTypes":[]}}"#),
+            Some(serde_json::json!([])),
+        ),
     ] {
-        let attr: Attributes = serde_json::from_str(raw).unwrap_or_else(|e| panic!("{raw}: {e}"));
+        let attr: Attributes = serde_json::from_str(&raw).unwrap_or_else(|e| panic!("{raw}: {e}"));
         assert!(attr.canonical_values.is_empty());
         assert!(attr.reference_types.is_empty());
         let out = serde_json::to_value(&attr).unwrap();
-        assert_eq!(out["canonicalValues"], serde_json::json!([]));
-        assert_eq!(out["referenceTypes"], serde_json::json!([]));
+        assert_eq!(out.get("canonicalValues"), expected.as_ref(), "{raw}");
+        assert_eq!(out.get("referenceTypes"), expected.as_ref(), "{raw}");
     }
 }

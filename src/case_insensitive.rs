@@ -1,29 +1,31 @@
-//! Case-insensitive attribute names, per RFC 7643 §2.1.
+//! This module makes attribute names case-insensitive, per RFC 7643 §2.1.
 //!
-//! "Attribute names are case insensitive and are often camel-cased" A
-//! conformant peer may therefore send `"USERNAME"` or `"displayname"`, and a
-//! `serde` derive matching exact strings drops the key and then fails on the
-//! missing required field. This module rewrites every known attribute name,
-//! sub-attribute name, protocol member (`Resources`, `Operations`) and schema
-//! URN to its canonical spelling before deserialization.
+//! RFC 7643 §2.1 states: "Attribute names are case insensitive and are
+//! often camel-cased". A conformant peer may therefore send `"USERNAME"`
+//! or `"displayname"`. A `serde` derive that matches exact strings drops
+//! such a key. The derive then fails on the missing required field. This
+//! module rewrites every known attribute name, sub-attribute name,
+//! protocol member (`Resources`, `Operations`) and schema URN to its
+//! canonical spelling before deserialization.
 //!
-//! Three rules keep this from being lossy. A key with no case-insensitive
-//! match is left exactly as it arrived. A subtree under an extension URN this
-//! crate does not model (`urn:example:…`) is left byte-identical, because that
-//! namespace is not governed by RFC 7643 §2.1 and its vendor may well be
-//! case-sensitive. And two keys that fold to the same attribute — `userName`
-//! and `USERNAME` in one object — are an error rather than a silent
-//! last-write-wins, since §2.1 makes them the same attribute asserted twice
-//! and nothing in either RFC says which value wins.
+//! Three rules prevent data loss here. This module leaves a key with no
+//! case-insensitive match exactly as it arrived. This module leaves a
+//! subtree byte-identical under an extension URN that this crate does not
+//! model (`urn:example:…`). RFC 7643 §2.1 does not govern that namespace.
+//! Its vendor may well be case-sensitive. Two keys that fold to the same
+//! attribute are an error, not a silent last-write-wins. For example,
+//! `userName` and `USERNAME` in one object fold to the same attribute.
+//! RFC 7643 §2.1 makes them the same attribute asserted twice. Neither
+//! RFC says which value wins.
 //!
-//! The Java SCIM SDK does the same by enabling Jackson's
-//! `ACCEPT_CASE_INSENSITIVE_PROPERTIES`; scim2-models lowercases every key in
-//! a pre-validator citing §2.1.
+//! The Java SCIM SDK does the same. It enables Jackson's
+//! `ACCEPT_CASE_INSENSITIVE_PROPERTIES`. The scim2-models library
+//! lowercases every key in a pre-validator that cites §2.1.
 //!
 //! # Choosing it
 //!
-//! Nothing here happens implicitly. The derives stay exact-match, and the
-//! choice is made per call site by which of these you reach for:
+//! Nothing here happens implicitly. The derives stay exact-match. You
+//! choose the behavior at each call site, as this example shows:
 //!
 //! ```
 //! # #[cfg(feature = "models")] {
@@ -40,11 +42,13 @@
 //! # }
 //! ```
 //!
-//! [`CaseInsensitive<T>`] is the primitive and the one to reach for in a
-//! signature — a `serde` front end such as an `axum` extractor can name it
-//! directly, and it is re-exported as [`scim_v2::CaseInsensitive`].
-//! [`from_str()`] and [`from_value()`] are shorthand for wrapping and unwrapping it, for the
-//! common case of having the bytes in hand.
+//! [`CaseInsensitive<T>`] is the primitive type. Use it directly in a
+//! function signature. A `serde` front end, such as an `axum` extractor,
+//! can name it directly. This crate re-exports it as
+//! [`scim_v2::CaseInsensitive`]. [`from_str()`] and [`from_value()`] are
+//! shorthand functions. They wrap and then unwrap [`CaseInsensitive<T>`]
+//! for you. Use them for the common case where you already have the
+//! bytes.
 //!
 //! [`CaseInsensitive<T>`]: CaseInsensitive
 //! [`scim_v2::CaseInsensitive`]: crate::CaseInsensitive
@@ -58,12 +62,13 @@ use thiserror::Error;
 
 /// Two keys in one object fold to the same attribute name.
 ///
-/// RFC 7643 §2.1 makes `userName` and `USERNAME` the same attribute, so a
-/// payload carrying both has asserted one attribute twice, possibly with
-/// different values, and neither RFC defines a precedence. Resolving it
-/// silently would let whichever spelling sorts later decide what a handler
-/// sees, which is an attribute-smuggling vector at a request boundary; the
-/// only safe answer is to refuse the body (RFC 7644 §3.12 `invalidSyntax`).
+/// RFC 7643 §2.1 makes `userName` and `USERNAME` the same attribute. A
+/// payload that carries both has asserted one attribute twice, possibly
+/// with different values. Neither RFC defines a precedence. A silent
+/// resolution would let whichever spelling sorts later decide what a
+/// handler sees. This behavior would be an attribute-smuggling vector at
+/// a request boundary. This crate therefore refuses the body instead
+/// (RFC 7644 §3.12 `invalidSyntax`).
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[error(
     "attribute {canonical:?} is given more than once with differing case ({first:?} and {second:?}); RFC 7643 §2.1 makes these the same attribute"
@@ -71,15 +76,16 @@ use thiserror::Error;
 pub struct AmbiguousKey {
     /// The canonical spelling both keys fold to.
     pub canonical: String,
-    /// The spelling seen first.
+    /// The spelling this crate saw first.
     pub first: String,
-    /// The spelling seen second.
+    /// The spelling this crate saw second.
     pub second: String,
 }
 
-/// Every canonical wire name this crate models, generated from the embedded
-/// RFC 7643 schemas plus the protocol messages. A test asserts it stays
-/// complete against those schemas.
+/// This constant lists every canonical wire name that this crate models.
+/// This crate derives the list from the embedded RFC 7643 schemas plus
+/// the protocol messages. A test asserts that the list stays complete
+/// against those schemas.
 pub(crate) const WIRE_NAMES: &[&str] = &[
     "path",
     "op",
@@ -182,9 +188,10 @@ pub(crate) const WIRE_NAMES: &[&str] = &[
     "x509Certificates",
 ];
 
-/// The schema URNs, because an extension appears as an object *key*
-/// (`"urn:…:extension:enterprise:2.0:User": { … }`) and so is subject to the
-/// same folding as any other attribute name.
+/// This constant lists the schema URNs. An extension appears as an
+/// object *key* (`"urn:…:extension:enterprise:2.0:User": { … }`). This
+/// module therefore folds a URN the same way it folds any other
+/// attribute name.
 const URNS: &[&str] = &[
     "urn:ietf:params:scim:schemas:core:2.0:User",
     "urn:ietf:params:scim:schemas:core:2.0:Group",
@@ -214,25 +221,28 @@ fn table() -> &'static HashMap<String, &'static str> {
 /// Rewrite every object key in `value`, recursively, to its canonical
 /// spelling where a case-insensitive match is known.
 ///
-/// Keys with no known match are left exactly as they arrived, and values are
-/// never touched — including the URN strings inside a `schemas` array, which
-/// the crate compares exactly as RFC 7643 prints them. An object under an
-/// extension URN this crate does not model is left byte-identical, subtree
-/// included. Two keys in one object that fold to the same name are an
-/// [`AmbiguousKey`] error rather than a silent overwrite.
+/// This function leaves a key with no known match exactly as it arrived.
+/// This function never touches a value. This includes the URN strings
+/// inside a `schemas` array. This crate compares those URN strings
+/// exactly as RFC 7643 prints them. This function leaves an object
+/// byte-identical, subtree included, under an extension URN that this
+/// crate does not model. Two keys in one object that fold to the same
+/// name are an [`AmbiguousKey`] error, not a silent overwrite.
 ///
-/// On `Err`, `value` is exactly as it was passed. The collision check runs
-/// over the whole tree before any key is rewritten, so a caller that logs,
-/// echoes or retries the rejected body sees both spellings, not a half-rebuilt
-/// object asserting only the attacker's.
+/// On `Err`, `value` still holds exactly what the caller passed in. The
+/// collision check runs over the whole tree before this function
+/// rewrites any key. A caller that logs, echoes or retries the rejected
+/// body therefore sees both spellings. Such a caller never sees a
+/// half-rebuilt object that asserts only the attacker's spelling.
 pub fn canonicalize_keys(value: &mut Value) -> Result<(), AmbiguousKey> {
     check_collisions(value)?;
     rewrite_keys(value);
     Ok(())
 }
 
-/// Phase one, read-only: the first pair of keys in one object that fold to
-/// the same canonical name, anywhere in the tree the rewrite would visit.
+/// This function is phase one. It is read-only. This function finds the
+/// first pair of keys in one object that fold to the same canonical name.
+/// This search covers the whole tree that the rewrite would visit.
 fn check_collisions(value: &Value) -> Result<(), AmbiguousKey> {
     match value {
         Value::Object(map) => {
@@ -261,7 +271,8 @@ fn check_collisions(value: &Value) -> Result<(), AmbiguousKey> {
     }
 }
 
-/// Phase two: the rewrite, which cannot fail once phase one has passed.
+/// This function is phase two, the rewrite. It cannot fail once phase
+/// one has passed.
 fn rewrite_keys(value: &mut Value) {
     match value {
         Value::Object(map) => {
@@ -280,30 +291,32 @@ fn rewrite_keys(value: &mut Value) {
     }
 }
 
-/// Deserialize `T` from JSON text, accepting attribute names in any case.
+/// Deserialize `T` from JSON text. Accept an attribute name in any case.
 pub fn from_str<T: DeserializeOwned>(s: &str) -> Result<T, serde_json::Error> {
     let mut v: Value = serde_json::from_str(s)?;
     canonicalize_keys(&mut v).map_err(serde::de::Error::custom)?;
     serde_json::from_value(v)
 }
 
-/// Deserialize `T` from a [`Value`], accepting attribute names in any case.
+/// Deserialize `T` from a [`Value`]. Accept an attribute name in any case.
 pub fn from_value<T: DeserializeOwned>(mut v: Value) -> Result<T, serde_json::Error> {
     canonicalize_keys(&mut v).map_err(serde::de::Error::custom)?;
     serde_json::from_value(v)
 }
 
-/// A `Deserialize` adapter that canonicalises attribute-name case before
-/// deserializing `T`, so it composes with any `serde` front end:
+/// This struct is a `Deserialize` adapter. It canonicalizes
+/// attribute-name case before it deserializes `T`. It therefore composes
+/// with any `serde` front end, for example
 /// `serde_json::from_str::<CaseInsensitive<User>>(..)?.into_inner()`.
 ///
-/// It buffers the input as a [`Value`] first, which is the cost of doing this
-/// without a derive; on a SCIM payload that is not measurable.
+/// It buffers the input as a [`Value`] first. This buffering is the cost
+/// of the adapter. The adapter uses no derive macro. On a SCIM payload,
+/// this cost is not measurable.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CaseInsensitive<T>(pub T);
 
 impl<T> CaseInsensitive<T> {
-    /// The deserialized value.
+    /// This method returns the deserialized value.
     pub fn into_inner(self) -> T {
         self.0
     }

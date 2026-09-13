@@ -1,31 +1,35 @@
-//! SCIM filter expressions (RFC 7644 §3.4.2.2) and PATCH paths (RFC 7644 §3.5.2).
+//! SCIM filter expressions (RFC 7644 §3.4.2.2) and PATCH paths
+//! (RFC 7644 §3.5.2).
 //!
 //! # Overview
 //!
-//! This module provides the AST types for SCIM filter expressions and PATCH operation
-//! paths. The two main entry points are [`Filter`] and [`PatchPath`].
+//! This module provides the AST types for SCIM filter expressions and
+//! PATCH operation paths. The two main entry points are [`Filter`] and
+//! [`PatchPath`].
 //!
 //! # SCIM server: evaluating an incoming filter
 //!
 //! Filters arrive already deserialized inside other SCIM message types:
 //!
-//! - `SearchRequest::filter` — from a
+//! - `SearchRequest::filter` comes from a
 //!   `POST /.search` body.
-//! - `ListQuery::filter` — from a `GET`
-//!   query string (`?filter=...`), parsed by your web framework into this struct.
-//! - `PatchOperation` — each operation's
+//! - `ListQuery::filter` comes from a `GET`
+//!   query string (`?filter=...`). Your web framework parses the query string
+//!   into this struct.
+//! - Each `PatchOperation`'s
 //!   `path` field deserializes as a [`PatchPath`].
 //!
-//! By default these types fail deserialization when the filter expression is
-//! malformed, which takes `start_index`, `count`, and other fields down with
-//! it. To produce an RFC 7644 §3.12 `invalidFilter` response instead, use the
-//! `TolerantListQuery` /
-//! `TolerantSearchRequest`
-//! aliases (equivalently `ListQuery<MaybeFilter>` / `SearchRequest<MaybeFilter>`)
-//! and match on [`MaybeFilter::Valid`] vs [`MaybeFilter::Invalid`] to build
+//! By default, these types fail deserialization when the filter expression is
+//! malformed. As a result, `start_index`, `count`, and other fields also fail
+//! to deserialize. To produce an RFC 7644 §3.12 `invalidFilter` response
+//! instead, use the `TolerantListQuery` /
+//! `TolerantSearchRequest` aliases (equivalently `ListQuery<MaybeFilter>` /
+//! `SearchRequest<MaybeFilter>`).
+//! Match on [`MaybeFilter::Valid`] vs [`MaybeFilter::Invalid`] to build
 //! the error body from the captured `raw` string and [`ParseError`].
 //!
-//! Once you have a [`Filter`], recursively `match` on its variants to evaluate it:
+//! Once you have a [`Filter`], use a recursive `match` on its variants to
+//! evaluate it:
 //!
 //! ```
 //! # use scim_v2::filter::*;
@@ -50,39 +54,42 @@
 //!
 //! # Depth and size limits
 //!
-//! [`Filter::from_str`](std::str::FromStr::from_str) and [`PatchPath::from_str`](std::str::FromStr::from_str) (and the corresponding
-//! [`Deserialize`] impls, which delegate to
-//! [`FromStr`](std::str::FromStr)) reject any input whose parsed AST would exceed
-//! [`MAX_FILTER_DEPTH`] levels of nesting or [`MAX_FILTER_TERMS`] attribute
-//! expressions. The depth bound is what keeps the crate's own recursive
-//! [`Display`], derived [`PartialEq`] / [`Debug`], serialization, and `Drop`
-//! impls off the end of the stack, so a hostile `?filter=` value with
-//! thousands of nested `not (…)` cannot crash the server after the filter has
-//! been accepted. The term bound is memory hygiene for the other axis. Both
-//! are enforced while the parser runs, so an input that crosses either is
-//! rejected at that point with the rest unread, and peak allocation for a
-//! hostile input is bounded by the limits rather than by its length.
+//! [`Filter::from_str`](std::str::FromStr::from_str) and
+//! [`PatchPath::from_str`](std::str::FromStr::from_str) reject any input
+//! whose parsed AST exceeds [`MAX_FILTER_DEPTH`] levels of nesting or
+//! [`MAX_FILTER_TERMS`] attribute expressions. The corresponding
+//! [`Deserialize`] impls delegate to [`FromStr`](std::str::FromStr), so they
+//! reject the same input. The depth bound protects the crate's own
+//! recursive [`Display`], derived [`PartialEq`] / [`Debug`], serialization,
+//! and `Drop` impls from stack overflow. A hostile `?filter=` value with
+//! thousands of nested `not (…)` terms cannot crash the server after the
+//! filter passes this check. The term bound gives the same memory
+//! protection for a filter with many terms rather than deep nesting. The
+//! parser enforces both bounds while it runs. It rejects an input that
+//! crosses either bound at that point, before it reads the rest of the
+//! input. As a result, the limits bound peak allocation for a hostile
+//! input, not the input's length.
 //!
-//! The two are independent because `and`/`or` are n-ary: `a or b or c …` is
-//! one [`Filter::Or`] however many operands it has, so a hundred-id batch
-//! lookup has depth 2 and parses, while the same hundred terms would have
-//! been depth 100 in a binary tree. Depth counts only genuine nesting —
-//! `not`, grouping that changes the operator, a value path's inner filter —
-//! and one filter has one budget: a value path's inner filter continues the
-//! count from where its enclosing filter left off rather than starting over.
-//! Hand-constructed [`Filter`] values bypass both checks and are the caller's
-//! responsibility; build them with [`Filter::and`] / [`Filter::or`] to keep
-//! the shape the parser would produce.
+//! The two limits are independent because `and`/`or` are n-ary. `a or b or
+//! c …` is one [`Filter::Or`] node, however many operands it has. So a
+//! hundred-id batch lookup has depth 2 and parses, while the same hundred
+//! terms would have depth 100 in a binary tree. Depth counts only genuine
+//! nesting: `not`, grouping that changes the operator, and a value path's
+//! inner filter. One filter has one depth budget: a value path's inner
+//! filter continues the count from where its enclosing filter left off,
+//! rather than starting a new count. Hand-constructed [`Filter`] values
+//! bypass both checks. A caller who builds a filter by hand must keep it
+//! within the limits. Build such filters with [`Filter::and`] /
+//! [`Filter::or`] to keep the same shape the parser produces.
 //!
 //! # SCIM client: building a filter to send in a request
 //!
 //! Construct the AST directly and assign it to the `filter` field of
 //! `SearchRequest` or
 //! `ListQuery`. Those types implement
-//! `serde::Serialize`, so the filter is serialized automatically as a JSON
-//! string when you serialize the containing struct. You can also call
-//! `.to_string()` directly when you need the raw filter string for a query
-//! parameter:
+//! `serde::Serialize`. When you serialize the containing struct, the filter
+//! serializes automatically as a JSON string. Call `.to_string()` directly
+//! when you need the raw filter string for a query parameter:
 //!
 //! ```
 //! # use scim_v2::filter::*;
@@ -111,9 +118,11 @@ use std::ops::{Deref, DerefMut};
 use std::sync::OnceLock;
 use thiserror::Error;
 
-/// The generated parsers, built once. Constructing one compiles the lexer's
-/// regex set (about 400 KiB and measurable time), which used to happen on
-/// every `from_str`; the parser itself is stateless, so sharing is free.
+/// This function builds the generated parser once. When the code builds a
+/// parser, it compiles the lexer's regex set, which is about 400 KiB and
+/// takes measurable time to compile. Earlier versions of this crate compiled
+/// the regex set on every call to `from_str`. The parser itself is
+/// stateless, so one instance serves every call without extra cost.
 fn filter_parser() -> &'static crate::filter_parser::FilterParser {
     static PARSER: OnceLock<crate::filter_parser::FilterParser> = OnceLock::new();
     PARSER.get_or_init(crate::filter_parser::FilterParser::new)
@@ -126,50 +135,58 @@ fn path_parser() -> &'static crate::filter_parser::PathParser {
 
 /// Maximum allowed nesting depth for a parsed [`Filter`] or [`ValFilter`] tree.
 ///
-/// [`Filter::from_str`](std::str::FromStr::from_str) and [`PatchPath::from_str`](std::str::FromStr::from_str) reject any input whose parsed
-/// AST would exceed this depth, returning
-/// [`ParseError::User`] wrapping [`FilterActionError::DepthExceeded`]. The same
-/// enforcement runs on the [`Deserialize`] paths (SCIM `SearchRequest.filter`,
-/// `ListQuery.filter`, `PatchOperation.path`), so a remote attacker cannot submit
-/// a pathologically nested filter like `(((…(title pr)…)))` or
-/// `a pr and a pr and …` that would later overflow the call stack when the
-/// library's recursive [`Display`], derived [`PartialEq`] / [`Debug`],
-/// [`Serialize`], or [`Drop`] impls walk the tree.
+/// [`Filter::from_str`](std::str::FromStr::from_str) and
+/// [`PatchPath::from_str`](std::str::FromStr::from_str) reject any input
+/// whose parsed AST exceeds this depth. Rejection returns
+/// [`ParseError::User`] wrapping [`FilterActionError::DepthExceeded`]. The
+/// same enforcement runs on the [`Deserialize`] paths: SCIM
+/// `SearchRequest.filter`, `ListQuery.filter`, and `PatchOperation.path`. As
+/// a result, a remote attacker cannot submit a pathologically nested filter,
+/// such as `(((…(title pr)…)))` or `a pr and a pr and …`. Such a filter
+/// would otherwise overflow the call stack later, when the library's
+/// recursive [`Display`], derived [`PartialEq`] / [`Debug`], [`Serialize`],
+/// or [`Drop`] impls walk the tree.
 ///
-/// Hand-constructed [`Filter`] values that bypass the parser do not pass through
-/// this check; it is the caller's responsibility to keep programmatically built
-/// filters within this limit.
+/// Hand-constructed [`Filter`] values bypass the parser, so they do not pass
+/// through this check. A caller who builds a filter programmatically must
+/// keep it within this limit.
 pub const MAX_FILTER_DEPTH: usize = 64;
 
 /// Maximum number of attribute expressions (terms) in one filter or PATCH
 /// path, across every `and`/`or` chain and value path.
 ///
-/// Distinct from [`MAX_FILTER_DEPTH`] on purpose. Since the AST is n-ary, a
-/// flat `a or b or … ` chain has depth 2 however long it is, so depth no
-/// longer bounds the *size* of an accepted filter; this does. It is generous
-/// — a client resolving a batch of a hundred ids in one `or` chain is an
-/// ordinary request and parses — while still keeping a hostile `?filter=`
-/// from allocating without limit. RFC 7644 §3.4.2.2 sets no term limit and
-/// `ServiceProviderConfig.filter.maxResults` bounds results, not terms, so
-/// this is the crate's own hygiene bound.
+/// This limit is distinct from [`MAX_FILTER_DEPTH`] on purpose. The AST is
+/// n-ary, so a flat `a or b or … ` chain has depth 2 however long it is. So
+/// depth no longer bounds the *size* of an accepted filter. This term limit
+/// bounds size instead. This limit is generous: a client that resolves a
+/// batch of a hundred ids in one `or` chain sends an ordinary request, and
+/// it parses.
+/// At the same time, the limit still keeps a hostile `?filter=` value from
+/// allocating without limit. RFC 7644 §3.4.2.2 sets no term limit.
+/// `ServiceProviderConfig.filter.maxResults` bounds results, not terms. So
+/// this limit is the crate's own hygiene bound.
 ///
-/// Exceeding it is [`FilterActionError::TooManyTerms`], which a server should
-/// answer with RFC 7644 §3.12 `tooMany` or `invalidFilter`.
+/// When a filter exceeds this limit, parsing returns
+/// [`FilterActionError::TooManyTerms`]. A server should answer this error
+/// with RFC 7644 §3.12 `tooMany` or `invalidFilter`.
 ///
-/// Both this and [`MAX_FILTER_DEPTH`] are enforced *during* parsing, not
-/// after: the parser charges each attribute expression against a budget as it
-/// is reduced and tracks open brackets as it shifts them, so an input that
-/// crosses a limit is rejected at that point and the rest of it is never read,
-/// let alone allocated. Peak memory for a hostile filter is therefore bounded
-/// by the limits, not by the input's length.
+/// The parser enforces both this limit and [`MAX_FILTER_DEPTH`] *during*
+/// parsing, not after. It charges each attribute expression against a
+/// budget as it reduces the expression, and it tracks open brackets as it
+/// shifts them. So the parser rejects an input that crosses a limit at that
+/// point. The parser never reads or allocates the rest of that input. As a
+/// result, peak memory for a hostile filter is bounded by the limits, not by
+/// the input's length.
 pub const MAX_FILTER_TERMS: usize = 1024;
 
-/// Parse-time resource budget, threaded through the generated parser.
+/// This struct is the parse-time resource budget that the generated parser
+/// uses.
 ///
-/// Charges each attribute expression against [`MAX_FILTER_TERMS`] and each
-/// open `(` / `[` against [`MAX_FILTER_DEPTH`], failing the parse the moment
-/// either is exceeded. This is what makes the limits a bound on allocation
-/// rather than a check on an already-built tree.
+/// This struct charges each attribute expression against
+/// [`MAX_FILTER_TERMS`]. It charges each open `(` or `[` against
+/// [`MAX_FILTER_DEPTH`]. Parsing fails the moment either limit is exceeded.
+/// Because parsing fails immediately, the limits bound allocation. They do
+/// not merely check an already-built tree.
 #[derive(Debug, Default)]
 pub(crate) struct ParseBudget {
     terms: Cell<usize>,
@@ -203,20 +220,21 @@ impl ParseBudget {
     }
 }
 
-/// Error produced by fallible grammar actions (`=>?` rules in the LALRPOP grammar)
-/// and by post-parse validation.
-/// `#[non_exhaustive]`: further grammar and depth diagnostics will be added
-/// in minor releases.
+/// Fallible grammar actions (the LALRPOP grammar's `=>?` rules) and
+/// post-parse validation produce this error.
+/// This enum is `#[non_exhaustive]`. Minor releases will add further grammar
+/// and depth diagnostics.
 #[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum FilterActionError {
     /// An `attrPath` token contained more than one sub-attribute segment.
     #[error("attrPath '{0}' has more than one sub-attribute segment")]
     InvalidAttrPath(String),
-    /// A segment of an `attrPath` token is not an RFC 7644 §3.4.2.2 `ATTRNAME`:
-    /// a letter followed by letters, digits, `_` or `-`. Covers an empty
-    /// sub-attribute (`name.`), a segment starting with a digit or dash, and
-    /// an empty name after a URN prefix.
+    /// A segment of an `attrPath` token is not an RFC 7644 §3.4.2.2
+    /// `ATTRNAME`. An `ATTRNAME` is a letter followed by letters, digits,
+    /// `_`, or `-`. This variant covers an empty sub-attribute (`name.`), a
+    /// segment that starts with a digit or a dash, and an empty name after
+    /// a URN prefix.
     #[error(
         "attrPath '{0}': each segment must be ATTRNAME = ALPHA *(nameChar) (RFC 7644 §3.4.2.2)"
     )]
@@ -226,25 +244,30 @@ pub enum FilterActionError {
     InvalidCompValue(#[from] serde_json::Error),
     /// The filter's nesting depth exceeded [`MAX_FILTER_DEPTH`].
     ///
-    /// The wrapped value is the depth at which the limit was first breached.
-    /// Nesting is measured two ways, both against the same limit: the number
-    /// of brackets open at once (`(`, `not (`, `[`) while parsing, which
-    /// rejects an over-deep input before its interior is read; and the depth
-    /// of the finished AST, where `not (…)`, a value path's inner filter, or
-    /// an operator change such as an `or` inside an `and` each add a level.
-    /// Neither counts the length of a same-operator chain, which is bounded
-    /// by [`TooManyTerms`](FilterActionError::TooManyTerms) instead.
+    /// The wrapped value is the depth at which the input first exceeded the
+    /// limit. The crate measures nesting two ways, against the same limit.
+    /// The first way counts the number of brackets open at once: `(`,
+    /// `not (`, or `[`. This count rejects an over-deep input before the
+    /// parser reads its interior. The second way counts the depth of the
+    /// finished AST. In the finished AST, `not (…)`, a value path's inner
+    /// filter, and an operator change (for example, an `or` inside an
+    /// `and`) each add one level. Neither way counts the length of a
+    /// same-operator chain.
+    /// [`TooManyTerms`](FilterActionError::TooManyTerms) bounds that
+    /// instead.
     #[error("filter nesting depth exceeds maximum of {MAX_FILTER_DEPTH} (at depth {0})")]
     DepthExceeded(usize),
-    /// The filter contains more attribute expressions than [`MAX_FILTER_TERMS`].
+    /// The filter contains more attribute expressions than
+    /// [`MAX_FILTER_TERMS`].
     ///
-    /// The wrapped value is the count that breached the limit.
+    /// The wrapped value is the count that exceeded the limit.
     #[error("filter has too many terms: {0} exceeds the maximum of {MAX_FILTER_TERMS}")]
     TooManyTerms(usize),
 }
 
-/// Error returned by [`Filter::from_str`](std::str::FromStr::from_str) and [`PatchPath::from_str`](std::str::FromStr::from_str) when the
-/// input is not a valid filter or path expression.
+/// [`Filter::from_str`](std::str::FromStr::from_str) and
+/// [`PatchPath::from_str`](std::str::FromStr::from_str) return this error
+/// when the input is not a valid filter or path expression.
 pub type ParseError = LalrParseError<usize, String, FilterActionError>;
 
 /// Payload of [`MaybeFilter::Invalid`] and error type of the
@@ -252,13 +275,14 @@ pub type ParseError = LalrParseError<usize, String, FilterActionError>;
 /// `TolerantListQuery` and
 /// `TolerantSearchRequest`.
 ///
-/// Captures the original filter string and underlying [`ParseError`] so
-/// callers can build an RFC 7644 §3.12 `invalidFilter` response body
-/// (typically via `.map_err(...)` into the caller's SCIM error type).
+/// This struct captures the original filter string and the underlying
+/// [`ParseError`]. A caller can use them to build an RFC 7644 §3.12
+/// `invalidFilter` response body, typically via `.map_err(...)` into the
+/// caller's own SCIM error type.
 #[derive(Debug, Error)]
 #[error("invalid SCIM filter {raw:?}: {error}")]
 pub struct InvalidFilterError {
-    /// The original filter string as received from the wire.
+    /// The original filter string from the wire.
     pub raw: String,
     /// The underlying parse failure.
     pub error: ParseError,
@@ -266,8 +290,9 @@ pub struct InvalidFilterError {
 
 /// A SCIM filter expression (RFC 7644 §3.4.2.2).
 ///
-/// Filters are used in SCIM `GET` requests (`?filter=...`) and in conditional
-/// operations. The expression forms a tree of logical and comparison nodes.
+/// SCIM uses filter expressions in `GET` requests (`?filter=...`) and in
+/// conditional operations. Each expression forms a tree of logical and
+/// comparison nodes.
 ///
 /// ## Operator precedence
 ///
@@ -293,8 +318,9 @@ pub struct InvalidFilterError {
 ///
 /// ## Matching
 ///
-/// Use a recursive `match` to walk the tree when evaluating a filter against a
-/// resource. See the [module-level examples](self) for a complete pattern.
+/// Use a recursive `match` to walk the tree when you evaluate a filter
+/// against a resource. See the [module-level examples](self) for a
+/// complete pattern.
 ///
 /// ## Serde
 ///
@@ -307,65 +333,72 @@ pub enum Filter {
     /// Examples: `title pr`, `userName eq "bjensen"`.
     Attr(AttrExp),
 
-    /// An attribute path with a bracketed sub-filter applied to its values.
+    /// An attribute path with a bracketed sub-filter for its values.
     ///
     /// Example: `emails[type eq "work" and value co "@example.com"]`.
     ///
-    /// This form filters the elements of a multi-valued attribute; only elements
-    /// matching the inner [`ValFilter`] are considered.
+    /// This form filters the elements of a multi-valued attribute. The
+    /// filter considers only elements that match the inner [`ValFilter`].
     ValuePath(ValuePath),
 
     /// Logical negation of the inner filter.
     ///
-    /// Serializes as `not (<inner>)`. The inner filter is always parenthesised.
+    /// This variant serializes as `not (<inner>)` and always parenthesises
+    /// the inner filter.
     Not(Box<Filter>),
 
-    /// Logical conjunction — both operands must match.
+    /// Logical conjunction. Both operands must match.
     ///
-    /// Binds more tightly than [`Or`](Filter::Or).
+    /// This variant binds more tightly than [`Or`](Filter::Or).
     ///
-    /// N-ary: `a and b and c` is one `And` with three operands, not two nested
-    /// pairs. The grammar flattens same-operator chains on the way in, so the
-    /// tree's depth reflects genuine nesting (`not`, grouping, a value path, an
-    /// `or` inside an `and`) and never the length of a chain. That is what lets
-    /// a 100-term batch lookup parse while [`MAX_FILTER_DEPTH`] still bounds the
-    /// recursion of the derived impls. [`Operands`] guarantees at least two
-    /// operands however the value was built.
+    /// This variant is n-ary. `a and b and c` is one `And` variant with
+    /// three operands, not two nested pairs. The grammar flattens
+    /// same-operator chains on the way in. So the tree's depth reflects
+    /// genuine nesting only: `not`, grouping, a value path, or an `or`
+    /// inside an `and`. The depth never reflects the length of a chain.
+    /// This is why a 100-term batch lookup parses, while
+    /// [`MAX_FILTER_DEPTH`] still bounds the recursion of the derived
+    /// impls. [`Operands`] guarantees at least two operands, however the
+    /// caller built the value.
     And(Operands<Filter>),
 
-    /// Logical disjunction — at least one operand must match.
+    /// Logical disjunction. At least one operand must match.
     ///
-    /// Lowest precedence operator. When an `Or` expression appears as a
-    /// direct child of an `And`, [`Display`] wraps it in parentheses to
-    /// preserve the original precedence on round-trip.
+    /// This is the lowest-precedence operator. When an `Or` expression
+    /// appears as a direct child of an `And`, [`Display`] wraps it in
+    /// parentheses to preserve the original precedence on round-trip.
     ///
-    /// N-ary, as [`And`](Filter::And).
+    /// This variant is n-ary, like [`And`](Filter::And).
     Or(Operands<Filter>),
 }
 
-/// A logical operator was built with fewer than two operands.
+/// A logical operator has fewer than two operands.
 ///
-/// Returned by [`Operands::new`]; the wrapped value is the count supplied.
+/// [`Operands::new`] returns this error. The wrapped value is the operand
+/// count the caller supplied.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 #[error("a logical operator needs at least two operands, got {0}")]
 pub struct TooFewOperands(pub usize);
 
-/// The operands of an n-ary [`Filter::And`] / [`Filter::Or`] (and the
-/// [`ValFilter`] pair): at least two, by construction.
+/// This struct holds the operands of an n-ary [`Filter::And`] or
+/// [`Filter::Or`], and of the equivalent [`ValFilter`] variants. It always
+/// holds at least two operands, by construction.
 ///
-/// The SCIM grammar has no way to write a conjunction of one thing or of
-/// nothing, so a tree holding one would not survive `Display` and re-parse.
-/// Rather than check that at every use, the type rules it out: the only ways
-/// to obtain an `Operands` are [`Operands::new`] (which refuses fewer than
-/// two), [`Operands::pair`], the flattening constructors [`Filter::and`] /
-/// [`Filter::or`], and the parser. Dereferences to a slice, so `.len()`,
-/// `.iter()`, indexing and slice patterns all work; [`push`](Operands::push)
-/// is the only way to grow it and there is no way to shrink it.
+/// The SCIM grammar has no way to write a conjunction of one thing, or of
+/// nothing. So a tree holding only one operand would not survive a
+/// `Display` call followed by a re-parse. Rather than check for this at
+/// every use, the type rules it out. There are only four ways to obtain an
+/// `Operands` value: [`Operands::new`] (which refuses fewer than two
+/// operands), [`Operands::pair`], the flattening constructors
+/// [`Filter::and`] / [`Filter::or`], and the parser. `Operands` dereferences
+/// to a slice, so `.len()`, `.iter()`, indexing, and slice patterns all work
+/// on it. [`push`](Operands::push) is the only way to grow an `Operands`
+/// value, and there is no way to shrink one.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Operands<T>(Vec<T>);
 
 impl<T> Operands<T> {
-    /// Wrap `items`, which must hold at least two operands.
+    /// Wrap `items`. `items` must hold at least two operands.
     pub fn new(items: Vec<T>) -> Result<Self, TooFewOperands> {
         if items.len() < 2 {
             return Err(TooFewOperands(items.len()));
@@ -373,7 +406,7 @@ impl<T> Operands<T> {
         Ok(Self(items))
     }
 
-    /// Exactly two operands.
+    /// Wrap exactly two operands, `first` and `second`.
     pub fn pair(first: T, second: T) -> Self {
         Self(vec![first, second])
     }
@@ -388,7 +421,7 @@ impl<T> Operands<T> {
         &self.0
     }
 
-    /// Take the operands back as a `Vec`.
+    /// Return the operands as a `Vec`.
     pub fn into_vec(self) -> Vec<T> {
         self.0
     }
@@ -405,8 +438,8 @@ impl<T> Deref for Operands<T> {
     }
 }
 
-/// Elements may be replaced in place; the length cannot change through a
-/// slice, so the two-operand floor holds.
+/// A caller can replace elements in place. The length cannot change through
+/// a slice. So the two-operand floor still holds.
 impl<T> DerefMut for Operands<T> {
     fn deref_mut(&mut self) -> &mut [T] {
         &mut self.0
@@ -430,10 +463,11 @@ impl<'a, T> IntoIterator for &'a Operands<T> {
 }
 
 impl Filter {
-    /// `lhs and rhs`, flattening: an `And` operand contributes its operands
-    /// rather than nesting, since `and` is associative. This is the
-    /// constructor the parser uses, and the one to use when building filters
-    /// programmatically so the tree keeps the shape the parser would produce.
+    /// `lhs and rhs`, with flattening. An `And` operand contributes its own
+    /// operands rather than nesting inside the result, since `and` is
+    /// associative. The parser uses this constructor. Use it also when you
+    /// build filters programmatically, so the tree keeps the same shape the
+    /// parser produces.
     pub fn and(lhs: Filter, rhs: Filter) -> Filter {
         let mut items = match lhs {
             Filter::And(items) => items,
@@ -446,7 +480,7 @@ impl Filter {
         Filter::And(items)
     }
 
-    /// `lhs or rhs`, flattening as [`Filter::and`] does.
+    /// `lhs or rhs`, flattened the same way as [`Filter::and`].
     pub fn or(lhs: Filter, rhs: Filter) -> Filter {
         let mut items = match lhs {
             Filter::Or(items) => items,
@@ -459,25 +493,27 @@ impl Filter {
         Filter::Or(items)
     }
 
-    /// The conjunction of `items`: `None` for none, the item itself for one,
-    /// and a flattened [`And`](Filter::And) for more.
+    /// The conjunction of `items`. The result is `None` for zero items, the
+    /// item itself for one item, and a flattened [`And`](Filter::And) for
+    /// more than one item.
     ///
-    /// The constructor for folding a computed list of conditions — an
-    /// allow-list, say — where an empty list must reach the caller's control
-    /// flow rather than become an empty filter that a server could read as
-    /// "match everything".
+    /// Use this constructor to fold a computed list of conditions, such as
+    /// an allow-list. An empty list must reach the caller's own control
+    /// flow, not become an empty filter. A server could read an empty
+    /// filter as "match everything".
     pub fn all(items: impl IntoIterator<Item = Filter>) -> Option<Filter> {
         items.into_iter().reduce(Filter::and)
     }
 
-    /// The disjunction of `items`, as [`Filter::all`].
+    /// The disjunction of `items`. It behaves the same way as
+    /// [`Filter::all`].
     pub fn any(items: impl IntoIterator<Item = Filter>) -> Option<Filter> {
         items.into_iter().reduce(Filter::or)
     }
 }
 
 impl ValFilter {
-    /// `lhs and rhs`, flattening as [`Filter::and`].
+    /// `lhs and rhs`, flattened the same way as [`Filter::and`].
     pub fn and(lhs: ValFilter, rhs: ValFilter) -> ValFilter {
         let mut items = match lhs {
             ValFilter::And(items) => items,
@@ -490,7 +526,7 @@ impl ValFilter {
         ValFilter::And(items)
     }
 
-    /// `lhs or rhs`, flattening as [`Filter::or`].
+    /// `lhs or rhs`, flattened the same way as [`Filter::or`].
     pub fn or(lhs: ValFilter, rhs: ValFilter) -> ValFilter {
         let mut items = match lhs {
             ValFilter::Or(items) => items,
@@ -503,12 +539,14 @@ impl ValFilter {
         ValFilter::Or(items)
     }
 
-    /// The conjunction of `items`, as [`Filter::all`].
+    /// The conjunction of `items`. It behaves the same way as
+    /// [`Filter::all`].
     pub fn all(items: impl IntoIterator<Item = ValFilter>) -> Option<ValFilter> {
         items.into_iter().reduce(ValFilter::and)
     }
 
-    /// The disjunction of `items`, as [`Filter::any`].
+    /// The disjunction of `items`. It behaves the same way as
+    /// [`Filter::any`].
     pub fn any(items: impl IntoIterator<Item = ValFilter>) -> Option<ValFilter> {
         items.into_iter().reduce(ValFilter::or)
     }
@@ -566,26 +604,29 @@ impl<'de> Deserialize<'de> for Filter {
     }
 }
 
-/// Deserialize-side wrapper that rescues invalid filter expressions.
+/// This is a deserialize-side wrapper that rescues invalid filter
+/// expressions.
 ///
 /// SCIM handlers that receive a malformed `?filter=...` need to return a
-/// `400 invalidFilter` response per RFC 7644 §3.12. Using this wrapper in
-/// place of [`Filter`] lets the surrounding
+/// `400 invalidFilter` response per RFC 7644 §3.12. Use this wrapper in
+/// place of [`Filter`]. Then the surrounding
 /// `ListQuery` /
-/// `SearchRequest` deserialize
-/// successfully so the handler can inspect `start_index`, `count`, etc. and
-/// produce an RFC-compliant error body instead of a generic 400.
+/// `SearchRequest` deserializes
+/// successfully. The handler can then inspect `start_index`, `count`, and
+/// other fields, and produce an RFC-compliant error body instead of a
+/// generic 400.
 ///
 /// `MaybeFilter` intentionally does **not** implement `Serialize`. To emit a
 /// filter on the wire, pattern-match the [`MaybeFilter::Valid`] variant and
-/// serialize the inner [`Filter`] — `Filter` itself is `Serialize`.
+/// serialize the inner [`Filter`]. `Filter` itself implements `Serialize`.
 #[derive(Debug)]
 pub enum MaybeFilter {
     /// The filter string parsed successfully.
     Valid(Filter),
     /// The filter string did not parse. The wrapped [`InvalidFilterError`]
-    /// carries the original input and underlying [`ParseError`] for
-    /// constructing an RFC 7644 §3.12 `invalidFilter` error response.
+    /// carries the original input and the underlying [`ParseError`], so a
+    /// handler can construct an RFC 7644 §3.12 `invalidFilter` error
+    /// response.
     Invalid(InvalidFilterError),
 }
 
@@ -627,7 +668,8 @@ impl std::str::FromStr for Filter {
 
 /// The `attrPath "[" valFilter "]"` form of a filter (RFC 7644 §3.4.2.2).
 ///
-/// Selects elements of a multi-valued attribute that satisfy the inner filter.
+/// This form selects elements of a multi-valued attribute that satisfy the
+/// inner filter.
 ///
 /// ```
 /// # use scim_v2::filter::*;
@@ -643,31 +685,32 @@ impl std::str::FromStr for Filter {
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct ValuePath {
-    /// The multi-valued attribute being filtered.
+    /// The multi-valued attribute that this value path filters.
     pub attr: AttrPath,
-    /// The filter applied to each element of the attribute's values.
+    /// The filter that applies to each element of the attribute's values.
     pub filter: Box<ValFilter>,
 }
 
-/// A filter expression used inside `[...]` brackets (RFC 7644 §3.4.2.2).
+/// A filter expression for use inside `[...]` brackets (RFC 7644 §3.4.2.2).
 ///
-/// Structurally identical to [`Filter`] but does not allow nested
-/// [`ValuePath`] expressions. The RFC specifies that the expression inside
-/// square brackets must be a valid filter expression based on sub-attributes
-/// of the parent attribute.
+/// This type is structurally identical to [`Filter`], but it does not allow
+/// nested [`ValuePath`] expressions. The RFC specifies that the expression
+/// inside square brackets must be a valid filter expression based on
+/// sub-attributes of the parent attribute.
 ///
-/// Used as the inner filter of [`ValuePath`] and [`PatchValuePath`].
+/// This type serves as the inner filter of [`ValuePath`] and
+/// [`PatchValuePath`].
 #[derive(Debug, Clone, PartialEq)]
 pub enum ValFilter {
     /// A single attribute expression (presence test or comparison).
     Attr(AttrExp),
     /// Logical negation. Serializes as `not (<inner>)`.
     Not(Box<ValFilter>),
-    /// Logical conjunction — both operands must match.
-    /// N-ary, as [`Filter::And`].
+    /// Logical conjunction. Both operands must match.
+    /// This variant is n-ary, like [`Filter::And`].
     And(Operands<ValFilter>),
-    /// Logical disjunction — at least one operand must match.
-    /// N-ary, as [`Filter::Or`].
+    /// Logical disjunction. At least one operand must match.
+    /// This variant is n-ary, like [`Filter::Or`].
     Or(Operands<ValFilter>),
 }
 
@@ -689,18 +732,21 @@ pub enum ValFilter {
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub enum AttrExp {
-    /// The `pr` (present) operator. Matches when the attribute exists and is not null.
+    /// This is the `pr` (present) operator. It matches when the attribute
+    /// exists and is not null.
     ///
     /// Example: `title pr`
     Present(AttrPath),
 
     /// A comparison operator with a value.
     ///
-    /// Example: `userName eq "bjensen"`, `meta.lastModified gt "2024-01-01T00:00:00Z"`
+    /// Example: `userName eq "bjensen"`,
+    /// `meta.lastModified gt "2024-01-01T00:00:00Z"`
     Comparison(AttrPath, CompareOp, CompValue),
 }
 
-/// A SCIM attribute path, optionally qualified with a schema URI and/or a sub-attribute.
+/// A SCIM attribute path, optionally qualified with a schema URI, a
+/// sub-attribute, or both.
 ///
 /// An attribute path can take three forms:
 ///
@@ -725,7 +771,8 @@ pub enum AttrExp {
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct AttrPath {
-    /// Optional schema URI prefix, e.g. `"urn:ietf:params:scim:schemas:core:2.0:User"`.
+    /// Optional schema URI prefix, e.g.
+    /// `"urn:ietf:params:scim:schemas:core:2.0:User"`.
     pub uri: Option<String>,
     /// Attribute name, e.g. `"userName"`.
     pub name: String,
@@ -734,7 +781,8 @@ pub struct AttrPath {
 }
 
 impl AttrPath {
-    /// Create an `AttrPath` for a simple attribute name (no URI prefix, no sub-attribute).
+    /// Create an `AttrPath` for a simple attribute name (no URI prefix, no
+    /// sub-attribute).
     pub fn with_name(name: impl Into<String>) -> Self {
         Self {
             uri: None,
@@ -743,7 +791,8 @@ impl AttrPath {
         }
     }
 
-    /// Create an `AttrPath` for a dotted sub-attribute path (e.g. `name.familyName`).
+    /// Create an `AttrPath` for a dotted sub-attribute path (e.g.
+    /// `name.familyName`).
     pub fn with_sub_attr(name: impl Into<String>, sub_attr: impl Into<String>) -> Self {
         Self {
             uri: None,
@@ -755,37 +804,38 @@ impl AttrPath {
 
 /// SCIM comparison operators (RFC 7644 §3.4.2.2, Table 3).
 ///
-/// Operators are case-insensitive when parsed (`EQ`, `Eq`, and `eq` are all
-/// accepted) but are always displayed in lowercase.
+/// The parser accepts an operator without regard to case. For example,
+/// `EQ`, `Eq`, and `eq` all parse to the same operator. [`Display`] always
+/// shows an operator in lowercase.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CompareOp {
-    /// `eq` — equal.
+    /// `eq`: equal.
     Eq,
-    /// `ne` — not equal.
+    /// `ne`: not equal.
     Ne,
-    /// `co` — contains (substring match).
+    /// `co`: contains (substring match).
     Co,
-    /// `sw` — starts with.
+    /// `sw`: starts with.
     Sw,
-    /// `ew` — ends with.
+    /// `ew`: ends with.
     Ew,
-    /// `gt` — greater than.
+    /// `gt`: greater than.
     Gt,
-    /// `lt` — less than.
+    /// `lt`: less than.
     Lt,
-    /// `ge` — greater than or equal to.
+    /// `ge`: greater than or equal to.
     Ge,
-    /// `le` — less than or equal to.
+    /// `le`: less than or equal to.
     Le,
 }
 
 /// The comparison value (right-hand side of a filter comparison).
 ///
-/// Corresponds to the JSON scalar types allowed in SCIM filter expressions.
-/// [`Display`] produces the JSON representation (e.g. `Str("foo")` → `"foo"`
-/// with surrounding quotes and proper escaping).
+/// This enum corresponds to the JSON scalar types allowed in SCIM filter
+/// expressions. [`Display`] produces the JSON representation (e.g.
+/// `Str("foo")` → `"foo"` with surrounding quotes and proper escaping).
 ///
-/// String values can be constructed with `.into()`:
+/// Construct a string value with `.into()`:
 ///
 /// ```
 /// # use scim_v2::filter::*;
@@ -925,8 +975,8 @@ pub enum PatchPath {
 
 /// The `valuePath [subAttr]` form of a PATCH path (RFC 7644 §3.5.2).
 ///
-/// Identifies a specific subset of a multi-valued attribute's elements, and
-/// optionally a sub-attribute within those elements.
+/// This struct identifies a specific subset of a multi-valued attribute's
+/// elements, and optionally a sub-attribute within those elements.
 ///
 /// ```
 /// # use scim_v2::filter::*;
@@ -943,13 +993,13 @@ pub enum PatchPath {
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct PatchValuePath {
-    /// The multi-valued attribute being targeted.
+    /// The multi-valued attribute that this path targets.
     pub attr: AttrPath,
     /// The filter that selects which elements of the attribute to modify.
     pub filter: ValFilter,
     /// Optional sub-attribute after the closing bracket (e.g. `"value"` in
     /// `emails[type eq "work"].value`). When `None`, the operation targets
-    /// the entire matching element.
+    /// the whole matched element.
     pub sub_attr: Option<String>,
 }
 
@@ -1133,14 +1183,15 @@ fn filter_depth_exceeds(root: &Filter, limit: usize) -> Option<usize> {
     None
 }
 
-/// `ValFilter` mirror of [`filter_depth_exceeds`].
+/// This function is the `ValFilter` mirror of [`filter_depth_exceeds`].
 fn val_filter_depth_exceeds(root: &ValFilter, limit: usize) -> Option<usize> {
     val_filter_depth_exceeds_from(root, 1, limit)
 }
 
-/// [`val_filter_depth_exceeds`] with `root` at `start` rather than 1, so a
-/// value path's inner filter is charged against the budget its enclosing
-/// filter has already spent.
+/// This function behaves like [`val_filter_depth_exceeds`], but `root`
+/// starts at `start` instead of at 1. As a result, a value path's inner
+/// filter charges against the budget its enclosing filter has already
+/// spent.
 fn val_filter_depth_exceeds_from(root: &ValFilter, start: usize, limit: usize) -> Option<usize> {
     let mut worklist: Vec<(&ValFilter, usize)> = vec![(root, start)];
     while let Some((node, depth)) = worklist.pop() {
@@ -1158,8 +1209,9 @@ fn val_filter_depth_exceeds_from(root: &ValFilter, start: usize, limit: usize) -
     None
 }
 
-/// Drop a [`Filter`] without recursing, so an over-deep AST can be rejected
-/// without the derived recursive `Drop` overflowing the stack.
+/// Drop a [`Filter`] without recursion. This lets the code reject an
+/// over-deep AST without overflowing the stack in the derived recursive
+/// `Drop` impl.
 fn drop_filter_iteratively(root: Filter) {
     let mut stack: Vec<Filter> = vec![root];
     while let Some(node) = stack.pop() {
@@ -1172,7 +1224,7 @@ fn drop_filter_iteratively(root: Filter) {
     }
 }
 
-/// `ValFilter` mirror of [`drop_filter_iteratively`].
+/// This function is the `ValFilter` mirror of [`drop_filter_iteratively`].
 fn drop_val_filter_iteratively(root: ValFilter) {
     let mut stack: Vec<ValFilter> = vec![root];
     while let Some(node) = stack.pop() {

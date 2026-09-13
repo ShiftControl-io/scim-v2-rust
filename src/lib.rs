@@ -1,20 +1,22 @@
 //! # SCIM v2
 //!
 //! Models, parsers and validators for the System for Cross-domain Identity
-//! Management (SCIM) 2.0 protocol — RFC 7642, RFC 7643 and RFC 7644.
+//! Management (SCIM) 2.0 protocol. RFC 7642, RFC 7643 and RFC 7644 define the
+//! protocol.
 //!
-//! The crate is deliberately narrow: it models the wire format, parses the two
-//! grammars the RFC defines, and checks the attributes the RFC marks REQUIRED.
-//! It performs no I/O, evaluates no filters against storage, and does not wrap
-//! `serde` — use `serde_json` directly for that.
+//! The crate has a narrow scope. The crate models the wire format. The crate
+//! parses the two grammars the RFC defines. The crate checks the attributes
+//! the RFC marks REQUIRED. The crate performs no I/O and evaluates no filters
+//! against storage. The crate does not wrap `serde`. Use `serde_json`
+//! directly.
 //!
 //! ## Quick start
 //!
-//! A SCIM server receiving `POST /Users`. [`Strict`] deserializes the body and
-//! validates it for the direction it is travelling in one step, so a
-//! non-conformant request never becomes a `User` at all;
-//! the error names the offending attribute by its wire path and carries the
-//! RFC 7644 §3.12 `scimType`, ready for a `400`.
+//! A SCIM server answers `POST /Users`. [`Strict`] deserializes the body and
+//! validates the body for its direction in one step. A non-conformant request
+//! therefore never becomes a `User`. The error names the attribute at fault
+//! by its wire path. The error also carries the RFC 7644 §3.12 `scimType`,
+//! ready for a `400`.
 //!
 //! ```rust
 //! # #[cfg(feature = "models")] {
@@ -54,9 +56,9 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
-//! A SCIM client reading `GET /Users`. A page deserializes straight into the
-//! resource type, the lenient parsers absorb what real providers send (here
-//! Entra's `"active": "True"`), and `validate()` checks the envelope and every
+//! A SCIM client reads `GET /Users`. A page deserializes directly into the
+//! resource type. The lenient parsers accept what real providers send, such as
+//! Entra's `"active": "True"`. `validate()` checks the envelope and every
 //! resource on the page.
 //!
 //! ```rust
@@ -81,9 +83,9 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
-//! And the query side: a `?filter=` parameter parses into an AST for you to
-//! map onto your storage. A malformed filter is an error to answer with
-//! `invalidFilter`, never a panic.
+//! The query side comes next. A `?filter=` parameter parses into an AST. Map
+//! the AST onto your storage. A malformed filter gives an error to answer
+//! with `invalidFilter`. A malformed filter never causes a panic.
 //!
 //! ```rust
 //! # #[cfg(feature = "filter")] {
@@ -100,8 +102,8 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
-//! For the parsed shape, precedence rules and the `invalidFilter` error path,
-//! see the `filter` module docs.
+//! See the `filter` module docs for the parsed shape, the precedence rules
+//! and the `invalidFilter` error path.
 //!
 //! ## What is here
 //!
@@ -115,27 +117,29 @@
 //!   `ListQuery`,
 //!   `PatchOp`,
 //!   `ScimHttpError`.
-//! - **Filter and PATCH-path parsing** — `filter`, implementing the
+//! - **Filter and PATCH-path parsers** — `filter`. The module implements the
 //!   RFC 7644 §3.4.2.2 grammar and the §3.5.2 PATCH path rule.
-//! - **Validation** — the [`Validate`] trait, reporting failures by SCIM wire
-//!   path so a server can echo them in an RFC 7644 §3.12 response.
+//! - **Validation** — the [`Validate`] trait. The trait reports a failure by
+//!   its SCIM wire path, so a server can echo the path in an RFC 7644 §3.12
+//!   response.
 //!
-//! ## Validation — deserializing does not validate
+//! ## Validation — deserialization does not validate
 //!
-//! Every model is a plain `serde` type, and deserializing one enforces nothing
-//! beyond JSON shape: `serde_json::from_str::<User>(..)` will return a `User`
-//! with an empty `userName`, two `primary: true` emails, or an `id` on a create
-//! request. Store that and you will later emit a non-conformant response, or
-//! echo a `password` back.
+//! Every model is a plain `serde` type. Deserialization enforces nothing
+//! beyond the JSON shape. `serde_json::from_str::<User>(..)` returns a `User`
+//! with an empty `userName`, two `primary: true` emails, or an `id` on a
+//! create request. Store such a `User`, and you later emit a non-conformant
+//! response or echo a `password` back.
 //!
-//! [`Validate`] holds the RFC's REQUIRED rules and names the offending
-//! attribute by its **wire** path. It is direction-aware:
-//! [`validate_as`](Validate::validate_as) takes a [`Context`], because RFC 7643
-//! §3.1 forbids `id` on a create and requires it on a response. [`Valid<T>`]
-//! is a value the type system knows has passed, and [`Strict<T, M>`] runs the
-//! check inside deserialization so a bad body never becomes a `T` at all. A
-//! server should take `Strict<User, CreateRequest>` in its handlers, as in the
-//! quick start; a client can usually stop at `validate()`.
+//! [`Validate`] holds the RFC's REQUIRED rules. The trait names the attribute
+//! at fault by its **wire** path. The trait is direction-aware:
+//! [`validate_as`](Validate::validate_as) takes a [`Context`]. RFC 7643 §3.1
+//! forbids `id` on a create request and requires `id` on a response.
+//! [`Valid<T>`] is a value the type system knows has passed the check.
+//! [`Strict<T, M>`] runs the check inside deserialization, so a bad body never
+//! becomes a `T`. A server should take `Strict<User, CreateRequest>` in its
+//! handlers, as the quick start shows. A client can usually stop at
+//! `validate()`.
 //!
 //! ```rust
 //! # #[cfg(feature = "models")] {
@@ -155,23 +159,25 @@
 //!
 //! ## Leniency on input, canonical form on output
 //!
-//! Real providers do not all send conformant SCIM, and a client that cannot
-//! read a provider's payload is useless. So every wire parser here is
+//! Real providers do not all send conformant SCIM. A client that cannot read
+//! a provider's payload is useless. Every wire parser here is therefore
 //! lenient, and every serializer emits the RFC's canonical form. A round-trip
-//! therefore *canonicalizes* rather than preserving bytes.
+//! therefore *canonicalizes* the payload. A round-trip does not preserve the
+//! bytes.
 //!
 //! | Accepted on input | Emitted | Why |
 //! |---|---|---|
 //! | `"true"` / `"True"` for a boolean | `true` | Entra; RFC 7643 §2.3.2 defines the JSON literal |
-//! | `null`, `[]` or absence for a multi-valued attribute | `[]` (or omitted via `compact::Compact`) | RFC 7643 §2.5 equivalence; RFC 7644 §3.5.1 gives `[]` clear-all meaning |
+//! | `null` or `[]` for a multi-valued attribute | `[]` | RFC 7644 §3.5.1 gives `[]` clear-all meaning |
+//! | an absent multi-valued attribute | omitted | RFC 7644 §3.5.1 makes it "not asserted by the client" |
 //! | `Add` / `ADD` for a PATCH `op` | `add` | RFC 7644 §3.5.2 spells it lowercase; Entra does not |
 //! | `Ascending`, `GROUP` for `sortOrder` / `members.type` | `ascending`, `Group` | schema `caseExact: false` |
 //! | a `members.type` or `scimType` outside the RFC's list | preserved verbatim | RFC 7643 §7: canonical values are *suggested* |
 //! | attribute names in any case, via [`case_insensitive`] | canonical camelCase | RFC 7643 §2.1: "Attribute names are case insensitive" |
 //!
-//! Leniency stops at the attribute *names*, and it is never implicit: the
-//! derives stay exact-match and a caller who cannot trust a peer's casing
-//! reaches for [`case_insensitive`] at the call site.
+//! Leniency stops at the attribute *names*, and the leniency is never
+//! implicit. The derives stay exact-match. A caller who cannot trust a peer's
+//! letter case uses [`case_insensitive`] at the call site.
 //!
 //! ```
 //! # #[cfg(feature = "models")] {
@@ -188,10 +194,11 @@
 //! ## Timestamps
 //!
 //! `meta.created` and `meta.lastModified` are `ScimDateTime`, not `String`.
-//! RFC 7643 §2.3.5 requires a valid `xsd:dateTime` including both a date and a
-//! time, and §3.1 makes every `meta` sub-attribute readOnly and
-//! provider-assigned — so the party most likely to write a malformed one is a
-//! service provider built on this crate, and the type is what stops it.
+//! RFC 7643 §2.3.5 requires a valid `xsd:dateTime` with both a date and a
+//! time. §3.1 makes every `meta` sub-attribute readOnly and provider-assigned.
+//! The party most likely to write a malformed timestamp is therefore a service
+//! provider built on this crate. The `ScimDateTime` type stops that service
+//! provider.
 //!
 //! ```
 //! # #[cfg(feature = "models")] {
@@ -203,24 +210,25 @@
 //! # }
 //! ```
 //!
-//! It validates a lexical form: no arithmetic, no time zone conversion, and
-//! no normalising. `==` is textual, so ask about instants with
-//! `ScimDateTime::xsd_equivalent` and `ScimDateTime::xsd_partial_cmp`,
-//! which implement §3.3.7.1 and answer `None` where the spec says two values
-//! are ·incomparable·. The crate takes no date-time dependency because
-//! none of them fits — XSD makes the offset optional, and `time`, `chrono`
-//! and `jiff` each split offset-bearing and offset-less values across two
-//! different types, so a field typed as one of them would reject conformant
-//! input or invent an offset. [The module docs](models::datetime) give the
-//! full limits and how to convert (`models::datetime`).
+//! The type validates a lexical form. The type does no arithmetic, no time
+//! zone conversion and no normalization. `==` is textual. Ask about instants
+//! with `ScimDateTime::xsd_equivalent` and `ScimDateTime::xsd_partial_cmp`.
+//! Both functions implement §3.3.7.1. Both answer `None` where the spec says
+//! two values are ·incomparable·. The crate takes no date-time dependency,
+//! because no date-time crate fits. XSD makes the offset optional. `time`,
+//! `chrono` and `jiff` each split values with an offset and values without an
+//! offset across two different types. A field with one of those types would
+//! reject conformant input or invent an offset.
+//! [The module docs](models::datetime) give the full limits and show how to
+//! convert (`models::datetime`).
 //!
 //! ## Feature flags
 //!
-//! All three are on by default and all three are additive: a feature only ever
-//! compiles more. Behaviour choices are never features — they are wrapper
-//! types ([`CaseInsensitive`], [`Compact`]) or a call-site choice, because
-//! Cargo unifies features across the dependency graph and a transitive crate
-//! could otherwise flip them for everyone.
+//! All three features are on by default. All three are additive: a feature
+//! only ever compiles more code. Behaviour choices are never features. A
+//! behaviour choice is a wrapper type ([`CaseInsensitive`]) or a
+//! call-site choice. Cargo unifies features across the dependency graph, and a
+//! transitive crate could otherwise flip a behaviour choice for everyone.
 //!
 //! | Feature | Provides |
 //! |---------|----------|
@@ -228,14 +236,15 @@
 //! | `models` | every resource and protocol message |
 //! | `schemas` | the embedded RFC 7643 schema definitions and the `get_schemas` lookup; ~48 KB of `include_str!` |
 //!
-//! Dropping `filter` takes the dependency tree from 22 crates to 14 and removes
-//! a regex engine from the supply chain, which is the point; it also shortens
-//! the build, more on a serial build than a parallel one, since the crates it
-//! drops overlap with `syn` on the critical path.
+//! Without `filter` the dependency tree falls from 22 crates to 14, and the
+//! supply chain loses a regex engine. The lost regex engine is the point. The
+//! build also gets shorter. The gain is larger on a serial build than on a
+//! parallel build. The dropped crates overlap with `syn` on the critical
+//! path.
 //!
-//! `SearchRequest`, `ListQuery` and `PatchOp` need both `models` and `filter`,
-//! since each carries a parsed filter or PATCH path. A filter-only consumer
-//! wants:
+//! `SearchRequest`, `ListQuery` and `PatchOp` need both `models` and `filter`.
+//! Each of the three carries a parsed filter or a parsed PATCH path. A
+//! filter-only consumer wants this dependency declaration:
 //!
 //! ```toml
 //! scim_v2 = { version = "1", default-features = false, features = ["filter"] }
@@ -287,7 +296,7 @@ pub mod schema_urns;
 pub use models::datetime::{ParseScimDateTimeError, ScimDateTime};
 
 pub use case_insensitive::CaseInsensitive;
-pub use compact::Compact;
+pub use multi::Multi;
 
 pub use utils::validation::{
     Context, ContextMarker, CreateRequest, ReplaceRequest, Response, Strict, Valid, Validate,
@@ -295,7 +304,7 @@ pub use utils::validation::{
 };
 
 pub mod case_insensitive;
-pub mod compact;
+pub mod multi;
 
 /// Declaring the utils module which contains the error submodule
 pub mod utils {

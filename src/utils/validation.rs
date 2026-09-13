@@ -1,12 +1,12 @@
 //! Validation of SCIM resources against the required-attribute rules the
 //! type system cannot express.
 //!
-//! Nearly every attribute in RFC 7643 is optional, so the models make almost
-//! everything `Option` or defaulted. What `serde` therefore cannot enforce is
-//! the handful of attributes the RFC marks REQUIRED. [`Validate`] carries
-//! those checks, and reports failures using the **wire** attribute name
-//! (`userName`, not `user_name`) so a server can echo the path straight back
-//! in an RFC 7644 §3.12 error response.
+//! Nearly every attribute in RFC 7643 is optional. The models therefore make
+//! almost everything `Option` or defaulted. `serde` cannot enforce the handful
+//! of attributes the RFC marks REQUIRED. [`Validate`] carries those checks.
+//! [`Validate`] reports a failure with the **wire** attribute name
+//! (`userName`, not `user_name`). A server can then echo the path straight
+//! back in an RFC 7644 §3.12 error response.
 
 use thiserror::Error;
 
@@ -15,7 +15,7 @@ use crate::models::errors::{ScimHttpError, ScimType};
 #[cfg(feature = "models")]
 use crate::schema_urns;
 
-/// Why a resource failed validation.
+/// Why a resource fails validation.
 ///
 /// `#[non_exhaustive]`: further checks (attribute-type and mutability
 /// conformance, canonical-value membership) will add variants in minor
@@ -26,16 +26,16 @@ pub enum ValidationErrorKind {
     /// An attribute RFC 7643 marks REQUIRED is absent, `null`, or empty.
     #[error("required attribute is missing or empty")]
     MissingRequiredAttribute,
-    /// The attribute is present but its value is not permissible.
+    /// The attribute is present, but the value is not permissible.
     #[error("{0}")]
     InvalidValue(String),
 }
 
 /// A single validation failure, located by its SCIM wire path.
 ///
-/// `path` is dotted wire notation as it would appear in a filter or PATCH
-/// path — `userName`, `name.familyName`, `meta.resourceType` — never the Rust
-/// field name.
+/// `path` is dotted wire notation, as a filter or a PATCH path spells it:
+/// `userName`, `name.familyName`, `meta.resourceType`. `path` is never the
+/// Rust field name.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[error("{path}: {kind}")]
 pub struct ValidationError {
@@ -44,7 +44,7 @@ pub struct ValidationError {
 }
 
 impl ValidationError {
-    /// A REQUIRED attribute was missing or empty.
+    /// A REQUIRED attribute is missing or empty.
     pub fn missing_required(path: impl Into<String>) -> Self {
         Self {
             path: path.into(),
@@ -52,7 +52,7 @@ impl ValidationError {
         }
     }
 
-    /// An attribute carried a value that is not permissible.
+    /// An attribute carries a value that is not permissible.
     pub fn invalid_value(path: impl Into<String>, detail: impl Into<String>) -> Self {
         Self {
             path: path.into(),
@@ -60,21 +60,21 @@ impl ValidationError {
         }
     }
 
-    /// The same failure, located under `parent` — `Resources[2]`,
-    /// `authenticationSchemes[0]` — so a container can report a nested
-    /// resource's error with its full wire path and its kind and detail
-    /// intact, rather than flattening every nested failure into one kind.
+    /// The same failure, located under `parent`, such as `Resources[2]` or
+    /// `authenticationSchemes[0]`. A container reports a nested resource's
+    /// error with the full wire path, the kind and the detail intact. The
+    /// container does not flatten every nested failure into one kind.
     pub fn under(mut self, parent: &str) -> Self {
         self.path = format!("{parent}.{}", self.path);
         self
     }
 
-    /// The SCIM wire path of the offending attribute.
+    /// The SCIM wire path of the attribute at fault.
     pub fn path(&self) -> &str {
         &self.path
     }
 
-    /// Why validation failed.
+    /// Why the validation fails.
     pub fn kind(&self) -> &ValidationErrorKind {
         &self.kind
     }
@@ -104,10 +104,11 @@ impl ValidationError {
 
     /// Build the RFC 7644 §3.12 error body a server should return.
     ///
-    /// Every current [`ValidationErrorKind`] is a `400 Bad Request`, so the
-    /// status is fixed here rather than taken as a parameter a caller could
-    /// get wrong; a body needing another status is built as a
-    /// [`ScimHttpError`] directly and checked with its own `Validate`.
+    /// Every current [`ValidationErrorKind`] is a `400 Bad Request`. The
+    /// method therefore fixes the status here, rather than take it as a
+    /// parameter a caller could get wrong. For a body that needs another
+    /// status, build a [`ScimHttpError`] directly and check it with its own
+    /// `Validate`.
     ///
     /// Requires the `models` feature, which supplies [`ScimHttpError`].
     #[cfg(feature = "models")]
@@ -121,16 +122,17 @@ impl ValidationError {
     }
 }
 
-/// RFC 7643 §3: `schemas` is REQUIRED and "MUST include a non-empty array";
-/// "each String value must be a unique URI" and "duplicate values MUST NOT
-/// be included"; and a resource's `schemas` "MUST only contain values defined
-/// as schema and schemaExtensions for the resource's defined resourceType",
-/// while the protocol messages of RFC 7644 each carry one fixed URN. This
-/// checks non-emptiness, uniqueness, and that `required_urn` is present. It
-/// deliberately does *not* reject additional URNs: a resource may carry an
-/// extension this crate does not model, and the `Resource` deserializer in
-/// `models::others` likewise ignores URNs it does not recognise. Uniqueness
-/// is byte-exact, the same comparison the membership check uses.
+/// RFC 7643 §3: `schemas` is REQUIRED and "MUST include a non-empty array".
+/// §3 also requires "each String value must be a unique URI" and says
+/// "duplicate values MUST NOT be included". A resource's `schemas` "MUST only
+/// contain values defined as schema and schemaExtensions for the resource's
+/// defined resourceType". The protocol messages of RFC 7644 each carry one
+/// fixed URN. The function checks three things: the array is not empty, the
+/// values are unique, and `required_urn` is present. The function deliberately
+/// does *not* reject an additional URN. A resource may carry an extension this
+/// crate does not model, and the `Resource` deserializer in `models::others`
+/// likewise ignores a URN it does not recognise. The uniqueness comparison is
+/// byte-exact, the same comparison the membership check uses.
 pub fn require_schema_urn(schemas: &[String], required_urn: &str) -> Result<(), ValidationError> {
     if schemas.is_empty() {
         return Err(ValidationError::missing_required("schemas"));
@@ -160,7 +162,7 @@ pub fn require_schema_urn(schemas: &[String], required_urn: &str) -> Result<(), 
 
 /// RFC 7643 §2.4: for a multi-valued attribute, "The primary attribute value
 /// `true` MUST appear no more than once." `primary` extracts the flag from
-/// each value; `path` is the attribute's wire name for the error.
+/// each value. `path` is the attribute's wire name for the error.
 pub fn at_most_one_primary<T>(
     values: &[T],
     primary: impl Fn(&T) -> Option<bool>,
@@ -176,29 +178,30 @@ pub fn at_most_one_primary<T>(
     Ok(())
 }
 
-/// The direction a payload is travelling, which decides which conformance
+/// The direction a payload travels. The direction decides which conformance
 /// rules apply.
 ///
 /// RFC 7643 §3.1 makes `id` REQUIRED in "each representation of the resource"
-/// a server returns, while a client "MUST NOT" specify it on create. §4.1's
-/// `password` has `returned: never`, so it may travel *to* a server and must
-/// never travel *from* one. A single direction-agnostic check cannot express
-/// either, which is why [`Validate::validate_as`] takes a context.
+/// a server returns. A client "MUST NOT" specify `id` on create. §4.1 gives
+/// `password` `returned: never`, so `password` may travel *to* a server and
+/// must never travel *from* a server. A single direction-agnostic check cannot
+/// express either rule. [`Validate::validate_as`] therefore takes a context.
 ///
-/// `#[non_exhaustive]`: further contexts (bulk, search results as a distinct
-/// case) may be added in minor releases.
+/// `#[non_exhaustive]`: minor releases may add further contexts (bulk, search
+/// results as a distinct case).
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Context {
     /// A client's `POST` body. `id` MUST NOT be present (RFC 7643 §3.1).
     CreateRequest,
     /// A client's `PUT` body. RFC 7644 §3.5.1 has the server ignore
-    /// `readOnly` attributes such as `id` rather than reject them, and its
-    /// own example carries `id`, so presence is tolerated here.
+    /// `readOnly` attributes such as `id`, rather than reject them. The
+    /// §3.5.1 example itself carries `id`. This context therefore tolerates
+    /// `id`.
     ReplaceRequest,
     /// A server's response body. `id` is REQUIRED (§3.1, except
-    /// `ServiceProviderConfig` per §5), and `returned: never` attributes
-    /// such as `password` MUST be absent.
+    /// `ServiceProviderConfig` per §5). A `returned: never` attribute such as
+    /// `password` MUST be absent.
     Response,
 }
 
@@ -219,18 +222,19 @@ impl Context {
 ///
 /// [`validate`](Self::validate) holds the rules that apply in every
 /// direction. [`validate_as`](Self::validate_as) adds the direction-specific
-/// ones — `id` REQUIRED on a response, forbidden on a create — and is what
-/// [`Valid`] requires. Nothing here runs during deserialization: the wire
-/// parsers stay lenient so real providers' payloads can be read, and
-/// conformance is asserted at the point where the crate's user needs it.
-/// [`Strict`] moves that point to the parse boundary for callers who want it.
+/// rules, such as `id` REQUIRED on a response and forbidden on a create.
+/// [`Valid`] requires [`validate_as`](Self::validate_as). No method here runs
+/// during deserialization. The wire parsers stay lenient, so a caller can read
+/// a real provider's payload. The crate asserts conformance at the point where
+/// the crate's user needs the assertion. [`Strict`] moves that point to the
+/// parse boundary, for a caller who wants the check there.
 pub trait Validate {
     /// `Ok(())` when every REQUIRED attribute is present and permissible,
     /// regardless of direction.
     fn validate(&self) -> Result<(), ValidationError>;
 
-    /// The rules that depend on direction. The default has none; resources
-    /// override it.
+    /// The rules that depend on direction. The default implementation has no
+    /// such rule. A resource overrides the default.
     fn validate_context(&self, _ctx: Context) -> Result<(), ValidationError> {
         Ok(())
     }
@@ -245,11 +249,12 @@ pub trait Validate {
 /// A value that has passed [`Validate::validate_as`] for a known
 /// [`Context`].
 ///
-/// The only way to obtain one is [`Valid::new`], so a handler that takes
-/// `Valid<User>` cannot be handed an unvalidated resource — forgetting to
-/// validate becomes a compile error rather than a 500 later. Zero runtime
-/// cost beyond the validation itself. Dereferences to the inner value; there
-/// is deliberately no `DerefMut`, since mutation could invalidate it. Use
+/// [`Valid::new`] is the only way to obtain one. A caller therefore cannot
+/// give an unvalidated resource to a handler that takes `Valid<User>`. A
+/// caller who omits the check gets a compile error, not a 500 response later.
+/// The wrapper costs nothing at run time beyond the validation itself. The
+/// wrapper dereferences to the inner value. The wrapper deliberately has no
+/// `DerefMut`, because a mutation could invalidate the inner value. Use
 /// [`into_inner`](Self::into_inner) to take ownership back.
 ///
 /// ```
@@ -278,7 +283,7 @@ pub struct Valid<T> {
 }
 
 impl<T: Validate> Valid<T> {
-    /// Validate `value` for `context`, returning it wrapped on success.
+    /// Validate `value` for `context`. On success, the method wraps `value`.
     pub fn new(value: T, context: Context) -> Result<Self, ValidationError> {
         value.validate_as(context)?;
         Ok(Self {
@@ -289,13 +294,14 @@ impl<T: Validate> Valid<T> {
 }
 
 impl<T> Valid<T> {
-    /// The context this value was validated for.
+    /// The context this value is valid for.
     pub fn context(&self) -> Context {
         self.context
     }
 
-    /// Take the inner value back. It is no longer known to be valid once it
-    /// can be mutated, which is why this consumes the wrapper.
+    /// Take the inner value back. A caller can mutate the returned value, so
+    /// the value is no longer known to be valid. The method therefore consumes
+    /// the wrapper.
     pub fn into_inner(self) -> T {
         self.inner
     }
@@ -349,13 +355,14 @@ impl ContextMarker for Response {
 
 /// Deserialize-and-validate in one step.
 ///
-/// The plain models deserialize leniently so a real provider's payload can
-/// always be read. A server parsing an inbound request usually wants the
-/// opposite: reject a non-conformant body at the boundary and answer with the
-/// RFC 7644 §3.12 error. `Strict<T, M>` does that — it deserializes `T`, runs
-/// [`Validate::validate_as`] for `M`'s [`Context`], and fails deserialization
-/// with the [`ValidationError`]'s message if that fails. On success it holds a
-/// [`Valid<T>`].
+/// The plain models deserialize leniently, so a caller can always read a real
+/// provider's payload. A server that parses an inbound request usually wants
+/// the opposite behaviour. The server rejects a non-conformant body at the
+/// boundary and answers with the RFC 7644 §3.12 error. `Strict<T, M>` gives
+/// the server that behaviour. `Strict<T, M>` deserializes `T` and runs
+/// [`Validate::validate_as`] for `M`'s [`Context`]. A failed check fails the
+/// deserialization, with the [`ValidationError`]'s message. On success,
+/// `Strict<T, M>` holds a [`Valid<T>`].
 ///
 /// ```
 /// # #[cfg(feature = "models")] {

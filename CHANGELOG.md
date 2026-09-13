@@ -18,8 +18,8 @@ below; 1.0 was the one moment they were free.
   RFC 7643 §2.5 makes absent, `null` and `[]` one state, so all three
   deserialize to an empty `Vec`. An empty attribute serializes as `[]`, since
   RFC 7644 §3.5.1 gives `[]` the meaning "clear all values" that omission
-  lacks; `compact::Compact(&value)` omits them in a response. Suggested
-  by @travipross in #48.
+  lacks. Suggested by @travipross in #48, then superseded within this release
+  by `Multi<T>`; see the `Multi<T>` entry under Added.
 - **`ListResponse` is generic over the resource, not the ID type**:
   `ListResponse<User<String>>` deserializes straight into `Vec<User<String>>`,
   and the heterogeneous form is `ListResponse<Resource<String>>`. `R` is bound
@@ -35,8 +35,6 @@ below; 1.0 was the one moment they were free.
   operation that omitted `value` is distinguishable from one that sent an
   explicit `null` instead of both collapsing to null. RFC 7644 §3.5.2.1 makes
   the member REQUIRED on an `add`, which `PatchOp::validate` now reports.
-- **`Compact<T>` requires the sealed `Compactable`**: resources and lists,
-  never `PatchOp` or `SearchRequest`, whose `[]` means clear-all.
 - **The `serialize()` / `deserialize()` wrappers are gone.** Use `serde_json`.
 - **`Schema`, `ResourceType` and `ServiceProviderConfig` gained `schemas`**,
   and **`Address` gained `value`, `display` and `primary`** (RFC 7643 §2.4).
@@ -54,8 +52,8 @@ below; 1.0 was the one moment they were free.
   accepted grammar is exactly XSD 1.1 §3.3.7.2, day-of-month rule included;
   no date-time dependency is taken, and the module docs say what that costs.
   Suggested by @sidrubs in #49.
-- **`utils::case` is `case_insensitive` and `utils::compact` is `compact`**,
-  both at the crate root, with `CaseInsensitive` and `Compact` re-exported
+- **`utils::case` is `case_insensitive`**, at the crate root, with
+  `CaseInsensitive` re-exported
   there too. The old paths made a reader parse `utils` to learn nothing.
 - **The `case-insensitive` feature is gone**, and the module it gated is
   always compiled. It never selected any behaviour — the choice is made per
@@ -65,6 +63,16 @@ below; 1.0 was the one moment they were free.
 
 ### Added
 
+- **`Multi<T>` for every multi-valued attribute.** RFC 7643 §2.5 makes an
+  absent member, a `null` and an `[]` one state in a resource. RFC 7644 §3.5.1
+  makes them two instructions in a request: an omitted attribute is "not
+  asserted by the client", while `null` and `[]` "clear all values". A `Vec<T>`
+  holds one of the two, so a bridge that read a message and wrote it back sent
+  a clear-all for every attribute the upstream never mentioned. `Multi<T>` holds
+  three states, absent, cleared and set, and derefs to `[T]` so `len`, `iter`,
+  indexing and `for x in &multi` are unchanged. A read followed by a write now
+  reproduces the message that arrived. A server applying a `PUT` asks
+  `is_asserted()`.
 - **Feature flags** `filter`, `models` and `schemas`, all on by default and
   all additive. `default-features = false, features = ["filter"]` gives a
   server the grammar alone and drops eight crates.

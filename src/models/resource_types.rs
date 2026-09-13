@@ -2,15 +2,16 @@ use crate::utils::validation::{Validate, ValidationError, require_schema_urn};
 use serde::{Deserialize, Serialize};
 
 use crate::models::scim_schema::Meta;
+use crate::multi::Multi;
 use crate::schema_urns;
 use crate::utils::error::SCIMError;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct ResourceType {
-    /// RFC 7643 §3: the schema URN(s) this resource conforms to, REQUIRED and
-    /// carried by the RFC's §8.6 example. `#[serde(default)]` so a
-    /// non-conformant provider's payload can still be read; `validate()`
-    /// reports the omission.
+    /// RFC 7643 §3 requires this schema URN. The RFC's §8.6 example
+    /// includes it. The `#[serde(default)]` attribute lets the crate read
+    /// a payload from a non-conformant provider that omits the field. The
+    /// `validate()` method reports the omission.
     #[serde(default)]
     pub schemas: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -22,10 +23,10 @@ pub struct ResourceType {
     pub schema: String,
     #[serde(
         rename = "schemaExtensions",
-        default = "Vec::new",
-        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec"
+        default = "Multi::absent",
+        skip_serializing_if = "Multi::is_absent"
     )]
-    pub schema_extensions: Vec<SchemaExtension>,
+    pub schema_extensions: Multi<SchemaExtension>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
 }
@@ -39,7 +40,7 @@ impl Default for ResourceType {
             description: None,
             endpoint: "".to_string(),
             schema: "".to_string(),
-            schema_extensions: Vec::new(),
+            schema_extensions: Multi::absent(),
             meta: None,
         }
     }
@@ -60,19 +61,25 @@ impl Default for SchemaExtension {
     }
 }
 
-/// Returns a vector of `ResourceType` instances based on the provided resource type names.
+/// Builds a list of `ResourceType` instances for the given names.
 ///
-/// This function creates `ResourceType` instances for "user" and "group" with default values if their names are included in the `resource_type_names` vector.
-/// If "enterprise_user" is included in the `resource_type_names` vector, the "user" `ResourceType` will include the enterprise user schema extension.
+/// The function builds a default `ResourceType` for "user" and for "group"
+/// when the caller lists that name. When the caller lists
+/// "enterprise_user", the "user" `ResourceType` also gets the enterprise
+/// user schema extension.
 ///
 /// # Parameters
 ///
-/// * `resource_type_names` - A vector of string slices that represent the names of the resource types to be returned. Options are: user, group, enterprise_user
+/// * `resource_type_names` - The names of the resource types to build. The
+///   valid names are `user`, `group` and `enterprise_user`.
 ///
 /// # Returns
 ///
-/// * `Ok(Vec<ResourceType>)` - If all requested resource types are found. The returned vector includes the requested `ResourceType` instances.
-/// * `Err(SCIMError::ResourceTypeNotFound)` - If a requested resource type is not found. The error includes the name of the resource type that was not found.
+/// * `Ok(Vec<ResourceType>)` - The function found every requested resource
+///   type. The vector holds the built `ResourceType` instances.
+/// * `Err(SCIMError::ResourceTypeNotFound)` - The function did not find a
+///   requested resource type. The error names the resource type it did not
+///   find.
 ///
 /// # Examples
 ///
@@ -109,14 +116,16 @@ pub fn get_resource_types(
                     endpoint: "/Users".to_string(),
                     description: Some("User Account".to_string()),
                     schema: "urn:ietf:params:scim:schemas:core:2.0:User".to_string(),
+                    // RFC 7643 Figure 8 omits `schemaExtensions` on the Group
+                    // resource type rather than sending an empty array.
                     schema_extensions: if has_enterprise_user {
-                        vec![SchemaExtension {
+                        Multi::from(vec![SchemaExtension {
                             schema: "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User"
                                 .to_string(),
                             required: true,
-                        }]
+                        }])
                     } else {
-                        Vec::new()
+                        Multi::absent()
                     },
                     meta: Some(Meta {
                         location: Some("https://example.com/v2/ResourceTypes/User".to_string()),
@@ -136,7 +145,7 @@ pub fn get_resource_types(
                     endpoint: "/Groups".to_string(),
                     description: Some("Group".to_string()),
                     schema: "urn:ietf:params:scim:schemas:core:2.0:Group".to_string(),
-                    schema_extensions: Vec::new(),
+                    schema_extensions: Multi::absent(),
                     meta: Some(Meta {
                         location: Some("https://example.com/v2/ResourceTypes/Group".to_string()),
                         resource_type: Some("ResourceType".to_string()),
@@ -159,13 +168,14 @@ pub fn get_resource_types(
 
 /// Converts a JSON string into a `ResourceType` struct.
 ///
-/// This method attempts to parse a JSON string to construct a `ResourceType` object. It's useful for scenarios where
-/// you receive a JSON representation of a user from an external source (e.g., a web request) and you need to
-/// work with this data in a strongly-typed manner within your application.
+/// Use this method when an external source, such as a web request, sends
+/// you a JSON representation of a resource type. The method parses the
+/// string and builds a strongly-typed `ResourceType` object from it.
 ///
 /// # Errors
 ///
-/// Returns `SCIMError::DeserializationError` if the provided JSON string cannot be parsed into a `ResourceType` object.
+/// Returns `SCIMError::DeserializationError` when the JSON string does not
+/// parse into a `ResourceType` object.
 ///
 /// # Examples
 ///
@@ -208,12 +218,13 @@ impl TryFrom<&str> for ResourceType {
 }
 
 impl Validate for ResourceType {
-    /// RFC 7643 §6 marks `name`, `endpoint` and `schema` REQUIRED, along with
-    /// each schema extension's `schema`, and says `id` "is not required for
-    /// the resource type"; `schemas` is REQUIRED by §3 on every
-    /// representation, and both §8.6 examples carry it.
-    /// Deserialization tolerates its absence so a non-conformant provider can
-    /// still be read; this reports it.
+    /// RFC 7643 §6 marks `name`, `endpoint` and `schema` REQUIRED. RFC 7643
+    /// §6 also marks each schema extension's own `schema` REQUIRED. RFC
+    /// 7643 §6 says `id` "is not required for the resource type". RFC 7643
+    /// §3 marks `schemas` REQUIRED on every representation. Both §8.6
+    /// examples carry `schemas`. Deserialization tolerates the absence of
+    /// `schemas`. This tolerance lets a non-conformant provider's payload
+    /// still be read. The `validate` method reports the absence.
     fn validate(&self) -> Result<(), ValidationError> {
         require_schema_urn(&self.schemas, schema_urns::RESOURCE_TYPE)?;
         if self.name.is_empty() {

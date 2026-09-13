@@ -5,11 +5,15 @@ use crate::utils::validation::{Validate, ValidationError, require_schema_urn};
 
 /// Represents a SCIM HTTP Error.
 ///
-/// This struct is used to represent an error message that conforms to the SCIM protocol specification.
-/// The `schemas` field is a required array of strings containing the URI `urn:ietf:params:scim:api:messages:2.0:Error`.
-/// The `scim_type` field is an optional [`ScimType`] keyword from RFC 7644 §3.12.
-/// The `detail` field is an optional string that provides more detailed human-readable information.
-/// The `status` field is a required string that is the HTTP status code expressed as a JSON string.
+/// This struct represents an error message that conforms to the SCIM
+/// protocol.
+///
+/// The `schemas` field is a required array of strings. It holds the URI
+/// `urn:ietf:params:scim:api:messages:2.0:Error`. The `scim_type` field is
+/// an optional [`ScimType`] keyword from RFC 7644 §3.12. The `detail` field
+/// is an optional string. It gives more detail for a human reader. The
+/// `status` field is a required string. It holds the HTTP status code as a
+/// JSON string.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct ScimHttpError {
     pub schemas: Vec<String>,
@@ -20,50 +24,54 @@ pub struct ScimHttpError {
     pub status: String,
 }
 
-/// The `scimType` keywords RFC 7644 §3.12 defines for a 400-class error
-/// response.
+/// This enum models the `scimType` keywords that RFC 7644 §3.12 defines
+/// for a 400-class error response.
 ///
-/// `#[non_exhaustive]`, with an [`Other`](ScimType::Other) catch-all: the ten
-/// keywords are the defined set, but a non-conformant server may send a label
-/// outside it, and rejecting the whole error body for that would hide the
-/// error it was reporting. Unknown labels round-trip verbatim.
+/// This enum carries the `#[non_exhaustive]` attribute and the
+/// [`Other`](ScimType::Other) catch-all variant. RFC 7644 defines ten
+/// keywords. A non-conformant server may still send a label outside this
+/// set. A rejection of the whole error body for an unknown label would
+/// hide the error that body reports. Unknown labels round-trip verbatim.
 #[non_exhaustive]
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
 #[serde(from = "String", into = "String")]
 pub enum ScimType {
-    /// The specified filter syntax was invalid, or the attribute and
-    /// comparison combination is not supported. `GET`, `POST /.search`.
+    /// The filter syntax is invalid, or the server does not support the
+    /// attribute and comparison combination. This keyword applies to `GET`
+    /// and `POST /.search`.
     InvalidFilter,
-    /// The filter yields more results than the server is willing to return.
+    /// The filter yields more results than the server will return.
     TooMany,
-    /// One or more attribute values are already in use or reserved. `POST`,
-    /// `PUT`, `PATCH`.
+    /// One or more attribute values are already in use or reserved. This
+    /// keyword applies to `POST`, `PUT` and `PATCH`.
     Uniqueness,
-    /// The attempted modification is not compatible with the attribute's
-    /// mutability or current state. `PUT`, `PATCH`.
+    /// The attempted modification does not fit the attribute's mutability
+    /// or its current state. This keyword applies to `PUT` and `PATCH`.
     Mutability,
-    /// The request body message structure was invalid or did not conform to
-    /// the request schema. `POST /.search`, `POST /Bulk`.
+    /// The request body message structure is invalid, or it does not
+    /// conform to the request schema. This keyword applies to
+    /// `POST /.search` and `POST /Bulk`.
     InvalidSyntax,
-    /// The PATCH path attribute was invalid or malformed.
+    /// The PATCH path attribute is invalid or malformed.
     InvalidPath,
-    /// The PATCH path did not yield an attribute or value that could be
-    /// operated on.
+    /// The PATCH path does not yield an attribute or a value that the
+    /// server can act on.
     NoTarget,
-    /// A required value was missing, or the value specified was not
-    /// compatible with the operation, attribute type, or resource schema.
+    /// A required value is missing, or the specified value does not fit
+    /// the operation, the attribute type, or the resource schema.
     InvalidValue,
-    /// The specified SCIM protocol version is not supported.
+    /// The server does not support the specified SCIM protocol version.
     InvalidVers,
-    /// The request cannot be completed because it would violate a policy or
-    /// expose sensitive information.
+    /// The request would violate a policy, or it would expose sensitive
+    /// information. The server cannot complete the request.
     Sensitive,
-    /// A keyword outside the ten §3.12 defines, preserved verbatim.
+    /// This variant holds a keyword outside the ten that §3.12 defines.
+    /// The crate keeps the keyword's text exactly as received.
     Other(String),
 }
 
 impl ScimType {
-    /// The wire keyword.
+    /// This method returns the wire keyword.
     pub fn as_str(&self) -> &str {
         match self {
             ScimType::InvalidFilter => "invalidFilter",
@@ -111,12 +119,12 @@ impl From<ScimType> for String {
     }
 }
 
-/// Provides a default value for `ScimHttpError`.
+/// Returns a default `ScimHttpError`.
 ///
-/// This implementation of the `Default` trait provides a default value for `ScimHttpError`.
-/// The `schemas` field is set to a vector containing the string "urn:ietf:params:scim:api:messages:2.0:Error".
-/// The `scim_type` and `detail` fields are set to `None`.
-/// The `status` field is set to an empty string.
+/// This implementation sets the `schemas` field to a vector that holds the
+/// string `"urn:ietf:params:scim:api:messages:2.0:Error"`. It sets the
+/// `scim_type` and `detail` fields to `None`. It sets the `status` field
+/// to an empty string.
 impl Default for ScimHttpError {
     fn default() -> Self {
         ScimHttpError {
@@ -129,8 +137,8 @@ impl Default for ScimHttpError {
 }
 
 impl Validate for ScimHttpError {
-    /// RFC 7644 §3.12: `schemas` carries the Error URN and `status` is the
-    /// numeric HTTP status rendered as a JSON string.
+    /// RFC 7644 §3.12 requires the Error URN in the `schemas` field. The
+    /// `status` field holds the numeric HTTP status as a JSON string.
     fn validate(&self) -> Result<(), ValidationError> {
         require_schema_urn(&self.schemas, schema_urns::ERROR)?;
         match self.status.parse::<u16>() {

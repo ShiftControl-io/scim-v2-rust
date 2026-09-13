@@ -230,7 +230,7 @@ fn validate_requires_each_schema_extension_to_name_its_schema() {
         name: "User".to_string(),
         endpoint: "/Users".to_string(),
         schema: crate::schema_urns::USER.to_string(),
-        schema_extensions: vec![
+        schema_extensions: Multi::from(vec![
             SchemaExtension {
                 schema: crate::schema_urns::ENTERPRISE_USER.to_string(),
                 required: true,
@@ -239,7 +239,7 @@ fn validate_requires_each_schema_extension_to_name_its_schema() {
                 schema: String::new(),
                 required: false,
             },
-        ],
+        ]),
         ..Default::default()
     };
     let err = rt.validate().unwrap_err();

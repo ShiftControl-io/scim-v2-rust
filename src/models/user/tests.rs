@@ -643,7 +643,7 @@ fn validate_rejects_a_second_primary() {
     let two = User::<String> {
         schemas: vec![crate::schema_urns::USER.to_string()],
         user_name: "bjensen".to_string(),
-        emails: vec![
+        emails: Multi::from(vec![
             Email {
                 value: Some("a@example.com".to_string()),
                 primary: Some(true),
@@ -654,14 +654,14 @@ fn validate_rejects_a_second_primary() {
                 primary: Some(true),
                 ..Default::default()
             },
-        ],
+        ]),
         ..Default::default()
     };
     let err = two.validate().expect_err("two primaries");
     assert_eq!(err.path(), "emails");
 
     let one = User::<String> {
-        emails: vec![
+        emails: Multi::from(vec![
             Email {
                 value: Some("a@example.com".to_string()),
                 primary: Some(true),
@@ -672,7 +672,7 @@ fn validate_rejects_a_second_primary() {
                 primary: Some(false),
                 ..Default::default()
             },
-        ],
+        ]),
         ..two
     };
     assert!(
@@ -815,21 +815,20 @@ fn multi_valued_attributes_treat_absent_null_and_empty_alike() {
         assert!(user.emails.is_empty(), "{label}: emails");
     }
 }
-
-/// An unassigned multi-valued attribute serializes as `[]`, not as `null`
-/// and not by omission.
+/// RFC 7643 §2.5 makes an absent member, a `null` and an `[]` one state in a
+/// resource. A request is different.
 ///
-/// RFC 7643 §2.5 permits omitting it ("MAY be omitted for compactness"),
-/// but RFC 7644 §3.5.1 gives `[]` operational meaning that omission does
-/// not have: "Clients that want to override a server's defaults MAY
-/// specify `null` for a single-valued attribute, or an empty array `[]`
-/// for a multi-valued attribute, to clear all values", while an omitted
-/// attribute is merely "not asserted by the client" and the server MAY
-/// clear it *or* substitute a default. Since these models serve as request
-/// bodies as well as representations, emitting `[]` is what keeps a
-/// conformant clear-all expressible.
+/// RFC 7644 §3.5.1 on an omitted readWrite attribute: it "MAY be assumed to
+/// be not asserted by the client".
+///
+/// RFC 7644 §3.5.1 on the deterministic form: clients "MAY specify "null"
+/// for a single-valued attribute, or an empty array "[]" for a multi-valued
+/// attribute, to clear all values".
+///
+/// `Multi<T>` keeps the two apart. An attribute nobody assigned stays off
+/// the wire, and a cleared one reaches the wire as `[]`.
 #[test]
-fn unassigned_multi_valued_attributes_serialize_as_empty_arrays() {
+fn an_unassigned_multi_valued_attribute_stays_off_the_wire() {
     let user = User::<String> {
         schemas: vec![crate::schema_urns::USER.to_string()],
         user_name: "bjensen".to_string(),
@@ -850,14 +849,11 @@ fn unassigned_multi_valued_attributes_serialize_as_empty_arrays() {
     ] {
         assert_eq!(
             obj.get(attr),
-            Some(&serde_json::json!([])),
-            "{attr} must serialize as [] so a clear-all PUT is expressible"
+            None,
+            "{attr} was never assigned, so asserting it would clear values nobody asked to clear"
         );
     }
-    assert!(
-        !json.to_string().contains("null"),
-        "no attribute may be null: {json}"
-    );
+    assert!(!json.to_string().contains("null"));
 }
 
 /// The RFC 7644 §3.5.1 clear-all idiom, end to end: a client that empties a
@@ -868,11 +864,11 @@ fn a_cleared_attribute_reaches_the_wire_as_an_empty_array() {
     let user = User::<String> {
         schemas: vec![crate::schema_urns::USER.to_string()],
         user_name: "bjensen".to_string(),
-        roles: Vec::new(),
-        emails: vec![Email {
+        roles: Multi::cleared(),
+        emails: Multi::from(vec![Email {
             value: Some("bjensen@example.com".to_string()),
             ..Default::default()
-        }],
+        }]),
         ..Default::default()
     };
     let json = serde_json::to_value(&user).unwrap();

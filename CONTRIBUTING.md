@@ -140,6 +140,34 @@ coverage on this crate read 95% while seven mutants in new code survived.
 Mutation testing is a local step, not a CI job: it is slow and its output
 needs a reader.
 
+## Documentation is written in Simplified Technical English
+
+The README, the crate and module documentation, and every doc comment follow
+the writing rules of ASD-STE100 Simplified Technical English. SCIM is an
+international protocol and many readers of these documents do not have English
+as a first language. The rules below are the ones that apply here. They are the
+STE writing rules; this project does not claim compliance with the STE approved
+word list, which ASD licenses separately.
+
+- Write one topic in one sentence. Keep an instruction to 20 words or fewer,
+  and a description to 25 words or fewer.
+- Write in the active voice. Use the present tense.
+- Use the imperative for an instruction: "Use `Compact` for a response."
+- Do not use a gerund as a noun or as an adjective. Write "deserialization",
+  not "deserializing", when you need a noun.
+- Give every pronoun a clear referent in the same sentence or the one before
+  it. Do not start a sentence with "This" or "That" alone.
+- Use the same word for the same thing every time. Do not use a synonym for
+  variety.
+- Keep the articles. Write "the model", not "model".
+- Do not use an idiom, a metaphor or a rhetorical question.
+- Use three words or fewer in a noun cluster.
+- Put a reason in its own sentence. Do not attach it with a dash.
+
+A doc comment still quotes the RFC sentence that a check traces to, as the
+section above requires. A quotation from an RFC is copied exactly and is not
+rewritten to follow these rules.
+
 ## Comments are for readers of the code, not of the PR
 
 No review-round tags, finding numbers or reviewer names in code comments;

@@ -12,9 +12,10 @@ use crate::schema_urns;
 use crate::utils::validation::{Context, Validate, ValidationError, require_schema_urn};
 
 #[cfg(feature = "filter")]
-/// Server-side variant of [`ListQuery`] that tolerates malformed filter
-/// expressions so the handler can produce an RFC 7644 §3.12 `invalidFilter`
-/// error response instead of aborting deserialization of the whole query.
+/// Server-side variant of [`ListQuery`] that tolerates a malformed filter
+/// expression. This tolerance lets a handler return an RFC 7644 §3.12
+/// `invalidFilter` error response. Without it, a malformed filter would
+/// abort deserialization of the whole query.
 pub type TolerantListQuery = ListQuery<MaybeFilter>;
 
 #[cfg(feature = "filter")]
@@ -23,16 +24,17 @@ pub type TolerantListQuery = ListQuery<MaybeFilter>;
 pub type TolerantSearchRequest = SearchRequest<MaybeFilter>;
 
 #[cfg(feature = "filter")]
-/// [`ListQuery`] with a fully-parsed [`Filter`]. Equivalent to `ListQuery` with
-/// its default type parameter; provided as a named alias for symmetry with
-/// [`TolerantListQuery`] and as the `Ok` type of
-/// [`ListQuery::<MaybeFilter>::into_strict`].
+/// [`ListQuery`] with a fully-parsed [`Filter`]. This type is equivalent to
+/// `ListQuery` with its default type parameter. The crate provides it as a
+/// named alias for symmetry with [`TolerantListQuery`]. It is also the
+/// `Ok` type of [`ListQuery::<MaybeFilter>::into_strict`].
 pub type StrictListQuery = ListQuery<Filter>;
 
 #[cfg(feature = "filter")]
-/// [`SearchRequest`] with a fully-parsed [`Filter`]. Equivalent to
-/// `SearchRequest` with its default type parameter; provided as a named alias
-/// for symmetry with [`TolerantSearchRequest`] and as the `Ok` type of
+/// [`SearchRequest`] with a fully-parsed [`Filter`]. This type is
+/// equivalent to `SearchRequest` with its default type parameter. The
+/// crate provides it as a named alias for symmetry with
+/// [`TolerantSearchRequest`]. It is also the `Ok` type of
 /// [`SearchRequest::<MaybeFilter>::into_strict`].
 pub type StrictSearchRequest = SearchRequest<Filter>;
 
@@ -83,12 +85,12 @@ impl TryFrom<TolerantSearchRequest> for StrictSearchRequest {
 
 #[cfg(feature = "filter")]
 impl ListQuery<MaybeFilter> {
-    /// Convert a [`TolerantListQuery`] into a [`StrictListQuery`], failing if
-    /// the embedded filter is [`MaybeFilter::Invalid`].
+    /// Converts a [`TolerantListQuery`] into a [`StrictListQuery`]. The
+    /// method fails when the embedded filter is [`MaybeFilter::Invalid`].
     ///
-    /// Callers typically pair this with `.map_err(...)` to turn the
-    /// [`InvalidFilterError`] into their own RFC 7644 §3.12 `invalidFilter`
-    /// error response.
+    /// A caller typically pairs this method with `.map_err(...)`. That
+    /// pairing turns the [`InvalidFilterError`] into the caller's own RFC
+    /// 7644 §3.12 `invalidFilter` error response.
     pub fn into_strict(self) -> Result<StrictListQuery, InvalidFilterError> {
         StrictListQuery::try_from(self)
     }
@@ -96,12 +98,13 @@ impl ListQuery<MaybeFilter> {
 
 #[cfg(feature = "filter")]
 impl SearchRequest<MaybeFilter> {
-    /// Convert a [`TolerantSearchRequest`] into a [`StrictSearchRequest`],
-    /// failing if the embedded filter is [`MaybeFilter::Invalid`].
+    /// Converts a [`TolerantSearchRequest`] into a [`StrictSearchRequest`].
+    /// The method fails when the embedded filter is
+    /// [`MaybeFilter::Invalid`].
     ///
-    /// Callers typically pair this with `.map_err(...)` to turn the
-    /// [`InvalidFilterError`] into their own RFC 7644 §3.12 `invalidFilter`
-    /// error response.
+    /// A caller typically pairs this method with `.map_err(...)`. That
+    /// pairing turns the [`InvalidFilterError`] into the caller's own RFC
+    /// 7644 §3.12 `invalidFilter` error response.
     pub fn into_strict(self) -> Result<StrictSearchRequest, InvalidFilterError> {
         StrictSearchRequest::try_from(self)
     }
@@ -111,8 +114,9 @@ impl SearchRequest<MaybeFilter> {
 /// `descending`. If a value for `sortBy` is provided and no `sortOrder` is
 /// specified, `sortOrder` SHALL default to ascending."
 ///
-/// Exhaustive on purpose: the RFC closes the set. Deserialization is
-/// case-insensitive, matching the crate's posture on provider spelling.
+/// This enum is exhaustive. The RFC closes the set of values.
+/// Deserialization is case-insensitive. This choice matches the crate's
+/// posture on provider spelling.
 #[cfg(feature = "filter")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -129,24 +133,28 @@ pub enum SortOrder {
 #[serde(rename_all = "camelCase")]
 pub struct SearchRequest<F = Filter> {
     pub schemas: Vec<String>,
-    /// RFC 7644 §3.9 attribute selection, not a resource attribute — so unlike
-    /// the multi-valued attributes on `User` and `Group`, an empty list is
-    /// omitted rather than sent as `[]`. §3.5.1\'s "an empty array … for a multi-valued attribute, to clear all
-    /// values" is about a resource's own attributes; an empty *selection* is
-    /// not an assertion about anything, and a server could reasonably read
-    /// `"attributes": []` as a request for no attributes at all.
+    /// RFC 7644 §3.9 defines this field as attribute selection, not a
+    /// resource attribute. The multi-valued attributes on `User` and
+    /// `Group` send an empty list as `[]`. This field omits an empty list
+    /// instead. RFC 7644 §3.5.1 says "an empty array … for a multi-valued
+    /// attribute, to clear all values". That sentence is about a
+    /// resource's own attributes. An empty *selection* asserts nothing. A
+    /// server could reasonably read `"attributes": []` as a request for no
+    /// attributes at all.
     #[serde(
         default = "Vec::new",
         deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
         skip_serializing_if = "Vec::is_empty"
     )]
     pub attributes: Vec<String>,
-    /// RFC 7644 §3.9 attribute selection, not a resource attribute — so unlike
-    /// the multi-valued attributes on `User` and `Group`, an empty list is
-    /// omitted rather than sent as `[]`. §3.5.1\'s "an empty array … for a multi-valued attribute, to clear all
-    /// values" is about a resource's own attributes; an empty *selection* is
-    /// not an assertion about anything, and a server could reasonably read
-    /// `"attributes": []` as a request for no attributes at all.
+    /// RFC 7644 §3.9 defines this field as attribute selection, not a
+    /// resource attribute. The multi-valued attributes on `User` and
+    /// `Group` send an empty list as `[]`. This field omits an empty list
+    /// instead. RFC 7644 §3.5.1 says "an empty array … for a multi-valued
+    /// attribute, to clear all values". That sentence is about a
+    /// resource's own attributes. An empty *selection* asserts nothing. A
+    /// server could reasonably read `"attributes": []` as a request for no
+    /// attributes at all.
     #[serde(
         default = "Vec::new",
         deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec",
@@ -155,37 +163,41 @@ pub struct SearchRequest<F = Filter> {
     pub excluded_attributes: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filter: Option<F>,
-    /// RFC 7644 §3.4.2.3: the attribute whose value orders the results,
-    /// e.g. `userName` or `name.familyName`.
+    /// RFC 7644 §3.4.2.3: the attribute whose value orders the results, for
+    /// example `userName` or `name.familyName`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sort_by: Option<String>,
     /// RFC 7644 §3.4.2.3. When `sort_by` is set and this is `None`, the
     /// server SHALL treat it as [`SortOrder::Ascending`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sort_order: Option<SortOrder>,
-    /// RFC 7644 §3.4.2.4 Table 6: 1-based; "a value less than 1 SHALL be
-    /// interpreted as 1", so an out-of-range value is not an error — see
+    /// RFC 7644 §3.4.2.4 Table 6 makes this value 1-based. The table says "a
+    /// value less than 1 SHALL be interpreted as 1". An out-of-range value
+    /// is not an error. See
     /// [`effective_start_index`](Self::effective_start_index).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub start_index: Option<i64>,
-    /// RFC 7644 §3.4.2.4 Table 6: "a negative value SHALL be interpreted as
-    /// 0", so it is not an error — see [`effective_count`](Self::effective_count).
+    /// RFC 7644 §3.4.2.4 Table 6 says "a negative value SHALL be
+    /// interpreted as 0". A negative value is not an error. See
+    /// [`effective_count`](Self::effective_count).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub count: Option<i64>,
 }
 
 #[cfg(feature = "filter")]
 impl<F> SearchRequest<F> {
-    /// `startIndex` as RFC 7644 §3.4.2.4 Table 6 has a server read it: the
-    /// default 1 when absent, and 1 for any value below it.
+    /// Reads `startIndex` the way RFC 7644 §3.4.2.4 Table 6 has a server
+    /// read it. The default is 1 when the value is absent. The result is 1
+    /// for any value below 1.
     pub fn effective_start_index(&self) -> i64 {
         self.start_index.map_or(1, |s| s.max(1))
     }
 
-    /// `count` as Table 6 has a server read it: `None` when absent (the
-    /// server's own maximum applies), and 0 for a negative value, which the
-    /// table says "indicates that no resource results are to be returned
-    /// except for totalResults".
+    /// Reads `count` the way Table 6 has a server read it. The result is
+    /// `None` when the value is absent. The server's own maximum then
+    /// applies. The result is 0 for a negative value. Table 6 says a 0
+    /// count "indicates that no resource results are to be returned except
+    /// for totalResults".
     pub fn effective_count(&self) -> Option<i64> {
         self.count.map(|c| c.max(0))
     }
@@ -216,16 +228,17 @@ pub struct ListQuery<F = Filter> {
     /// RFC 7644 §3.4.2.3 `sortBy` query parameter.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sort_by: Option<String>,
-    /// RFC 7644 §3.4.2.3 `sortOrder`; defaults to ascending when `sort_by` is
-    /// set and this is absent.
+    /// RFC 7644 §3.4.2.3 `sortOrder`. This value defaults to ascending when
+    /// `sort_by` is set and this value is absent.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sort_order: Option<SortOrder>,
-    /// RFC 7644 §3.4.2.4 Table 6: "a value less than 1 SHALL be interpreted
-    /// as 1" — see [`effective_start_index`](Self::effective_start_index).
+    /// RFC 7644 §3.4.2.4 Table 6 says "a value less than 1 SHALL be
+    /// interpreted as 1". See
+    /// [`effective_start_index`](Self::effective_start_index).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub start_index: Option<i64>,
-    /// RFC 7644 §3.4.2.4 Table 6: "a negative value SHALL be interpreted as
-    /// 0" — see [`effective_count`](Self::effective_count).
+    /// RFC 7644 §3.4.2.4 Table 6 says "a negative value SHALL be
+    /// interpreted as 0". See [`effective_count`](Self::effective_count).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub count: Option<i64>,
     /// RFC 7644 §3.9: a comma-separated list of attribute names to return,
@@ -240,14 +253,16 @@ pub struct ListQuery<F = Filter> {
 
 #[cfg(feature = "filter")]
 impl<F> ListQuery<F> {
-    /// `startIndex` as RFC 7644 §3.4.2.4 Table 6 has a server read it: the
-    /// default 1 when absent, and 1 for any value below it.
+    /// Reads `startIndex` the way RFC 7644 §3.4.2.4 Table 6 has a server
+    /// read it. The default is 1 when the value is absent. The result is 1
+    /// for any value below 1.
     pub fn effective_start_index(&self) -> i64 {
         self.start_index.map_or(1, |s| s.max(1))
     }
 
-    /// `count` as Table 6 has a server read it: `None` when absent, and 0 for
-    /// a negative value.
+    /// Reads `count` the way Table 6 has a server read it. The result is
+    /// `None` when the value is absent. The result is 0 for a negative
+    /// value.
     pub fn effective_count(&self) -> Option<i64> {
         self.count.map(|c| c.max(0))
     }
@@ -274,17 +289,20 @@ impl<F> Default for ListQuery<F> {
 
 /// Heterogeneous SCIM resource type used inside [`ListResponse`].
 ///
-/// Deserialization dispatches on the SCIM schema URN carried in the payload's
-/// `schemas` attribute (RFC 7643 §3). `Schema` and `ResourceType` resources,
-/// which are often served without a `schemas` field — RFC 7643's own §8.7
-/// schema representations carry none — are disambiguated by structural
-/// markers: the `attributes` array (Schema) or
-/// the `endpoint` + `schema` fields (ResourceType). Payloads that do not
-/// carry a recognized discriminator are rejected rather than silently
-/// classified, to prevent type confusion.
-/// `#[non_exhaustive]`: RFC 7643 §6 lets a server define resource types
-/// beyond the four this crate models, so variants will be added in minor
-/// releases. Match with a trailing `_ =>` arm.
+/// Deserialization dispatches on the SCIM schema URN in the payload's
+/// `schemas` attribute (RFC 7643 §3). `Schema` and `ResourceType` resources
+/// often carry no `schemas` field. RFC 7643's own §8.7 schema
+/// representations carry none. The deserializer disambiguates these two
+/// types by structural markers instead. The `attributes` array marks a
+/// `Schema`. The `endpoint` and `schema` fields together mark a
+/// `ResourceType`. The deserializer rejects a payload with no recognized
+/// discriminator. It never classifies such a payload silently. This design
+/// prevents type confusion.
+///
+/// This type carries `#[non_exhaustive]`. RFC 7643 §6 lets a server define
+/// resource types beyond the four this crate models. New variants will
+/// therefore appear in a minor release. Match on this enum with a
+/// trailing `_ =>` arm.
 #[non_exhaustive]
 #[derive(Serialize, Debug, Clone, PartialEq)]
 #[serde(untagged)]
@@ -403,41 +421,45 @@ where
 }
 
 mod sealed {
-    /// Private supertrait of [`ScimResource`]. Nothing outside this crate can
-    /// name it, so nothing outside this crate can implement `ScimResource`.
+    /// Private supertrait of [`ScimResource`]. No code outside this crate
+    /// can name this trait. Because of that, no code outside this crate
+    /// can implement `ScimResource`.
     pub trait Sealed {}
 }
 
 /// A resource that may appear in the `Resources` array of a
 /// [`ListResponse`].
 ///
-/// **Sealed.** [`ScimResource`] has a private supertrait, so the implementing
-/// set is fixed by this crate: [`User`], [`Group`], [`Schema`],
+/// **Sealed.** [`ScimResource`] has a private supertrait. Because of that,
+/// this crate fixes the implementing set: [`User`], [`Group`], [`Schema`],
 /// [`ResourceType`], and [`Resource`] for the heterogeneous case. The bound
-/// exists to make `ListResponse<R>` reject a nonsense `R` at compile time —
-/// before 1.0 the type parameter was the *id* type, so `ListResponse<Resource<String>>`
-/// meant "ids are strings"; it now means "resources are strings", which the
-/// sealing turns into a compile error rather than a runtime deserialization
+/// exists to make `ListResponse<R>` reject a nonsense `R` at compile time.
+/// Before 1.0, the type parameter was the *id* type.
+/// `ListResponse<Resource<String>>` then meant "ids are strings". The
+/// same type now means "resources are strings". The sealing turns a
+/// mismatch into a compile error instead of a runtime deserialization
 /// failure.
 ///
-/// `EnterpriseUser` is deliberately absent: RFC 7643 §4.3 makes it a schema
-/// *extension* carried inside a `User`, never a resource in its own right.
-/// `ServiceProviderConfig` is absent because RFC 7643 §5 serves it as a
-/// singleton, not a list.
+/// `EnterpriseUser` is deliberately absent from this list. RFC 7643 §4.3
+/// makes it a schema *extension* carried inside a `User`. It is never a
+/// resource in its own right. `ServiceProviderConfig` is absent too. RFC
+/// 7643 §5 serves it as a singleton, not a list.
 ///
 /// # The bound is what makes the 1.0 change safe
 ///
-/// `ListResponse<String>` compiled before 1.0 and meant "ids are strings".
-/// Reusing the parameter for the resource would have left that code compiling
-/// with a new meaning and failing only at runtime, on deserialize. The bound
-/// turns it into a compile error instead. Each snippet below inlines the full
-/// path deliberately: a `use` line could fail for an unrelated reason — a
-/// renamed module, a moved re-export — and `compile_fail` would still pass
-/// while the bound it is guarding had been relaxed.
+/// `ListResponse<String>` compiled before 1.0. It meant "ids are strings".
+/// Reusing the parameter for the resource would have left that code
+/// compiling with a new meaning. That code would then fail only at
+/// runtime, on deserialize. The bound turns such a mismatch into a
+/// compile error instead. Each snippet below inlines the full path on
+/// purpose. A `use` line could fail for an unrelated reason, such as a
+/// renamed module or a moved re-export. If a snippet used a `use` line,
+/// `compile_fail` would still pass even after the bound it guards had
+/// been relaxed.
 ///
-/// Doctest error-code annotations are inert on stable, so each snippet below is
-/// kept to the single statement whose failure it is meant to prove, and names
-/// the mutation it catches.
+/// Doctest error-code annotations are inert on stable Rust. Because of
+/// that, each snippet below contains only the one statement whose failure
+/// proves the point. Each snippet also names the mutation it catches.
 ///
 /// Catches: relaxing `R: ScimResource` on `ListResponse`.
 ///
@@ -447,9 +469,10 @@ mod sealed {
 /// ```
 ///
 /// The sealing is why no downstream crate can widen that set. Catches:
-/// removing `: sealed::Sealed` from the trait. The impl is complete on purpose
-/// — with `declared_schemas` missing it failed for that reason instead and
-/// proved nothing about the seal.
+/// removing `: sealed::Sealed` from the trait. The impl below is
+/// deliberately complete. An earlier version left out `declared_schemas`.
+/// That earlier version failed for the missing method instead. It proved
+/// nothing about the seal.
 ///
 /// ```compile_fail
 /// struct MyResource;
@@ -460,11 +483,12 @@ mod sealed {
 /// }
 /// ```
 ///
-/// And the seal holds because the supertrait's module is private. Naming it
-/// from outside is an E0603, which is what keeps a later `pub mod sealed` —
-/// added to quiet a `private_interfaces` warning, say — from silently
-/// unsealing the trait: this snippet starts compiling, and therefore starts
-/// failing, the moment the module is public.
+/// The seal holds because the supertrait's module is private. Naming that
+/// module from outside code currently produces error E0603. A developer
+/// might later make the module `pub`, for example to quiet a
+/// `private_interfaces` warning. If that happens, the snippet below starts
+/// to compile. A `compile_fail` snippet that compiles is a failing test.
+/// The test failure is what reveals the trait has become unsealed.
 ///
 /// Catches: `pub mod sealed`.
 ///
@@ -478,12 +502,14 @@ pub trait ScimResource: sealed::Sealed + Validate {
 
     /// The `schemas` attribute this particular instance carries on the wire.
     ///
-    /// Empty when the payload omitted it, as discovery payloads sometimes do
-    /// (RFC 7643's own §8.7 schema representations carry none); whether that
-    /// is acceptable is each resource's own [`Validate`] decision.
+    /// This value is empty when the payload omitted the attribute. A
+    /// discovery payload sometimes omits it. RFC 7643's own §8.7 schema
+    /// representations carry no `schemas` attribute. Whether an empty
+    /// value is acceptable is each resource's own [`Validate`] decision.
     /// [`ListResponse::validate`] compares a non-empty value against
-    /// [`schema_urn`](ScimResource::schema_urn) so the typed path performs the
-    /// same discriminator check the [`Resource`] deserializer does.
+    /// [`schema_urn`](ScimResource::schema_urn). This comparison performs
+    /// the same discriminator check that the [`Resource`] deserializer
+    /// performs.
     fn declared_schemas(&self) -> &[String];
 }
 
@@ -575,47 +601,50 @@ impl<T: std::fmt::Display> ScimResource for Resource<T> {
 
 /// RFC 7644 §3.4.2 `ListResponse`.
 ///
-/// Generic over the resource, not over the id type. Use a concrete resource
-/// when the endpoint returns one kind — `GET /Users` is
-/// `ListResponse<User<String>>`, deserializing straight into
-/// `Vec<User<String>>` with no enum to match through and one allocation
-/// instead of one per resource. Use [`Resource`] for the heterogeneous case,
-/// which §3.4.3 allows when querying the root `/.search` endpoint:
+/// This type is generic over the resource, not over the id type. Use a
+/// concrete resource type when the endpoint returns one kind of resource.
+/// `GET /Users` returns `ListResponse<User<String>>`. This return type
+/// deserializes straight into `Vec<User<String>>`. The deserializer needs
+/// no enum to match through. It also performs one allocation for the
+/// whole list, instead of one allocation per resource. Use [`Resource`]
+/// for the heterogeneous case. RFC 7644 §3.4.3 allows this case when a
+/// client queries the root `/.search` endpoint:
 /// `ListResponse<Resource<String>>`.
 ///
-/// `R` is bounded by the sealed [`ScimResource`] trait, so a type that is not
-/// a SCIM resource is rejected at compile time.
+/// `R` is bounded by the sealed [`ScimResource`] trait. This bound rejects
+/// a type that is not a SCIM resource at compile time.
 #[derive(Serialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ListResponse<R: ScimResource = Resource<String>> {
-    /// RFC 7644 §3.4.2: REQUIRED when partial results are returned due to
-    /// pagination; omitted otherwise. Not enforced by the type — see
-    /// [`ListResponse::validate`].
+    /// RFC 7644 §3.4.2 marks this field REQUIRED when the response returns
+    /// partial results due to pagination. Omit the field otherwise. The
+    /// type does not enforce this rule. See [`ListResponse::validate`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub items_per_page: Option<i64>,
     pub total_results: i64,
-    /// RFC 7644 §3.4.2: REQUIRED when partial results are returned due to
-    /// pagination; omitted otherwise. Not enforced by the type — see
-    /// [`ListResponse::validate`].
+    /// RFC 7644 §3.4.2 marks this field REQUIRED when the response returns
+    /// partial results due to pagination. Omit the field otherwise. The
+    /// type does not enforce this rule. See [`ListResponse::validate`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub start_index: Option<i64>,
     pub schemas: Vec<String>,
-    /// RFC 7644 §3.4.2: "REQUIRED if "totalResults" is non-zero", so a query
-    /// returning no matches may omit it. Absence *with* a non-zero
-    /// `totalResults` is refused during deserialization rather than by
-    /// [`validate`](Validate::validate), because presence is a fact about the
-    /// JSON and not about the value: an omitted member, `null` and `[]` all
-    /// have to land on the same empty `Vec` for the type to stay usable, and
-    /// carrying a hidden presence flag would make this struct
-    /// unconstructible by a literal. `OperationTarget` refuses a pathless
-    /// operation with no `value` at the same boundary and for the same
-    /// reason.
+    /// RFC 7644 §3.4.2 says this field is "REQUIRED if "totalResults" is
+    /// non-zero". A query that returns no matches may omit the field for
+    /// that reason. Deserialization refuses an absent field when
+    /// `totalResults` is non-zero. [`validate`](Validate::validate) does
+    /// not perform this check. Presence is a fact about the JSON, not
+    /// about the value. An omitted member, `null`, and `[]` must all land
+    /// on the same empty `Vec` for the type to stay usable. A hidden
+    /// presence flag would make this struct impossible to build from a
+    /// literal. `OperationTarget` refuses a pathless operation with no
+    /// `value` at the same boundary, for the same reason.
     #[serde(rename = "Resources")]
     pub resources: Vec<R>,
 }
 
-/// The wire shape of [`ListResponse`], with `Resources` presence preserved
-/// so the RFC 7644 §3.4.2 REQUIRED can be checked before it is erased.
+/// The wire shape of [`ListResponse`]. This shape preserves whether
+/// `Resources` was present. The check for the RFC 7644 §3.4.2 REQUIRED
+/// rule needs that presence before the type erases it.
 #[derive(Deserialize)]
 #[serde(
     rename_all = "camelCase",
@@ -634,9 +663,9 @@ struct ListResponseWire<R: ScimResource> {
     resources: Option<Vec<R>>,
 }
 
-/// `Resources` as it appeared: `None` only when the member was absent, since
-/// `null` is a form providers send for an empty page (RFC 7643 §2.5 makes it
-/// equivalent to `[]`).
+/// `Resources` as the payload carried it. The result is `None` only when
+/// the member was absent. Some providers send `null` for an empty page.
+/// RFC 7643 §2.5 makes `null` equivalent to `[]` here.
 fn deserialize_present_resources<'de, D, R>(deserializer: D) -> Result<Option<Vec<R>>, D::Error>
 where
     D: Deserializer<'de>,
@@ -678,40 +707,47 @@ impl<R: ScimResource> Validate for ListResponse<R> {
     /// Checks performed:
     ///
     /// * `schemas` is present.
-    /// * `totalResults` is not negative, and is not smaller than the number of
-    ///   entries in `Resources` — §3.4.2 describes it as a count that "may be
-    ///   larger than the number of resources returned".
-    /// * A present `startIndex` is at least 1 (§3.4.2: "the 1-based index of
-    ///   the first result") and a present `itemsPerPage` is not negative.
-    /// * Every resource declares the schema of the type it was parsed as, and
-    ///   passes its own [`Validate::validate`]; a failure is reported under
-    ///   `Resources[i]`. [`validate_as`](Validate::validate_as) carries the
-    ///   [`Context`] into each resource too, so a `Response` page needs an
-    ///   `id` on every entry.
-    /// * When the response carries a *partial* result set — fewer entries in
-    ///   `Resources` than `totalResults` — both `startIndex` and `itemsPerPage`
-    ///   are present. §3.4.2 makes them REQUIRED "when partial results are
-    ///   returned due to pagination", and pagination is the only mechanism
-    ///   §3.4.2 gives for returning fewer resources than `totalResults`, so a
-    ///   short page without markers is treated as non-conformant rather than
-    ///   as an unpaginated page of unexplained size.
+    /// * `totalResults` is not negative. `totalResults` is not smaller than
+    ///   the number of entries in `Resources`. §3.4.2 describes
+    ///   `totalResults` as a count that "may be larger than the number of
+    ///   resources returned".
+    /// * A present `startIndex` is at least 1. §3.4.2 calls it "the
+    ///   1-based index of the first result". A present `itemsPerPage` is
+    ///   not negative.
+    /// * Every resource declares the schema of the type it was parsed as.
+    ///   Every resource also passes its own [`Validate::validate`]. A
+    ///   failure is reported under `Resources[i]`.
+    ///   [`validate_as`](Validate::validate_as) carries the [`Context`]
+    ///   into each resource too. Because of that, a `Response` page needs
+    ///   an `id` on every entry.
+    /// * When the response carries a partial result set, both
+    ///   `startIndex` and `itemsPerPage` are present. A partial result set
+    ///   has fewer entries in `Resources` than the value of
+    ///   `totalResults`. §3.4.2 makes the two markers REQUIRED "when
+    ///   partial results are returned due to pagination". Pagination is
+    ///   the only mechanism §3.4.2 gives for returning fewer resources
+    ///   than `totalResults`. For that reason, the check treats a short
+    ///   page with no markers as non-conformant. It does not treat that
+    ///   page as an unpaginated page of unexplained size.
     ///
-    /// This last invariant cannot be encoded in the type: `startIndex` and
-    /// `itemsPerPage` are `Option<i64>` so that a wire `0` stays distinct from
-    /// an omitted field, which leaves a paginated-but-incomplete response
-    /// expressible. Call this before serializing a response assembled by hand.
+    /// The type cannot encode this last invariant. `startIndex` and
+    /// `itemsPerPage` are `Option<i64>` so that a wire `0` stays distinct
+    /// from an omitted field. This design leaves a
+    /// paginated-but-incomplete response expressible. Call this method
+    /// before serializing a response that you assembled by hand.
     ///
     /// # Returns
     ///
-    /// * `Ok(())` — the response is conformant.
-    /// * `Err(ValidationError)` — `schemas` is empty, or a pagination marker is
-    ///   absent from a partial result set. The error names the offending
-    ///   attribute by its wire path.
+    /// * `Ok(())`: the response is conformant.
+    /// * `Err(ValidationError)`: either `schemas` is empty, or a
+    ///   pagination marker is absent from a partial result set. The error
+    ///   names the offending attribute by its wire path.
     ///
     /// # Example
     ///
     /// A homogeneous page from `GET /Users` deserializes straight into
-    /// `Vec<User<String>>`, with no enum to match through:
+    /// `Vec<User<String>>`. The deserializer needs no enum to match
+    /// through:
     ///
     /// ```
     /// use scim_v2::{Validate, models::{others::ListResponse, user::User}};
@@ -840,10 +876,11 @@ impl<R: ScimResource> Validate for ListResponse<R> {
         Ok(())
     }
 
-    /// The direction applies to every resource on the page: for
-    /// [`Context::Response`] each one needs its `id` (RFC 7643 §3.1) and may
-    /// not carry `password`. A list response is only ever a response, but the
-    /// context is the caller's to state, as everywhere else.
+    /// This method applies the direction to every resource on the page.
+    /// For [`Context::Response`], each resource needs its `id` (RFC 7643
+    /// §3.1) and may not carry `password`. A list response is always a
+    /// response. The caller still states the context explicitly here, as
+    /// everywhere else in this crate.
     fn validate_context(&self, ctx: Context) -> Result<(), ValidationError> {
         for (i, resource) in self.resources.iter().enumerate() {
             resource
@@ -869,12 +906,14 @@ pub struct PatchOp {
 pub enum OperationTarget {
     WithPath {
         path: PatchPath,
-        /// `None` when the operation carried no `value` member at all, which
-        /// an `add` may not do — RFC 7644 §3.5.2.1: "The operation MUST
-        /// contain a "value" member whose content specifies the value to be
-        /// added". Kept distinct from `Some(Value::Null)` so the omission is
-        /// reportable by [`PatchOp::validate`] rather than collapsed into an
-        /// explicit null on the way in and emitted as one on the way out.
+        /// `None` when the operation carried no `value` member at all. An
+        /// `add` operation may not omit `value`. RFC 7644 §3.5.2.1 says
+        /// "The operation MUST contain a "value" member whose content
+        /// specifies the value to be added". This field stays distinct
+        /// from `Some(Value::Null)`. [`PatchOp::validate`] can then report
+        /// the omission. Otherwise the omission would collapse into an
+        /// explicit null on the way in, and the crate would emit that null
+        /// on the way out.
         #[serde(skip_serializing_if = "Option::is_none")]
         value: Option<Value>,
     },
@@ -931,10 +970,11 @@ pub enum PatchOperation {
     Replace(OperationTarget),
 }
 
-/// Whether `s` is RFC 7644 §3.10 standard attribute notation — an `attrPath`,
-/// optionally URN-prefixed, with at most one sub-attribute. Decided by the
-/// crate's own grammar rather than a second-guess at it: `<s> pr` must parse
-/// to a bare presence test.
+/// Whether `s` is RFC 7644 §3.10 standard attribute notation. This
+/// notation is an `attrPath`, optionally URN-prefixed, with at most one
+/// sub-attribute. The crate's own grammar decides the answer, instead of a
+/// second guess at the grammar. `<s> pr` must parse to a bare presence
+/// test.
 #[cfg(feature = "filter")]
 fn is_attribute_path(s: &str) -> bool {
     format!("{s} pr")
@@ -942,10 +982,11 @@ fn is_attribute_path(s: &str) -> bool {
         .is_ok_and(|f| matches!(f, Filter::Attr(AttrExp::Present(_))))
 }
 
-/// The RFC 7644 §3.4.2.3 sort rules, shared by the two query carriers:
-/// `sortOrder` is "the order in which the "sortBy" parameter is applied", so
-/// on its own it orders nothing, and §3.4.3 requires that "the "sortBy"
-/// attribute MUST be in standard attribute notation (Section 3.10) form".
+/// The RFC 7644 §3.4.2.3 sort rules. Both query carriers share these
+/// rules. `sortOrder` is "the order in which the "sortBy" parameter is
+/// applied". On its own, `sortOrder` orders nothing. §3.4.3 also requires
+/// that "the "sortBy" attribute MUST be in standard attribute notation
+/// (Section 3.10) form".
 #[cfg(feature = "filter")]
 fn validate_sort(sort_by: Option<&str>, sort_order_present: bool) -> Result<(), ValidationError> {
     if sort_order_present && sort_by.is_none() {
@@ -963,18 +1004,20 @@ fn validate_sort(sort_by: Option<&str>, sort_order_present: bool) -> Result<(), 
     Ok(())
 }
 
-/// The RFC 7644 §3.9 attribute-selection rules, shared by the two query
-/// carriers. §3.9 offers "either of the mutually exclusive URL query
-/// parameters "attributes" or "excludedAttributes"", so a request carrying
-/// both asserts two incompatible projections; and §§3.4.2.5 and 3.4.3 both
-/// say of each parameter that "Attribute names MUST be in standard attribute
-/// notation (Section 3.10) form", so a name a server cannot resolve to an
-/// attribute is a client error rather than something to ignore.
+/// The RFC 7644 §3.9 attribute-selection rules. Both query carriers share
+/// these rules. §3.9 offers "either of the mutually exclusive URL query
+/// parameters "attributes" or "excludedAttributes"". A request that
+/// carries both parameters asserts two incompatible projections. §§3.4.2.5
+/// and 3.4.3 both say of each parameter that "Attribute names MUST be in
+/// standard attribute notation (Section 3.10) form". For that reason, a
+/// name that a server cannot resolve to an attribute is a client error,
+/// not something to ignore.
 ///
-/// Each selection is passed as its individual names. A wholly empty
-/// selection (`?attributes=`, or an empty `Vec`) is treated as absent, which
-/// is the only reading that asserts nothing; an empty name *within* a list
-/// (`?attributes=userName,,emails`) is malformed and rejected.
+/// This function takes each selection as its individual names. A wholly
+/// empty selection, such as `?attributes=` or an empty `Vec`, counts as
+/// absent. Absence is the only reading that asserts nothing. An empty name
+/// *within* a list, such as `?attributes=userName,,emails`, is malformed
+/// and rejected.
 #[cfg(feature = "filter")]
 fn validate_attribute_selection<'a>(
     attributes: impl Iterator<Item = &'a str>,
@@ -1010,9 +1053,10 @@ fn validate_attribute_selection<'a>(
     Ok(())
 }
 
-/// The individual names in a `ListQuery`'s comma-separated selection. Empty
-/// overall means no selection; an empty entry inside a non-empty list is
-/// kept, so [`validate_attribute_selection`] can reject it.
+/// The individual names in a `ListQuery`'s comma-separated selection. An
+/// empty overall selection means no selection at all. An empty entry
+/// inside a non-empty list stays in the result. This lets
+/// [`validate_attribute_selection`] reject that entry.
 #[cfg(feature = "filter")]
 fn selection_names(raw: Option<&str>) -> impl Iterator<Item = &str> {
     raw.filter(|s| !s.is_empty())
@@ -1023,12 +1067,13 @@ fn selection_names(raw: Option<&str>) -> impl Iterator<Item = &str> {
 
 #[cfg(feature = "filter")]
 impl<F> Validate for ListQuery<F> {
-    /// The `GET` half of the rules [`SearchRequest`] enforces for `POST
-    /// /.search`: RFC 7644 §3.4.2.3's sort pair and §3.9's mutually exclusive
-    /// attribute selection. There is no `schemas` to check, since these are
-    /// query parameters rather than a body. An out-of-range `count` or
-    /// `startIndex` is interpreted rather than rejected (§3.4.2.4 Table 6) —
-    /// see [`effective_count`](Self::effective_count) and
+    /// The `GET` half of the rules that [`SearchRequest`] enforces for
+    /// `POST /.search`. Those rules are RFC 7644 §3.4.2.3's sort pair and
+    /// §3.9's mutually exclusive attribute selection. This method checks
+    /// no `schemas` field, because these values are query parameters
+    /// rather than a body. RFC 7644 §3.4.2.4 Table 6 has this method
+    /// interpret an out-of-range `count` or `startIndex`, instead of
+    /// rejecting it. See [`effective_count`](Self::effective_count) and
     /// [`effective_start_index`](Self::effective_start_index).
     fn validate(&self) -> Result<(), ValidationError> {
         validate_sort(self.sort_by.as_deref(), self.sort_order.is_some())?;
@@ -1041,17 +1086,19 @@ impl<F> Validate for ListQuery<F> {
 
 #[cfg(feature = "filter")]
 impl<F> Validate for SearchRequest<F> {
-    /// RFC 7644 §3.4.3: the body carries the SearchRequest URN, and "the
-    /// sortBy attribute MUST be in standard attribute notation (Section 3.10)
-    /// form". §3.4.2.3: `sortOrder` is "the order in which the sortBy
-    /// parameter is applied", so without `sortBy` it orders nothing and is
-    /// rejected rather than silently ignored. §3.9 calls `attributes` and
-    /// `excludedAttributes` "mutually exclusive URL query parameters", so
-    /// both at once is rejected. A negative `count` or a `startIndex` below 1
-    /// is *not* an error: §3.4.2.4 Table 6 says each "SHALL be interpreted"
-    /// as 0 and 1 respectively, which
-    /// [`effective_count`](Self::effective_count) and
-    /// [`effective_start_index`](Self::effective_start_index) do.
+    /// RFC 7644 §3.4.3 requires the body to carry the SearchRequest URN.
+    /// §3.4.3 also requires that "the sortBy attribute MUST be in standard
+    /// attribute notation (Section 3.10) form". §3.4.2.3 defines
+    /// `sortOrder` as "the order in which the sortBy parameter is
+    /// applied". Without `sortBy`, `sortOrder` orders nothing, so this
+    /// method rejects it instead of ignoring it silently. §3.9 calls
+    /// `attributes` and `excludedAttributes` "mutually exclusive URL query
+    /// parameters", so this method rejects a request that carries both. A
+    /// negative `count` or a `startIndex` below 1 is *not* an error.
+    /// §3.4.2.4 Table 6 says each value "SHALL be interpreted" as 0 and 1
+    /// respectively. [`effective_count`](Self::effective_count) and
+    /// [`effective_start_index`](Self::effective_start_index) perform that
+    /// interpretation.
     fn validate(&self) -> Result<(), ValidationError> {
         require_schema_urn(&self.schemas, schema_urns::SEARCH_REQUEST)?;
         validate_sort(self.sort_by.as_deref(), self.sort_order.is_some())?;
@@ -1064,28 +1111,33 @@ impl<F> Validate for SearchRequest<F> {
 
 #[cfg(feature = "filter")]
 impl Validate for PatchOp {
-    /// RFC 7644 §3.5.2: the body carries the PatchOp URN and "an array of one
-    /// or more PATCH operations". Most of each operation's shape — `remove`
-    /// needs a path, a pathless `add`/`replace` needs an object — is enforced
-    /// by the [`PatchOperation`] type. What the type cannot enforce is
-    /// §3.5.2.1's "The operation MUST contain a "value" member whose content
-    /// specifies the value to be added", since a path-carrying operation may
-    /// legitimately omit `value` when it is a `remove`.
+    /// RFC 7644 §3.5.2 says the body carries the PatchOp URN and "an array
+    /// of one or more PATCH operations". Most of each operation's shape is
+    /// enforced by the [`PatchOperation`] type. A `remove` operation needs
+    /// a path. A pathless `add` or `replace` operation needs an object.
+    /// The type cannot enforce one rule: §3.5.2.1 says "The operation MUST
+    /// contain a "value" member whose content specifies the value to be
+    /// added". A path-carrying operation may legitimately omit `value`
+    /// when the operation is a `remove`.
     ///
-    /// A path-carrying `replace` is held to the same rule. §3.5.2.3 has no
-    /// single blanket MUST, but it opens with "The "replace" operation
-    /// replaces the value at the target location specified by the "path"" and
-    /// then requires the member twice: "the "value" attribute SHALL contain a
-    /// list of one or more attributes that are to be replaced" for the
-    /// pathless form, and "a set of sub-attributes SHALL be specified in the
-    /// "value" parameter" where the path names a complex attribute. Telling a
-    /// complex target from a single-valued one needs the resource's schema,
-    /// which this crate does not consult, and no reading of §3.5.2.3 gives a
-    /// valueless replace a defined outcome — so the check is uniform.
+    /// A path-carrying `replace` operation follows the same rule. §3.5.2.3
+    /// has no single blanket MUST. §3.5.2.3 opens with "The "replace"
+    /// operation replaces the value at the target location specified by
+    /// the "path"". §3.5.2.3 then requires the `value` member twice. For
+    /// the pathless form, §3.5.2.3 says "the "value" attribute SHALL
+    /// contain a list of one or more attributes that are to be replaced".
+    /// Where the path names a complex attribute, §3.5.2.3 says "a set of
+    /// sub-attributes SHALL be specified in the "value" parameter".
+    /// Telling a complex target from a single-valued one needs the
+    /// resource's schema. This crate does not consult the resource's
+    /// schema. No reading of §3.5.2.3 gives a valueless replace a defined
+    /// outcome. For that reason, this method checks a `replace` operation
+    /// the same way regardless of its target.
     ///
-    /// An explicit `"value": null` counts as present, which is why the field
-    /// distinguishes the two: what a null means for the targeted attribute is
-    /// the server's decision, and absence is not.
+    /// An explicit `"value": null` counts as present. This is why the
+    /// field keeps `None` and `Some(Value::Null)` distinct. What a null
+    /// value means for the targeted attribute is the server's decision.
+    /// What an absent value means is not the server's decision to make.
     fn validate(&self) -> Result<(), ValidationError> {
         require_schema_urn(&self.schemas, schema_urns::PATCH_OP)?;
         if self.operations.is_empty() {
@@ -1110,8 +1162,8 @@ impl Validate for PatchOp {
 }
 
 /// Tests for the parts of this module that do not depend on the `filter`
-/// feature — [`Resource`], [`ListResponse`] and [`ScimResource`] — so they
-/// still run under `--no-default-features --features models`.
+/// feature: [`Resource`], [`ListResponse`] and [`ScimResource`]. These
+/// tests still run under `--no-default-features --features models`.
 #[cfg(test)]
 mod resource_tests;
 

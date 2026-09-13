@@ -13,7 +13,7 @@ use scim_v2::filter::Filter;
 use scim_v2::models::errors::ScimType;
 use scim_v2::models::others::{ListResponse, Resource, SearchRequest};
 use scim_v2::models::user::User;
-use scim_v2::{CaseInsensitive, Compact, ScimDateTime, Validate, schema_urns};
+use scim_v2::{CaseInsensitive, Multi, ScimDateTime, Validate, schema_urns};
 
 /// Every field of `SearchRequest` is reachable and reaches the wire.
 /// `excluded_attributes` in particular was never `pub` before 1.0.
@@ -97,19 +97,26 @@ fn validation_error_surface_is_usable_downstream() {
 /// RFC 7644 §3.5.1's clear-all idiom, from outside the crate: an emptied
 /// multi-valued attribute has to reach the wire as `[]`, because omission
 /// means "not asserted" and the server may then keep or default the values.
+/// Through the public API: an attribute nobody assigned stays off the wire,
+/// and one the caller cleared reaches it as `[]`, which is the RFC 7644
+/// §3.5.1 instruction "to clear all values".
 #[test]
-fn a_cleared_multi_valued_attribute_reaches_the_wire_downstream() {
-    let user = User::<String> {
+fn only_an_asserted_multi_valued_attribute_reaches_the_wire() {
+    let mut user = User::<String> {
         schemas: vec![schema_urns::USER.to_string()],
         user_name: "bjensen".to_string(),
         ..Default::default()
     };
 
     let json = serde_json::to_value(&user).expect("User must serialize");
+    assert_eq!(json.get("roles"), None, "nobody assigned roles");
+
+    user.roles.clear();
+    let json = serde_json::to_value(&user).expect("User must serialize");
     assert_eq!(
         json["roles"],
         serde_json::json!([]),
-        "an unassigned multi-valued attribute must serialize as [] per RFC 7644 §3.5.1"
+        "the caller cleared roles"
     );
 }
 
@@ -124,11 +131,11 @@ fn the_common_types_are_re_exported_at_the_root() {
     assert_eq!(wrapped.into_inner().user_name, "bjensen");
 
     let user: User = scim_v2::case_insensitive::from_str(body).expect("§2.1: any casing");
-    let compact = serde_json::to_value(Compact(&user)).expect("Compact serializes");
-    assert!(
-        compact.get("emails").is_none(),
-        "RFC 7643 §2.5: an unassigned attribute may be omitted for compactness"
-    );
+    assert_eq!(user.user_name, "bjensen");
+    assert!(user.emails.is_absent(), "the body named no emails");
+    // `Multi` goes in a handler signature too, so it is reachable at the root.
+    let cleared: Multi<scim_v2::models::user::Email> = Multi::cleared();
+    assert!(cleared.is_asserted() && cleared.is_empty());
 
     let created: ScimDateTime = "2010-01-23T04:56:22Z".parse().expect("valid dateTime");
     assert_eq!(created.as_str(), "2010-01-23T04:56:22Z");
