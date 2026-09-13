@@ -1,24 +1,36 @@
 use serde::{Deserialize, Serialize};
 
+use crate::models::datetime::ScimDateTime;
+use crate::multi::Multi;
 use crate::utils::error::SCIMError;
+use crate::utils::validation::{Validate, ValidationError, require_schema_urn};
+#[cfg(feature = "schemas")]
 use crate::{ENTERPRISE_USER_SCHEMA, GROUP_SCHEMA, USER_SCHEMA};
 
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 pub struct Meta {
     #[serde(rename = "resourceType", skip_serializing_if = "Option::is_none")]
     pub resource_type: Option<String>,
+    /// RFC 7643 §2.3.5 makes this an `xsd:dateTime`. Only [`ScimDateTime`]
+    /// can hold this value. The field cannot hold a malformed date.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub created: Option<String>,
+    pub created: Option<ScimDateTime>,
     #[serde(rename = "lastModified", skip_serializing_if = "Option::is_none")]
-    pub last_modified: Option<String>,
+    pub last_modified: Option<ScimDateTime>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub location: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct Schema {
+    /// RFC 7643 §7 notes that a schema resource is often served without a
+    /// `schemas` attribute. This field defaults to an empty list for that
+    /// reason. The crate keeps a value that is present. The crate does not
+    /// drop the value silently.
+    #[serde(default)]
+    pub schemas: Vec<String>,
     pub id: String,
     pub name: String,
     pub description: String,
@@ -26,7 +38,7 @@ pub struct Schema {
     pub meta: Meta,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct Attributes {
     pub name: String,
     pub r#type: String,
@@ -36,8 +48,12 @@ pub struct Attributes {
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub required: Option<bool>,
-    #[serde(rename = "canonicalValues", skip_serializing_if = "Option::is_none")]
-    pub canonical_values: Option<Vec<String>>,
+    #[serde(
+        rename = "canonicalValues",
+        default = "Multi::absent",
+        skip_serializing_if = "Multi::is_absent"
+    )]
+    pub canonical_values: Multi<String>,
     #[serde(rename = "caseExact", skip_serializing_if = "Option::is_none")]
     pub case_exact: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -46,13 +62,21 @@ pub struct Attributes {
     pub returned: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub uniqueness: Option<String>,
-    #[serde(rename = "subAttributes", skip_serializing_if = "Option::is_none")]
-    pub sub_attributes: Option<Vec<SubAttributes>>,
-    #[serde(rename = "referenceTypes", skip_serializing_if = "Option::is_none")]
-    pub reference_types: Option<Vec<String>>,
+    #[serde(
+        rename = "subAttributes",
+        default = "Multi::absent",
+        skip_serializing_if = "Multi::is_absent"
+    )]
+    pub sub_attributes: Multi<SubAttributes>,
+    #[serde(
+        rename = "referenceTypes",
+        default = "Multi::absent",
+        skip_serializing_if = "Multi::is_absent"
+    )]
+    pub reference_types: Multi<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct SubAttributes {
     pub name: String,
     pub r#type: String,
@@ -62,8 +86,12 @@ pub struct SubAttributes {
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub required: Option<bool>,
-    #[serde(rename = "canonicalValues", skip_serializing_if = "Option::is_none")]
-    pub canonical_values: Option<Vec<String>>,
+    #[serde(
+        rename = "canonicalValues",
+        default = "Multi::absent",
+        skip_serializing_if = "Multi::is_absent"
+    )]
+    pub canonical_values: Multi<String>,
     #[serde(rename = "caseExact", skip_serializing_if = "Option::is_none")]
     pub case_exact: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -72,29 +100,34 @@ pub struct SubAttributes {
     pub returned: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub uniqueness: Option<String>,
-    #[serde(rename = "referenceTypes", skip_serializing_if = "Option::is_none")]
-    pub reference_types: Option<Vec<String>>,
+    #[serde(
+        rename = "referenceTypes",
+        default = "Multi::absent",
+        skip_serializing_if = "Multi::is_absent"
+    )]
+    pub reference_types: Multi<String>,
 }
 
-/// Retrieves a list of `Schema` instances based on the provided schema names.
+#[cfg(feature = "schemas")]
+/// Retrieves a list of `Schema` instances for the given schema names.
 ///
-/// This function takes a vector of schema names as input and attempts to retrieve the corresponding `Schema` instances.
-/// It uses a predefined list of schema contents to match the input schema names.
+/// The function matches each name against a predefined list of schema
+/// contents and retrieves the matching `Schema` instances.
 ///
 /// # Parameters
 ///
-/// * `schema_names` - A vector of string slices that represent the names of the schemas to retrieve.
+/// * `schema_names` - The names of the schemas to retrieve.
 ///
 /// # Returns
 ///
-/// This function returns a `Result<Vec<Schema>, SCIMError>`. If the function succeeds, it returns `Ok(Vec<Schema>)`
-/// where `Vec<Schema>` is a vector of the retrieved `Schema` instances. If the function fails, it returns `Err(SCIMError)`
-/// where `SCIMError` is the error that occurred.
+/// `Ok(Vec<Schema>)` on success, holding the retrieved `Schema` instances.
+/// `Err(SCIMError)` on failure, holding the error that occurred.
 ///
 /// # Errors
 ///
-/// This function will return an error if any of the provided schema names do not match any of the predefined schema contents.
-/// The error will be of type `SCIMError::SchemaNotFound` and will contain the name of the schema that could not be found.
+/// The function returns `SCIMError::SchemaNotFound` when a given schema
+/// name matches none of the predefined schema contents. The error names
+/// the schema it could not find.
 ///
 /// # Examples
 ///
@@ -132,13 +165,14 @@ pub fn get_schemas(schema_names: Vec<&str>) -> Result<Vec<Schema>, SCIMError> {
 
 /// Converts a JSON string into a `Schema` struct.
 ///
-/// This method attempts to parse a JSON string to construct a `Schema` object. It's useful for scenarios where
-/// you receive a JSON representation of a user from an external source (e.g., a web request) and you need to
-/// work with this data in a strongly-typed manner within your application.
+/// Use this method when an external source, such as a web request, sends
+/// you a JSON representation of a schema. The method parses the string and
+/// builds a strongly-typed `Schema` object from it.
 ///
 /// # Errors
 ///
-/// Returns `SCIMError::DeserializationError` if the provided JSON string cannot be parsed into a `Schema` object.
+/// Returns `SCIMError::DeserializationError` when the JSON string does not
+/// parse into a `Schema` object.
 ///
 /// # Examples
 ///
@@ -260,217 +294,37 @@ impl TryFrom<&str> for Schema {
     }
 }
 
-impl Schema {
-    /// Serializes the `Schema` instance to a JSON string, using the custom SCIMError for error handling.
+impl Validate for Schema {
+    /// RFC 7643 §7 makes `id` the schema URI. The RFC says "service
+    /// providers MUST specify" it. `name` and `description` are OPTIONAL.
     ///
-    /// # Returns
-    ///
-    /// This method returns a `Result<String, SCIMError>`, where `Ok(String)` contains
-    /// the JSON string representation of the `Schema` instance, and `Err(SCIMError)` contains
-    /// the custom error encountered during serialization.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use scim_v2::models::scim_schema::{Schema, Attributes, Meta};
-    ///
-    ///     let user = Schema {
-    ///     id: "urn:ietf:params:scim:schemas:core:2.0:User".to_string(),
-    ///     name: "User".to_string(),
-    ///     description: "User Account".to_string(),
-    ///     attributes: vec![
-    ///         Attributes {
-    ///             name: "userName".to_string(),
-    ///             r#type: "string".to_string(),
-    ///             multi_valued: false,
-    ///             description: Some("Unique identifier for the User".to_string()),
-    ///             required: Some(true),
-    ///             canonical_values: None,
-    ///             case_exact: Some(false),
-    ///             mutability: Some("readWrite".to_string()),
-    ///             returned: Some("default".to_string()),
-    ///             uniqueness: Some("server".to_string()),
-    ///             sub_attributes: None,
-    ///             reference_types: None,
-    ///         },
-    ///     ],
-    ///     meta: Meta {
-    ///     resource_type: Some("Schema".to_string()),
-    ///     created: None,
-    ///     last_modified: None,
-    ///     version: None,
-    ///     location: Some("/v2/Schemas/urn:ietf:params:scim:schemas:core:2.0:User".to_string()),
-    /// },
-    /// };
-    ///
-    /// match user.serialize() {
-    ///     Ok(json) => println!("Serialized User: {}", json),
-    ///     Err(e) => println!("Serialization error: {}", e),
-    /// }
-    /// ```
-    pub fn serialize(&self) -> Result<String, SCIMError> {
-        serde_json::to_string(&self).map_err(SCIMError::SerializationError)
-    }
-
-    /// Deserializes a JSON string into a `Schema` instance, using the custom SCIMError for error handling.
-    ///
-    /// # Parameters
-    ///
-    /// * `json` - A string slice that holds the JSON representation of a `Schema`.
-    ///
-    /// # Returns
-    ///
-    /// This method returns a `Result<Schema, SCIMError>`, where `Ok(User)` is the deserialized `Schema` instance,
-    /// and `Err(SCIMError)` is the custom error encountered during deserialization.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use scim_v2::models::scim_schema::Schema;
-    ///
-    /// let schema_json = r#"{
-    ///   "id": "urn:ietf:params:scim:schemas:core:2.0:ResourceType",
-    ///   "name": "ResourceType",
-    ///   "description": "Specifies the schema that describes a SCIM resource type",
-    ///   "attributes": [
-    ///     {
-    ///       "name": "id",
-    ///       "type": "string",
-    ///       "multiValued": false,
-    ///       "description": "The resource type's server unique id. May be the same as the 'name' attribute.",
-    ///       "required": false,
-    ///       "caseExact": false,
-    ///       "mutability": "readOnly",
-    ///       "returned": "default",
-    ///       "uniqueness": "none"
-    ///     },
-    ///     {
-    ///       "name": "name",
-    ///       "type": "string",
-    ///       "multiValued": false,
-    ///       "description": "The resource type name.  When applicable, service providers MUST specify the name, e.g., 'User'.",
-    ///       "required": true,
-    ///       "caseExact": false,
-    ///       "mutability": "readOnly",
-    ///       "returned": "default",
-    ///       "uniqueness": "none"
-    ///     },
-    ///     {
-    ///       "name": "description",
-    ///       "type": "string",
-    ///       "multiValued": false,
-    ///       "description": "The resource type's human-readable description.  When applicable, service providers MUST specify the description.",
-    ///       "required": false,
-    ///       "caseExact": false,
-    ///       "mutability": "readOnly",
-    ///       "returned": "default",
-    ///       "uniqueness": "none"
-    ///     },
-    ///     {
-    ///       "name": "endpoint",
-    ///       "type": "reference",
-    ///       "referenceTypes": [
-    ///         "uri"
-    ///       ],
-    ///       "multiValued": false,
-    ///       "description": "The resource type's HTTP-addressable endpoint relative to the Base URL, e.g., '/Users'.",
-    ///       "required": true,
-    ///       "caseExact": false,
-    ///       "mutability": "readOnly",
-    ///       "returned": "default",
-    ///       "uniqueness": "none"
-    ///     },
-    ///     {
-    ///       "name": "schema",
-    ///       "type": "reference",
-    ///       "referenceTypes": [
-    ///         "uri"
-    ///       ],
-    ///       "multiValued": false,
-    ///       "description": "The resource type's primary/base schema URI.",
-    ///       "required": true,
-    ///       "caseExact": true,
-    ///       "mutability": "readOnly",
-    ///       "returned": "default",
-    ///       "uniqueness": "none"
-    ///     },
-    ///     {
-    ///       "name": "schemaExtensions",
-    ///       "type": "complex",
-    ///       "multiValued": false,
-    ///       "description": "A list of URIs of the resource type's schema extensions.",
-    ///       "required": true,
-    ///       "mutability": "readOnly",
-    ///       "returned": "default",
-    ///       "subAttributes": [
-    ///         {
-    ///           "name": "schema",
-    ///           "type": "reference",
-    ///           "referenceTypes": [
-    ///             "uri"
-    ///           ],
-    ///           "multiValued": false,
-    ///           "description": "The URI of a schema extension.",
-    ///           "required": true,
-    ///           "caseExact": true,
-    ///           "mutability": "readOnly",
-    ///           "returned": "default",
-    ///           "uniqueness": "none"
-    ///         },
-    ///         {
-    ///           "name": "required",
-    ///           "type": "boolean",
-    ///           "multiValued": false,
-    ///           "description": "A Boolean value that specifies whether or not the schema extension is required for the resource type.  If true, a resource of this type MUST include this schema extension and also include any attributes declared as required in this schema extension. If false, a resource of this type MAY omit this schema extension.",
-    ///           "required": true,
-    ///           "mutability": "readOnly",
-    ///           "returned": "default"
-    ///         }
-    ///       ]
-    ///     }
-    ///   ]
-    /// }"#;
-    /// match Schema::deserialize(schema_json) {
-    ///     Ok(schema) => println!("Deserialized User: {:?}", schema),
-    ///     Err(e) => println!("Deserialization error: {}", e),
-    /// }
-    /// ```
-    pub fn deserialize(json: &str) -> Result<Self, SCIMError> {
-        serde_json::from_str(json).map_err(SCIMError::DeserializationError)
+    /// `schemas` is the one attribute where this crate's validators
+    /// tolerate absence. RFC 7643 §3 marks `schemas` REQUIRED on "all
+    /// representations". The RFC's own §8.7 examples break that rule. The
+    /// §8.7 definitions for User, Group, EnterpriseUser,
+    /// ServiceProviderConfig, ResourceType and Schema carry no `schemas`
+    /// attribute at all. Real providers follow that example. Rejecting
+    /// what the RFC itself publishes would make `validate()` useless on a
+    /// real `/Schemas` response. For this reason, absence passes
+    /// validation here alone. A present array must still be non-empty. It
+    /// must be unique. It must name this resource type. `ResourceType`
+    /// and `ServiceProviderConfig` require `schemas`. Their §8.5 and §8.6
+    /// examples carry it.
+    fn validate(&self) -> Result<(), ValidationError> {
+        if !self.schemas.is_empty() {
+            require_schema_urn(&self.schemas, crate::schema_urns::SCHEMA)?;
+        }
+        if self.id.is_empty() {
+            return Err(ValidationError::missing_required("id"));
+        }
+        Ok(())
     }
 }
 
+/// Tests for the `Schema` type itself, independent of the embedded
+/// definitions, so they still run without the `schemas` feature.
 #[cfg(test)]
-mod tests {
-    use super::*;
+mod schema_tests;
 
-    #[test]
-    fn get_schemas_returns_correct_schemas_for_valid_input() {
-        let schemas = get_schemas(vec!["user"]).unwrap();
-        assert_eq!(schemas.len(), 1);
-        assert_eq!(schemas[0].id, "urn:ietf:params:scim:schemas:core:2.0:User");
-        assert_eq!(schemas[0].name, "User");
-        assert_eq!(schemas[0].description, "User Account");
-        assert_eq!(schemas[0].attributes.len(), 21);
-        assert_eq!(
-            schemas[0].meta.resource_type.as_ref(),
-            Some(&"Schema".to_string())
-        );
-        assert_eq!(
-            schemas[0].meta.location.as_ref(),
-            Some(&"/v2/Schemas/urn:ietf:params:scim:schemas:core:2.0:User".to_string())
-        );
-    }
-
-    #[test]
-    fn get_schemas_returns_error_for_invalid_input() {
-        let result = get_schemas(vec!["invalid"]);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn get_schemas_returns_error_for_missing_file() {
-        let result = get_schemas(vec!["missing"]);
-        assert!(result.is_err());
-    }
-}
+#[cfg(all(test, feature = "schemas"))]
+mod tests;

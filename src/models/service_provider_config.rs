@@ -1,10 +1,21 @@
+use crate::utils::validation::{
+    Validate, ValidationError, at_most_one_primary, require_schema_urn,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::models::scim_schema::Meta;
+use crate::multi::Multi;
+use crate::schema_urns;
 use crate::utils::error::SCIMError;
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct ServiceProviderConfig {
+    /// RFC 7643 §3 requires this schema URN. The RFC's §8.5 example
+    /// includes it. The `#[serde(default)]` attribute lets the crate read
+    /// a payload from a non-conformant provider that omits the field. The
+    /// `validate()` method reports the omission.
+    #[serde(default)]
+    pub schemas: Vec<String>,
     #[serde(rename = "documentationUri", skip_serializing_if = "Option::is_none")]
     pub documentation_uri: Option<String>,
     pub patch: Supported,
@@ -14,8 +25,12 @@ pub struct ServiceProviderConfig {
     pub change_password: Supported,
     pub sort: Supported,
     pub etag: Supported,
-    #[serde(rename = "authenticationSchemes")]
-    pub authentication_schemes: Vec<AuthenticationScheme>,
+    #[serde(
+        rename = "authenticationSchemes",
+        default = "Multi::absent",
+        skip_serializing_if = "Multi::is_absent"
+    )]
+    pub authentication_schemes: Multi<AuthenticationScheme>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
 }
@@ -23,69 +38,65 @@ pub struct ServiceProviderConfig {
 impl Default for ServiceProviderConfig {
     fn default() -> Self {
         ServiceProviderConfig {
+            schemas: vec![schema_urns::SERVICE_PROVIDER_CONFIG.to_string()],
             documentation_uri: None,
-            patch: Supported { supported: false },
-            bulk: Bulk {
-                supported: false,
-                max_operations: 0,
-                max_payload_size: 0,
-            },
-            filter: Filter {
-                supported: false,
-                max_results: 0,
-            },
+            patch: Supported::default(),
+            bulk: Bulk::default(),
+            filter: Filter::default(),
             change_password: Supported { supported: false },
             sort: Supported { supported: false },
             etag: Supported { supported: false },
-            authentication_schemes: vec![],
+            authentication_schemes: Multi::absent(),
             meta: None,
         }
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct AuthenticationScheme {
     pub name: String,
-    pub r#type: String,
+    /// RFC 7643 §5 marks `type` REQUIRED, with the values "oauth", "oauth2",
+    /// "oauthbearertoken", "httpbasic" and "httpdigest". This field is
+    /// `Option` here for one reason. The §8.7 schema representation omits
+    /// `type`. §8 calls that representation non-normative. Real servers
+    /// follow the representation anyway. A discovery document must still
+    /// parse. [`Validate`] enforces the §5 requirement.
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub r#type: Option<String>,
     pub description: String,
-    #[serde(rename = "specUri")]
-    pub spec_uri: String,
+    /// OPTIONAL per RFC 7643 §5.
+    #[serde(rename = "specUri", skip_serializing_if = "Option::is_none")]
+    pub spec_uri: Option<String>,
     #[serde(rename = "documentationUri", skip_serializing_if = "Option::is_none")]
     pub documentation_uri: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::utils::serde::deserialize_optional_lenient_bool"
+    )]
     pub primary: Option<bool>,
 }
 
-impl Default for AuthenticationScheme {
-    fn default() -> Self {
-        AuthenticationScheme {
-            name: "".to_string(),
-            r#type: "".to_string(),
-            description: "".to_string(),
-            spec_uri: "".to_string(),
-            documentation_uri: Some("".to_string()),
-            primary: None,
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(PartialEq, Eq, Serialize, Deserialize, Debug, Clone)]
 pub struct Filter {
     pub supported: bool,
     #[serde(rename = "maxResults")]
     pub max_results: i64,
 }
 
+/// Advertises no filter support. The REQUIRED `maxResults` field is
+/// present and set to zero. See [`Bulk`]'s `Default` impl for the reason
+/// the limit is not a positive number.
 impl Default for Filter {
     fn default() -> Self {
         Filter {
             supported: false,
-            max_results: 100,
+            max_results: 0,
         }
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(PartialEq, Eq, Serialize, Deserialize, Debug, Clone)]
 pub struct Bulk {
     pub supported: bool,
     #[serde(rename = "maxOperations")]
@@ -94,30 +105,41 @@ pub struct Bulk {
     pub max_payload_size: i64,
 }
 
+/// Advertises no bulk support. RFC 7643 §5 marks `maxOperations` and
+/// `maxPayloadSize` REQUIRED. Both fields are therefore present. Each
+/// field is zero. A non-zero limit alongside `supported: false` would
+/// claim a capacity the server does not have.
+///
+/// Before 1.0, this method returned 1000 and 1048576.
+/// `ServiceProviderConfig::default()` built the same struct by hand, with
+/// zeros instead. The two constructors disagreed, depending on which one
+/// a caller used.
 impl Default for Bulk {
     fn default() -> Self {
         Bulk {
             supported: false,
-            max_operations: 1000,
-            max_payload_size: 1048576,
+            max_operations: 0,
+            max_payload_size: 0,
         }
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(PartialEq, Eq, Serialize, Deserialize, Debug, Default, Clone)]
 pub struct Supported {
     pub supported: bool,
 }
 
 /// Converts a JSON string into a `ServiceProviderConfig` struct.
 ///
-/// This method attempts to parse a JSON string to construct a `ServiceProviderConfig` object. It's useful for scenarios where
-/// you receive a JSON representation of a user from an external source (e.g., a web request) and you need to
-/// work with this data in a strongly-typed manner within your application.
+/// Use this method when an external source, such as a web request, sends
+/// you a JSON representation of a service provider config. The method
+/// parses the string and builds a strongly-typed `ServiceProviderConfig`
+/// object from it.
 ///
 /// # Errors
 ///
-/// Returns `SCIMError::DeserializationError` if the provided JSON string cannot be parsed into a `ServiceProviderConfig` object.
+/// Returns `SCIMError::DeserializationError` when the JSON string does not
+/// parse into a `ServiceProviderConfig` object.
 ///
 /// # Examples
 ///
@@ -168,240 +190,58 @@ impl TryFrom<&str> for ServiceProviderConfig {
     }
 }
 
-impl ServiceProviderConfig {
-    /// Validates a service provider config.
-    ///
-    /// This function checks if the service provider config has `patch`, `bulk`, `filter`, `change_password`, `sort`, and `etag`. If any of these fields are missing, it returns an error.
-    ///
-    /// # Arguments
-    ///
-    /// * `config` - A reference to a ServiceProviderConfig instance.
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(())` - If the service provider config is valid.
-    /// * `Err(SCIMError::MissingRequiredField)` - If a required field is missing.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use scim_v2::models::service_provider_config::ServiceProviderConfig;
-    ///
-    /// let config = ServiceProviderConfig {
-    ///     // Initialize config fields here...
-    ///     // ...
-    ///     ..Default::default()
-    /// };
-    ///
-    /// match config.validate() {
-    ///     Ok(_) => println!("ServiceProviderConfig is valid."),
-    ///     Err(e) => println!("ServiceProviderConfig is invalid: {}", e),
-    /// }
-    /// ```
-    pub fn validate(&self) -> Result<(), SCIMError> {
-        if !self.patch.supported {
-            return Err(SCIMError::MissingRequiredField("patch".to_string()));
+impl Validate for AuthenticationScheme {
+    /// RFC 7643 §5 marks `type`, `name` and `description` REQUIRED. RFC
+    /// 7643 §5 marks `specUri` and `documentationUri` OPTIONAL.
+    fn validate(&self) -> Result<(), ValidationError> {
+        if self.r#type.as_deref().is_none_or(str::is_empty) {
+            return Err(ValidationError::missing_required("type"));
         }
-        if !self.bulk.supported {
-            return Err(SCIMError::MissingRequiredField("bulk".to_string()));
+        if self.name.is_empty() {
+            return Err(ValidationError::missing_required("name"));
         }
-        if !self.filter.supported {
-            return Err(SCIMError::MissingRequiredField("filter".to_string()));
-        }
-        if !self.change_password.supported {
-            return Err(SCIMError::MissingRequiredField(
-                "change_password".to_string(),
-            ));
-        }
-        if !self.sort.supported {
-            return Err(SCIMError::MissingRequiredField("sort".to_string()));
-        }
-        if !self.etag.supported {
-            return Err(SCIMError::MissingRequiredField("etag".to_string()));
+        if self.description.is_empty() {
+            return Err(ValidationError::missing_required("description"));
         }
         Ok(())
     }
+}
 
-    /// Serializes the `ServiceProviderConfig` instance to a JSON string, using the custom SCIMError for error handling.
+impl Validate for ServiceProviderConfig {
+    /// RFC 7643 §5 marks `authenticationSchemes` REQUIRED. An empty list is
+    /// therefore a conformance failure. This method checks each scheme in
+    /// turn and reports its index in the path. RFC 7643 §5 also marks
+    /// `patch`, `bulk`, `filter`, `changePassword`, `sort` and `etag`
+    /// REQUIRED. These six fields are non-`Option` fields. Because of
+    /// that, `serde` already refuses a payload that omits any of them.
     ///
-    /// # Returns
-    ///
-    /// This method returns a `Result<String, SCIMError>`, where `Ok(String)` contains
-    /// the JSON string representation of the `ServiceProviderConfig` instance, and `Err(SCIMError)` contains
-    /// the custom error encountered during serialization.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use scim_v2::models::service_provider_config::ServiceProviderConfig;
-    ///
-    /// let config = ServiceProviderConfig {
-    ///     // Initialize config fields here...
-    ///     // ...
-    ///     ..Default::default()
-    /// };
-    ///
-    /// match config.serialize() {
-    ///     Ok(json) => println!("Serialized ServiceProviderConfig: {}", json),
-    ///     Err(e) => println!("Serialization error: {}", e),
-    /// }
-    /// ```
-    pub fn serialize(&self) -> Result<String, SCIMError> {
-        serde_json::to_string(&self).map_err(SCIMError::SerializationError)
-    }
-
-    /// Deserializes a JSON string into a `ServiceProviderConfig` instance, using the custom SCIMError for error handling.
-    ///
-    /// # Parameters
-    ///
-    /// * `json` - A string slice that holds the JSON representation of a `ServiceProviderConfig`.
-    ///
-    /// # Returns
-    ///
-    /// This method returns a `Result<ServiceProviderConfig, SCIMError>`, where `Ok(ServiceProviderConfig)` is the deserialized `ServiceProviderConfig` instance,
-    /// and `Err(SCIMError)` is the custom error encountered during deserialization.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use scim_v2::models::service_provider_config::ServiceProviderConfig;
-    ///
-    /// let config_json = r#"{
-    ///             "schemas": ["urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"],
-    ///             "documentationUri": "http:///example.com/help/scim.html",
-    ///             "patch": { "supported": true },
-    ///             "bulk": {
-    ///                 "supported": true,
-    ///                 "maxOperations": 1000,
-    ///                 "maxPayloadSize": 1048576
-    ///             },
-    ///             "filter": {
-    ///                 "supported": true,
-    ///                 "maxResults": 200
-    ///             },
-    ///             "changePassword": { "supported": true },
-    ///             "sort": { "supported": true },
-    ///             "etag": { "supported": true },
-    ///             "authenticationSchemes": [
-    ///                 {
-    ///                     "name": "OAuth Bearer Token",
-    ///                     "description": "Authentication scheme using the OAuth Bearer Token Standard",
-    ///                     "specUri": "http:///www.rfc-editor.org/info/rfc6750",
-    ///                     "documentationUri": "http:///example.com/help/oauth.html"
-    ///                 },
-    ///                 {
-    ///                     "name": "HTTP Basic",
-    ///                     "description": "Authentication scheme using the HTTP Basic Standard",
-    ///                     "specUri": "http:///www.rfc-editor.org/info/rfc2617",
-    ///                     "documentationUri": "http:///example.com/help/httpBasic.html"
-    ///                 }
-    ///             ]
-    ///         }"#;
-    /// match ServiceProviderConfig::deserialize(config_json) {
-    ///     Ok(user) => println!("Deserialized User: {:?}", user),
-    ///     Err(e) => println!("Deserialization error: {}", e),
-    /// }
-    /// ```
-    pub fn deserialize(json: &str) -> Result<Self, SCIMError> {
-        serde_json::from_str(json).map_err(SCIMError::DeserializationError)
+    /// Before 1.0, this method returned `MissingRequiredField` whenever any
+    /// of those six fields reported `supported: false`. That behavior
+    /// rejected valid configurations. §5 makes the `supported` **field**
+    /// required, not its value `true`. A server that does not implement
+    /// bulk correctly advertises `"bulk": {"supported": false}`.
+    fn validate(&self) -> Result<(), ValidationError> {
+        // §5: "id is not required". `schemas` is: RFC 7643 §3 says "all
+        // representations of SCIM schemas MUST include a non-empty array", and
+        // the §8.5 example carries it. Deserialization still tolerates absence
+        // so a non-conformant provider's config can be read; this reports it.
+        require_schema_urn(&self.schemas, schema_urns::SERVICE_PROVIDER_CONFIG)?;
+        if self.authentication_schemes.is_empty() {
+            return Err(ValidationError::missing_required("authenticationSchemes"));
+        }
+        for (i, scheme) in self.authentication_schemes.iter().enumerate() {
+            scheme
+                .validate()
+                .map_err(|e| e.under(&format!("authenticationSchemes[{i}]")))?;
+        }
+        at_most_one_primary(
+            &self.authentication_schemes,
+            |a| a.primary,
+            "authenticationSchemes",
+        )?;
+        Ok(())
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use pretty_assertions::assert_eq;
-
-    use super::*;
-
-    #[test]
-    fn service_provider_config_deserialization() {
-        let json_data = r#"{
-            "schemas": ["urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"],
-            "documentationUri": "http://example.com/help/scim.html",
-            "patch": { "supported": true },
-            "bulk": {
-                "supported": true,
-                "maxOperations": 1000,
-                "maxPayloadSize": 1048576
-            },
-            "filter": {
-                "supported": true,
-                "maxResults": 200
-            },
-            "changePassword": { "supported": true },
-            "sort": { "supported": true },
-            "etag": { "supported": true },
-            "authenticationSchemes": [
-                {
-                    "name": "OAuth Bearer Token",
-                    "description": "Authentication scheme using the OAuth Bearer Token Standard",
-                    "specUri": "http://www.rfc-editor.org/info/rfc6750",
-                    "documentationUri": "http://example.com/help/oauth.html",
-                    "type": "oauthbearertoken",
-                    "primary": true
-                },
-                {
-                    "name": "HTTP Basic",
-                    "description": "Authentication scheme using the HTTP Basic Standard",
-                    "specUri": "http://www.rfc-editor.org/info/rfc2617",
-                    "documentationUri": "http://example.com/help/httpBasic.html",
-                    "type": "httpbasic"
-                }
-            ]
-        }"#;
-
-        let config: Result<ServiceProviderConfig, serde_json::Error> =
-            serde_json::from_str(json_data);
-
-        if let Err(e) = &config {
-            eprintln!("Deserialization failed: {:?}", e);
-        }
-        assert!(config.is_ok());
-        let config = config.unwrap();
-        assert_eq!(
-            config.documentation_uri,
-            Some("http://example.com/help/scim.html".to_string())
-        );
-        assert_eq!(config.patch.supported, true);
-        assert_eq!(config.bulk.supported, true);
-        assert_eq!(config.bulk.max_operations, 1000);
-        assert_eq!(config.bulk.max_payload_size, 1048576);
-        assert_eq!(config.filter.supported, true);
-        assert_eq!(config.filter.max_results, 200);
-        assert_eq!(config.change_password.supported, true);
-        assert_eq!(config.sort.supported, true);
-        assert_eq!(config.etag.supported, true);
-        assert_eq!(config.authentication_schemes.len(), 2);
-        let oauth_scheme = &config.authentication_schemes[0];
-        assert_eq!(oauth_scheme.name, "OAuth Bearer Token");
-        assert_eq!(
-            oauth_scheme.description,
-            "Authentication scheme using the OAuth Bearer Token Standard"
-        );
-        assert_eq!(
-            oauth_scheme.spec_uri,
-            "http://www.rfc-editor.org/info/rfc6750"
-        );
-        assert_eq!(
-            oauth_scheme.documentation_uri,
-            Some("http://example.com/help/oauth.html".to_string())
-        );
-        assert_eq!(oauth_scheme.r#type, "oauthbearertoken");
-        assert_eq!(oauth_scheme.primary, Some(true));
-        let http_scheme = &config.authentication_schemes[1];
-        assert_eq!(http_scheme.name, "HTTP Basic");
-        assert_eq!(
-            http_scheme.description,
-            "Authentication scheme using the HTTP Basic Standard"
-        );
-        assert_eq!(
-            http_scheme.spec_uri,
-            "http://www.rfc-editor.org/info/rfc2617"
-        );
-        assert_eq!(
-            http_scheme.documentation_uri,
-            Some("http://example.com/help/httpBasic.html".to_string())
-        );
-        assert_eq!(http_scheme.r#type, "httpbasic");
-    }
-}
+mod tests;

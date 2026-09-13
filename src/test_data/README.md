@@ -1,32 +1,37 @@
 # Test fixtures
 
-Two groups, one per subdirectory:
+This directory holds two groups of fixtures. Each group has its own
+subdirectory:
 
-- **`rfc7644/`** — sample payloads lifted from [RFC 7644](https://www.rfc-editor.org/rfc/rfc7644).
+- **`rfc7644/`** — sample payloads copied from [RFC 7644](https://www.rfc-editor.org/rfc/rfc7644).
 - **`provider_samples/`** — sanitized real responses from SCIM providers.
 
 ## `rfc7644/` — RFC 7644 sample payloads
 
-Each file is one JSON payload from RFC 7644. Filenames follow
-`s<section>_<statement>.json`, or `s<section>_fig<N>_<statement>.json` when the
-payload is one of the RFC's numbered figures — so the RFC location is
-self-documenting. The matching tests are named `rfc7644_s<section>_<statement>`
-(dots in the section become underscores).
+Each file holds one JSON payload from RFC 7644. A filename follows the
+pattern `s<section>_<statement>.json`. A filename follows
+`s<section>_fig<N>_<statement>.json` instead when the payload is one of the
+RFC's numbered figures. This pattern makes the RFC location self-documenting.
+Every fixture has a matching test named `rfc7644_s<section>_<statement>` (a
+dot in the section number becomes an underscore).
 
-**RFC 7644 has only nine numbered figures** (Figures 1-9); most of the payloads
-below are *unnumbered* inline examples, so most filenames carry no `fig<N>`
-segment. Only three do: Figures 3, 4 and 5. The **RFC 7644 location** column
-below gives the full citation: a section number, plus either the figure number
-or the sentence in the RFC that introduces the example. Whitespace is normalized
-from the RFC's printed form; content is otherwise verbatim **except** as noted
-under "Deviations" below.
+**RFC 7644 has only nine numbered figures** (Figures 1-9). Most of the
+payloads below are *unnumbered* inline examples. Most filenames therefore
+carry no `fig<N>` segment. Only three filenames carry a `fig<N>` segment:
+Figures 3, 4 and 5. The **RFC 7644 location** column below gives the full
+citation. Each citation has a section number, plus either the figure number
+or the sentence in the RFC that introduces the example. This table
+normalizes whitespace from the RFC's printed form. The content is otherwise
+verbatim, **except** where the Deviations section below notes a change.
 
-The **Support** column reflects whether this crate currently models the payload:
+The **Support** column shows whether this crate models the payload today:
 
-- `SUPPORTED` — a model exists and a test in `src/models/` deserializes (and,
-  where lossless, round-trips) this fixture.
-- `NOT SUPPORTED` — no model yet. The fixture is checked in so a test can be
-  added when support lands; nothing references it today.
+- `SUPPORTED` — a model exists for this payload. A test in `src/models/`
+  deserializes the fixture, and round-trips it when the round trip is
+  lossless.
+- `NOT SUPPORTED` — no model exists yet. This crate keeps the fixture in
+  the repository so that a future test can use it. No test references the
+  fixture today.
 
 | File | RFC 7644 location | Payload | Support |
 | --- | --- | --- | --- |
@@ -57,45 +62,50 @@ The **Support** column reflects whether this crate currently models the payload:
 
 - **`s3.4.2_list_response`, `s3.4.2.4_fig3_pagination_response`,
   `s3.4.3_fig5_post_query_response`** — the RFC abbreviates the embedded
-  resources (to `id` + `userName`, or to a bare `{...}`) and omits their
-  `schemas` array. This crate's `Resource` deserializer requires a
-  resource-type discriminator and will not guess, so each embedded resource
-  here carries a concrete body with a `schemas` array.
-  `s3.4.3_fig5_post_query_response` additionally drops the trailing `...` that
-  truncates the RFC's `Resources` list.
+  resources. It shortens them to `id` + `userName`, or to a bare `{...}`,
+  and omits their `schemas` array. This crate's `Resource` deserializer
+  requires a resource-type discriminator, and it will not guess one. Each
+  embedded resource here therefore carries a concrete body with a `schemas`
+  array. `s3.4.3_fig5_post_query_response` also drops the trailing `...`
+  that truncates the RFC's `Resources` list.
 - **`s3.5.2.1_add_member`, `s3.5.2.2_remove_member_by_filter`,
   `s3.5.2.2_remove_by_filter_then_add_member`, `s3.5.2.2_replace_all_members`,
-  `s3.5.2.3_replace_members_single_op`** — retain the RFC's truncated `$ref` /
-  `value` UUIDs (e.g. `2819c223...413861904646`). The filter parser treats
-  these as opaque strings, so they exercise the same code paths.
-- **`s3.5.2.2_remove_by_filter_then_add_member`** — the RFC prints the remove
-  path as `members[value eq"..."]` with no space after `eq`; a space was added
-  so the filter expression parses. (The truncated `2819c223...` / `08e1d05d...`
-  UUIDs are kept as printed, per the bullet above.)
-- **`s3.5.2.1_add_user_attributes`, `s3.5.2.3_replace_multiple_attributes`** —
-  the RFC prints both `Operations` bodies with the operation object's closing
-  brace missing (`… "nickname": "Babs" }]` where `}}]` is required), so neither
-  parses as JSON. The brace is restored here; nothing else is changed. For the
-  §3.5.2.1 example this is [RFC 7644 Errata ID 8096](https://www.rfc-editor.org/errata/eid8096)
-  ("missing one closing curly bracket", Verified 2025-10-28); the §3.5.2.3
-  example carries the identical typo.
+  `s3.5.2.3_replace_members_single_op`** — these fixtures retain the RFC's
+  truncated `$ref` / `value` UUIDs (e.g. `2819c223...413861904646`). The
+  filter parser treats each UUID as an opaque string. The truncation does
+  not change which code paths the fixtures exercise.
+- **`s3.5.2.2_remove_by_filter_then_add_member`** — the RFC prints the
+  remove path as `members[value eq"..."]`, with no space after `eq`. This
+  fixture adds a space so the filter expression parses. (This fixture keeps
+  the truncated `2819c223...` / `08e1d05d...` UUIDs as printed, per the
+  bullet above.)
+- **`s3.5.2.1_add_user_attributes`, `s3.5.2.3_replace_multiple_attributes`**
+  — the RFC prints both `Operations` bodies with the operation object's
+  closing brace missing (`… "nickname": "Babs" }]` where `}}]` is required).
+  Neither body parses as JSON without this brace. This fixture restores the
+  missing brace and changes nothing else. For the §3.5.2.1 example,
+  [RFC 7644 Errata ID 8096](https://www.rfc-editor.org/errata/eid8096)
+  confirms the defect ("missing one closing curly bracket", Verified
+  2025-10-28). The §3.5.2.3 example carries the identical typo.
 
 ### Not included
 
-- The RFC's **Figure 2** (§3.4.2.2, "Example Filters") and **Figure 1** (§3.4.2.2,
-  "ABNF Specification of SCIM Filters") are filter-expression grammar/strings,
-  not JSON bodies — covered by the `filter` module's own tests.
-- The RFC's **Figure 7** ("SCIM PATCH PATH Rule"), **Figure 8** ("Example Path
-  Values") and **Figure 9** (§4, "Example Resource Type JSON Representation") are
-  not checked in here as standalone fixtures.
-- The remaining §3.7 bulk examples (bulk response body, `bulkId` temporary
-  identifiers, error-in-response, `maxOperations` exceeded) are not checked in
-  yet; add them alongside a `BulkRequest` / `BulkResponse` model.
+- The RFC's **Figure 2** (§3.4.2.2, "Example Filters") and **Figure 1**
+  (§3.4.2.2, "ABNF Specification of SCIM Filters") are filter-expression
+  grammar and strings, not JSON bodies. The `filter` module's own tests
+  cover these figures.
+- The RFC's **Figure 7** ("SCIM PATCH PATH Rule"), **Figure 8** ("Example
+  Path Values") and **Figure 9** (§4, "Example Resource Type JSON
+  Representation") are not fixtures in this crate.
+- This crate does not include the remaining §3.7 bulk examples yet (bulk
+  response body, `bulkId` temporary identifiers, error-in-response,
+  `maxOperations` exceeded). Add these examples alongside a `BulkRequest` /
+  `BulkResponse` model.
 
 ## `provider_samples/`
 
-Sanitized real responses, kept for regression coverage of
-non-conformant-but-common provider behavior:
+These files are sanitized real responses. They cover provider behavior
+that is common but does not conform to the RFC:
 
 | File | Source |
 | --- | --- |
