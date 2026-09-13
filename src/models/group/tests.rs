@@ -105,10 +105,6 @@ fn unknown_member_type_round_trips_instead_of_failing() {
         .collect();
     assert_eq!(types, ["User", "Group", "ServiceAccount"]);
 }
-/// RFC 7643 §2.5 equivalence for `Group.members`: absent, `null` and `[]`
-/// all mean unassigned, and unassigned is omitted on the way out.
-/// Guards the `deserialize_null_as_empty_vec` wiring, which
-/// `#[serde(default)]` alone does not provide.
 /// All three wire forms read alike, because RFC 7643 §2.5 makes them one
 /// state in a resource. They do not write alike: RFC 7644 §3.5.1 makes an
 /// absent member "not asserted by the client", so only the forms the client

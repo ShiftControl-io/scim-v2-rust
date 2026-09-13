@@ -305,8 +305,8 @@ for body in [
 A bridge is a service provider on the way in and a client on the way out:
 
 ```text
-JumpCloud ──PUT──▶ [ you as service provider │ you as client ] ──PUT──▶ CyberArk
- (client)            deserialize → mutate → serialize           (service provider)
+  Okta ──PUT──▶ [ you as service provider │ you as client ] ──PUT──▶ CyberArk
+(client)           deserialize → mutate → serialize           (service provider)
 ```
 
 Both roles use the same types. In a response, the three wire forms above are
@@ -322,7 +322,7 @@ call. A message that arrives and leaves unchanged is unchanged:
 ```rust
 use scim_v2::models::user::User;
 
-// JumpCloud clears the emails and says nothing about phone numbers.
+// Okta clears the emails and says nothing about phone numbers.
 let inbound = r#"{"schemas":["urn:ietf:params:scim:schemas:core:2.0:User"],"userName":"BJENSEN","emails":[]}"#;
 
 let mut user: User<String> = serde_json::from_str(inbound)?;

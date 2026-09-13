@@ -908,7 +908,7 @@ mod rfc7644_samples {
 
     /// JumpCloud sends `"emails": null` on a minimal PUT. RFC 7643 §2.5
     /// makes that equivalent to unassigned, and this is the payload that
-    /// makes `deserialize_null_as_empty_vec` load-bearing rather than
+    /// makes `Multi<T>`'s own `Deserialize` load-bearing rather than
     /// theoretical: with `#[serde(default)]` alone, modelling `emails` as
     /// `Vec<Email>` would reject this real provider response outright.
     #[test]
