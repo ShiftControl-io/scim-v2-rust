@@ -12,6 +12,23 @@ Management (SCIM) 2.0 protocol. [RFC 7642](https://www.rfc-editor.org/rfc/rfc764
 [RFC 7643](https://www.rfc-editor.org/rfc/rfc7643) and
 [RFC 7644](https://www.rfc-editor.org/rfc/rfc7644) define the protocol.
 
+## What this crate is for
+
+SCIM is a protocol made of messages, and this crate is about those messages. It
+reads a message that arrived and tells you whether the message conforms. It
+builds a message to send, and refuses to build one that does not conform. A
+client and a server need the same thing from opposite sides, so the same types
+serve both, and `Context` states the direction a value travels in.
+
+The goal is to apply the RFCs correctly, and correct is not always obvious. The
+RFCs leave some questions open, and real providers send forms the RFCs never
+describe. This crate decides those cases instead of passing the problem to you,
+and the doc comment on each decision quotes the RFC sentence it rests on. Where
+the decision is genuinely yours, the type hands it to you rather than choosing
+for you. `Multi<T>` is the clearest example. RFC 7644 §3.5.1 makes an omitted
+attribute a different instruction from a cleared one, so `Multi<T>` keeps the
+two apart and your server decides what each one means.
+
 ## Quick start
 
 This example shows a SCIM server that receives `POST /Users`. `Strict` does two

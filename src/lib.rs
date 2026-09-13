@@ -4,11 +4,29 @@
 //! Management (SCIM) 2.0 protocol. RFC 7642, RFC 7643 and RFC 7644 define the
 //! protocol.
 //!
-//! The crate has a narrow scope. The crate models the wire format. The crate
-//! parses the two grammars the RFC defines. The crate checks the attributes
-//! the RFC marks REQUIRED. The crate performs no I/O and evaluates no filters
-//! against storage. The crate does not wrap `serde`. Use `serde_json`
-//! directly.
+//! ## What this crate is for
+//!
+//! SCIM is a protocol made of messages, and this crate is about those
+//! messages. It reads a message that arrived and tells you whether the
+//! message conforms. It builds a message to send, and refuses to build one
+//! that does not conform. A client and a server need the same thing from
+//! opposite sides, so the same types serve both, and [`Context`] states the
+//! direction a value travels in.
+//!
+//! The goal is to apply the RFCs correctly, and correct is not always
+//! obvious. The RFCs leave some questions open, and real providers send forms
+//! the RFCs never describe. This crate decides those cases instead of passing
+//! the problem to you, and the doc comment on each decision quotes the RFC
+//! sentence it rests on. Where the decision is genuinely yours, the type
+//! hands it to you rather than choosing for you. [`Multi<T>`](Multi) is the
+//! clearest example. RFC 7644 §3.5.1 makes an omitted attribute a different
+//! instruction from a cleared one, so [`Multi<T>`](Multi) keeps the two apart
+//! and your server decides what each one means.
+//!
+//! The scope is narrow. This crate models the wire format, parses the two
+//! grammars the RFC defines, and checks the attributes the RFC marks
+//! REQUIRED. It performs no I/O and evaluates no filter against storage. It
+//! does not wrap `serde`, so use `serde_json` directly.
 //!
 //! ## Quick start
 //!
