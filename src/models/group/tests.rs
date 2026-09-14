@@ -4,7 +4,7 @@ fn validate_and_validate_context() {
     let base = Group::<String> {
         schemas: vec![crate::schema_urns::GROUP.to_string()],
         id: None,
-        external_id: None,
+        external_id: Asserted::absent(),
         display_name: "Tour Guides".to_string(),
         members: Asserted::absent(),
         meta: None,

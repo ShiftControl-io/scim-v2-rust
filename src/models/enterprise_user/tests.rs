@@ -20,7 +20,7 @@ fn manager_omits_all_unset_fields_on_serialize() {
 #[test]
 fn manager_omits_the_unset_subset_on_serialize() {
     let manager = Manager {
-        value: Some("26118915".to_string()),
+        value: Asserted::set("26118915".to_string()),
         ..Default::default()
     };
     let json = serde_json::to_value(&manager).unwrap();
@@ -39,12 +39,13 @@ fn manager_omits_the_unset_subset_on_serialize() {
 fn manager_explicit_null_deserializes_to_none() {
     let m: Manager =
         serde_json::from_str(r#"{"value": null, "$ref": null, "displayName": null}"#).unwrap();
-    assert_eq!(m.value, None);
-    assert_eq!(m.r#ref, None);
-    assert_eq!(m.display_name, None);
+    // An explicit `null` is now the client asking to clear, not silence.
+    assert!(m.value.is_nulled());
+    assert!(m.r#ref.is_nulled());
+    assert_eq!(m.display_name.as_deref(), None); // readOnly, so it stays a plain Option
 
     let empty: Manager = serde_json::from_str("{}").unwrap();
-    assert_eq!(empty.value, None);
+    assert!(empty.value.is_absent());
 }
 
 /// Regression guard for the pre-1.0 bug. Every attribute in RFC 7643 §4.3
@@ -60,7 +61,7 @@ fn an_empty_extension_is_valid() {
 #[test]
 fn a_partial_extension_is_valid() {
     let partial = EnterpriseUser {
-        department: Some("Engineering".to_string()),
+        department: Asserted::set("Engineering".to_string()),
         ..Default::default()
     };
     assert!(partial.validate().is_ok());
@@ -86,7 +87,7 @@ fn full_extension_round_trips() {
     let eu: EnterpriseUser = serde_json::from_str(raw).expect("§4.3 example must deserialize");
     assert_eq!(eu.employee_number.as_deref(), Some("701984"));
     assert_eq!(eu.division.as_deref(), Some("Theme Park"));
-    let manager = eu.manager.as_ref().expect("manager must deserialize");
+    let manager = eu.manager.as_option().expect("manager must deserialize");
     assert_eq!(manager.display_name.as_deref(), Some("John Smith"));
     assert!(eu.validate().is_ok());
 

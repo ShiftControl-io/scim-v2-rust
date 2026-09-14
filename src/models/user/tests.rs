@@ -33,7 +33,7 @@ fn validate_context_enforces_direction_rules() {
     // ReplaceRequest tolerates id (RFC 7644 §3.5.1 ignores readOnly; its
     // PUT example carries one) and a password.
     let replace = User {
-        password: Some("s3cret".to_string()),
+        password: Asserted::set("s3cret".to_string()),
         ..with_id.clone()
     };
     assert!(replace.validate_as(Context::ReplaceRequest).is_ok());
@@ -320,17 +320,17 @@ fn user_deserialization_with_all_fields() {
         user.id,
         Some("2819c223-7f76-453a-919d-413861904646".to_string())
     );
-    assert_eq!(user.external_id, Some("701984".to_string()));
+    assert_eq!(user.external_id.as_deref(), Some("701984"));
     assert_eq!(user.user_name, "bjensen@example.com");
     assert_eq!(
-        user.name.as_ref().unwrap().formatted,
-        Some("Ms. Barbara J Jensen, III".to_string())
+        user.name.as_option().unwrap().formatted.as_deref(),
+        Some("Ms. Barbara J Jensen, III")
     );
-    assert_eq!(user.display_name, Some("Babs Jensen".to_string()));
-    assert_eq!(user.nick_name, Some("Babs".to_string()));
+    assert_eq!(user.display_name.as_deref(), Some("Babs Jensen"));
+    assert_eq!(user.nick_name.as_deref(), Some("Babs"));
     assert_eq!(
-        user.profile_url,
-        Some("https://login.example.com/bjensen".to_string())
+        user.profile_url.as_deref(),
+        Some("https://login.example.com/bjensen")
     );
     assert_eq!(user.emails.len(), 2);
     assert_eq!(
@@ -520,24 +520,24 @@ fn user_deserialization_with_enterprise_user_extension() {
     }
     assert!(user.is_ok());
     let user = user.unwrap();
-    let enterprise_user = user.enterprise_user.unwrap();
-    assert_eq!(enterprise_user.employee_number, Some("701984".to_string()));
-    assert_eq!(enterprise_user.cost_center, Some("4130".to_string()));
+    let enterprise_user = user.enterprise_user.as_option().unwrap();
+    assert_eq!(enterprise_user.employee_number.as_deref(), Some("701984"));
+    assert_eq!(enterprise_user.cost_center.as_deref(), Some("4130"));
     assert_eq!(
-        enterprise_user.organization,
-        Some("Universal Studios".to_string())
+        enterprise_user.organization.as_deref(),
+        Some("Universal Studios")
     );
-    assert_eq!(enterprise_user.division, Some("Theme Park".to_string()));
+    assert_eq!(enterprise_user.division.as_deref(), Some("Theme Park"));
     assert_eq!(
-        enterprise_user.department,
-        Some("Tour Operations".to_string())
+        enterprise_user.department.as_deref(),
+        Some("Tour Operations")
     );
-    let manager = enterprise_user.manager.unwrap();
+    let manager = enterprise_user.manager.as_option().unwrap();
     assert_eq!(
-        manager.value,
-        Some("26118915-6090-4610-87e4-49d8ca9f808d".to_string())
+        manager.value.as_deref(),
+        Some("26118915-6090-4610-87e4-49d8ca9f808d")
     );
-    assert_eq!(manager.display_name, Some("John Smith".to_string()));
+    assert_eq!(manager.display_name.as_deref(), Some("John Smith"));
 }
 
 #[test]
@@ -555,7 +555,7 @@ fn user_deserialization_without_enterprise_user_extension() {
     }
     assert!(user.is_ok());
     let user = user.unwrap();
-    assert!(user.enterprise_user.is_none());
+    assert!(!user.enterprise_user.is_set());
 }
 
 // Test data is from https://scimvalidator.microsoft.com/
@@ -582,7 +582,7 @@ fn deserialize_entra_user() {
 
     let user: User = serde_json::from_str(raw).expect("Entra payload must deserialize");
     assert_eq!(user.user_name, "isaias@bode.ca");
-    assert_eq!(user.active, Some(true));
+    assert_eq!(user.active.as_option(), Some(&true));
 
     // The stringified boolean, normalised.
     assert_eq!(user.roles.len(), 1);
@@ -598,10 +598,10 @@ fn deserialize_entra_user() {
     // The enterprise extension, from its URN key.
     let ext = user
         .enterprise_user
-        .as_ref()
+        .as_option()
         .expect("the extension must deserialize from its URN key");
     assert_eq!(ext.employee_number.as_deref(), Some("LLQMUPKSPYGA"));
-    assert!(ext.manager.is_some());
+    assert!(ext.manager.is_set());
 
     // Everything except that one normalisation does survive, which is the
     // round-trip claim narrowed to what is actually true here.
@@ -728,7 +728,7 @@ fn active_accepts_a_stringified_boolean() {
         (format!(r#"{{"schemas":["{urn}"],"userName":"a"}}"#), None),
     ] {
         let u: User = serde_json::from_str(&raw).unwrap_or_else(|e| panic!("{raw}: {e}"));
-        assert_eq!(u.active, want, "{raw}");
+        assert_eq!(u.active.as_option(), want.as_ref(), "{raw}");
     }
 }
 
@@ -931,7 +931,7 @@ mod rfc7644_samples {
         let user: User = serde_json::from_str(raw).expect("JumpCloud minimal PUT must parse");
         assert!(user.emails.is_empty());
         assert_eq!(user.user_name, "testuser@example.io");
-        assert_eq!(user.active, Some(true));
+        assert_eq!(user.active.as_option(), Some(&true));
 
         // The same `null` on the way back out. The client asked to clear
         // the values, and the crate writes back the form the client used
@@ -954,7 +954,7 @@ mod rfc7644_samples {
         assert_eq!(user.photos.len(), 1);
         let enterprise = user
             .enterprise_user
-            .as_ref()
+            .as_option()
             .expect("the enterprise extension must deserialize from its URN key");
         assert!(
             enterprise.validate().is_ok(),
@@ -991,7 +991,7 @@ mod rfc7644_samples {
         assert_eq!(user.user_name, "bjensen");
         assert_eq!(user.external_id.as_deref(), Some("bjensen"));
         assert_eq!(
-            user.name.as_ref().unwrap().family_name.as_deref(),
+            user.name.as_option().unwrap().family_name.as_deref(),
             Some("Jensen")
         );
     }
@@ -1036,7 +1036,7 @@ mod rfc7644_samples {
         let user: User = serde_json::from_str(raw).unwrap();
         assert!(user.roles.is_empty());
         assert_eq!(
-            user.name.as_ref().unwrap().middle_name.as_deref(),
+            user.name.as_option().unwrap().middle_name.as_deref(),
             Some("Jane")
         );
         assert_eq!(user.emails.len(), 2);
@@ -1069,9 +1069,9 @@ mod rfc7644_samples {
     #[test]
     fn name_omits_unset_formatted_on_serialize() {
         let name = Name {
-            formatted: None,
-            family_name: Some("Jensen".to_string()),
-            given_name: Some("Barbara".to_string()),
+            formatted: Asserted::absent(),
+            family_name: Asserted::set("Jensen".to_string()),
+            given_name: Asserted::set("Barbara".to_string()),
             ..Name::default()
         };
         let serialized = serde_json::to_string(&name).unwrap();
@@ -1085,7 +1085,7 @@ mod rfc7644_samples {
         );
 
         let full = Name {
-            formatted: Some("Ms. Barbara J Jensen III".to_string()),
+            formatted: Asserted::set("Ms. Barbara J Jensen III".to_string()),
             ..name
         };
         let round: Name = serde_json::from_str(&serde_json::to_string(&full).unwrap()).unwrap();
@@ -1102,11 +1102,11 @@ mod rfc7644_samples {
     fn name_explicit_null_deserializes_to_none() {
         let name: Name =
             serde_json::from_str(r#"{"formatted": null, "familyName": "Jensen"}"#).unwrap();
-        assert_eq!(name.formatted, None);
+        assert_eq!(name.formatted.as_deref(), None);
         assert_eq!(name.family_name.as_deref(), Some("Jensen"));
 
         let empty: Name = serde_json::from_str("{}").unwrap();
-        assert_eq!(empty.formatted, None);
+        assert_eq!(empty.formatted.as_deref(), None);
     }
 
     /// A fully-unset `Name` serializes to an empty object, not one padded
@@ -1171,8 +1171,8 @@ fn enterprise_extension_body_requires_its_urn() {
     use crate::utils::validation::{CreateRequest, Strict};
 
     let undeclared = User {
-        enterprise_user: Some(EnterpriseUser {
-            department: Some("Tour Operations".to_string()),
+        enterprise_user: Asserted::set(EnterpriseUser {
+            department: Asserted::set("Tour Operations".to_string()),
             ..Default::default()
         }),
         ..base_user()

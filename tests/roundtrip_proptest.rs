@@ -24,6 +24,13 @@ use scim_v2::{Asserted, ScimDateTime};
 fn opt_str() -> impl Strategy<Value = Option<String>> {
     proptest::option::of("[a-zA-Z0-9 @._-]{0,24}")
 }
+/// A string attribute across all three `Asserted` states.
+fn ast_str() -> impl Strategy<Value = Asserted<String>> {
+    asserted("[a-zA-Z0-9 @._-]{0,24}".prop_map(String::from))
+}
+fn ast_bool() -> impl Strategy<Value = Asserted<bool>> {
+    asserted(any::<bool>())
+}
 // `meta` timestamps are `ScimDateTime`, so the generator builds them from
 // their parts rather than from arbitrary text: an invalid one is
 // unconstructable, and a round-trip can only be checked on values that exist.
@@ -99,8 +106,8 @@ prop_compose! {
     }
 }
 prop_compose! {
-    fn name()(formatted in opt_str(), family_name in opt_str(), given_name in opt_str(),
-              middle_name in opt_str(), honorific_prefix in opt_str(), honorific_suffix in opt_str()) -> Name {
+    fn name()(formatted in ast_str(), family_name in ast_str(), given_name in ast_str(),
+              middle_name in ast_str(), honorific_prefix in ast_str(), honorific_suffix in ast_str()) -> Name {
         Name { formatted, family_name, given_name, middle_name, honorific_prefix, honorific_suffix }
     }
 }
@@ -112,14 +119,14 @@ prop_compose! {
     }
 }
 prop_compose! {
-    fn manager()(value in opt_str(), r in opt_str(), display_name in opt_str()) -> Manager {
+    fn manager()(value in ast_str(), r in ast_str(), display_name in opt_str()) -> Manager {
         Manager { value, r#ref: r, display_name }
     }
 }
 prop_compose! {
-    fn enterprise()(employee_number in opt_str(), cost_center in opt_str(), organization in opt_str(),
-                    division in opt_str(), department in opt_str(),
-                    manager in proptest::option::of(manager())) -> EnterpriseUser {
+    fn enterprise()(employee_number in ast_str(), cost_center in ast_str(), organization in ast_str(),
+                    division in ast_str(), department in ast_str(),
+                    manager in asserted(manager())) -> EnterpriseUser {
         EnterpriseUser { employee_number, cost_center, organization, division, department, manager }
     }
 }
@@ -140,10 +147,10 @@ where
 }
 
 prop_compose! {
-    fn user()(id in opt_str(), external_id in opt_str(), user_name in "[a-z][a-z0-9.@-]{0,20}",
-              name in proptest::option::of(name()), display_name in opt_str(), nick_name in opt_str(),
-              title in opt_str(), user_type in opt_str(), preferred_language in opt_str(),
-              locale in opt_str(), timezone in opt_str(), active in opt_bool(), password in opt_str(),
+    fn user()(id in opt_str(), external_id in ast_str(), user_name in "[a-z][a-z0-9.@-]{0,20}",
+              name in asserted(name()), display_name in ast_str(), nick_name in ast_str(),
+              title in ast_str(), user_type in ast_str(), preferred_language in ast_str(),
+              locale in ast_str(), timezone in ast_str(), active in ast_bool(), password in ast_str(),
               emails in asserted(proptest::collection::vec(email(), 0..3)),
               phone_numbers in asserted(proptest::collection::vec(phone(), 0..3)),
               addresses in asserted(proptest::collection::vec(address(), 0..2)),
@@ -154,7 +161,7 @@ prop_compose! {
               entitlements in asserted(proptest::collection::vec(entitlement(), 0..2)),
               x509_certificates in asserted(proptest::collection::vec(cert(), 0..2)),
               meta in proptest::option::of(meta()),
-              enterprise_user in proptest::option::of(enterprise())) -> User<String> {
+              enterprise_user in asserted(enterprise())) -> User<String> {
         User {
             schemas: vec![schema_urns::USER.to_string()],
             id, external_id, user_name, name, display_name, nick_name, title, user_type,
@@ -175,7 +182,7 @@ prop_compose! {
     }
 }
 prop_compose! {
-    fn group()(id in opt_str(), external_id in opt_str(), display_name in "[A-Za-z ]{1,20}",
+    fn group()(id in opt_str(), external_id in ast_str(), display_name in "[A-Za-z ]{1,20}",
                members in asserted(proptest::collection::vec(member(), 0..4)),
                meta in proptest::option::of(meta())) -> Group<String> {
         Group { schemas: vec![schema_urns::GROUP.to_string()], id, external_id, display_name, members, meta }

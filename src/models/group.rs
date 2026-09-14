@@ -8,16 +8,26 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 pub struct Group<T = String> {
     pub schemas: Vec<String>,
+    /// Not an `Asserted`: RFC 7643 §3.1 gives `id` "a mutability of
+    /// "readOnly"", and its value "MUST NOT be specified by the client", so
+    /// RFC 7644 §3.5.1's readOnly rule applies: "Any values provided SHALL be
+    /// ignored." A client cannot assert it, so there is nothing to preserve.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<T>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub external_id: Option<String>,
+    #[serde(
+        default = "Asserted::absent",
+        skip_serializing_if = "Asserted::is_absent"
+    )]
+    pub external_id: Asserted<String>,
     pub display_name: String,
     #[serde(
         default = "Asserted::absent",
         skip_serializing_if = "Asserted::is_absent"
     )]
     pub members: Asserted<Vec<Member<T>>>,
+    /// Not an `Asserted`: every `meta` sub-attribute is readOnly (RFC 7643
+    /// §3.1), and RFC 7644 §3.5.1 says of readOnly, "Any values provided
+    /// SHALL be ignored."
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
 }
@@ -107,6 +117,11 @@ impl From<MemberType> for String {
     }
 }
 
+/// The sub-attributes here stay plain `Option`s. An element of a multi-valued
+/// attribute is replaced with its parent array rather than patched in place,
+/// so an absent sub-attribute and a `null` one are the same unassigned state
+/// under RFC 7643 §2.5, and RFC 7644 §3.5.1 has no separate instruction to
+/// preserve.
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 pub struct Member<T = String> {
     #[serde(skip_serializing_if = "Option::is_none")]

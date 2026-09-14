@@ -1,22 +1,43 @@
 use crate::utils::validation::{Validate, ValidationError};
 use serde::{Deserialize, Serialize};
 
+use crate::asserted::Asserted;
 use crate::utils::error::SCIMError;
 
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 pub struct EnterpriseUser {
-    #[serde(rename = "employeeNumber", skip_serializing_if = "Option::is_none")]
-    pub employee_number: Option<String>,
-    #[serde(rename = "costCenter", skip_serializing_if = "Option::is_none")]
-    pub cost_center: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub organization: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub division: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub department: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub manager: Option<Manager>,
+    #[serde(
+        rename = "employeeNumber",
+        default = "Asserted::absent",
+        skip_serializing_if = "Asserted::is_absent"
+    )]
+    pub employee_number: Asserted<String>,
+    #[serde(
+        rename = "costCenter",
+        default = "Asserted::absent",
+        skip_serializing_if = "Asserted::is_absent"
+    )]
+    pub cost_center: Asserted<String>,
+    #[serde(
+        default = "Asserted::absent",
+        skip_serializing_if = "Asserted::is_absent"
+    )]
+    pub organization: Asserted<String>,
+    #[serde(
+        default = "Asserted::absent",
+        skip_serializing_if = "Asserted::is_absent"
+    )]
+    pub division: Asserted<String>,
+    #[serde(
+        default = "Asserted::absent",
+        skip_serializing_if = "Asserted::is_absent"
+    )]
+    pub department: Asserted<String>,
+    #[serde(
+        default = "Asserted::absent",
+        skip_serializing_if = "Asserted::is_absent"
+    )]
+    pub manager: Asserted<Manager>,
 }
 
 /// Converts a JSON string into an `EnterpriseUser` struct.
@@ -73,10 +94,19 @@ impl TryFrom<&str> for EnterpriseUser {
 /// SHALL ignore it.
 #[derive(Default, Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct Manager {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub value: Option<String>,
-    #[serde(rename = "$ref", skip_serializing_if = "Option::is_none")]
-    pub r#ref: Option<String>,
+    #[serde(
+        default = "Asserted::absent",
+        skip_serializing_if = "Asserted::is_absent"
+    )]
+    pub value: Asserted<String>,
+    #[serde(
+        rename = "$ref",
+        default = "Asserted::absent",
+        skip_serializing_if = "Asserted::is_absent"
+    )]
+    pub r#ref: Asserted<String>,
+    /// Not an `Asserted`: `manager.displayName` is readOnly, and RFC 7644
+    /// §3.5.1 says of readOnly, "Any values provided SHALL be ignored."
     #[serde(rename = "displayName", skip_serializing_if = "Option::is_none")]
     pub display_name: Option<String>,
 }

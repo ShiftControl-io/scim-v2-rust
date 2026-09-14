@@ -45,8 +45,15 @@ fn the_wire_forms_land_in_the_three_states() {
 
     assert!(wire(json!({})).roles.is_absent());
     assert!(wire(json!({"roles": null})).roles.is_nulled());
-    assert!(wire(json!({"roles": []})).roles.is_asserted());
     assert_eq!(wire(json!({"roles": ["a"]})).roles.len(), 1);
+
+    // An empty array is `Set` with no values, never `Nulled`. Both ask the
+    // server to clear, and the two spellings stay apart so a message goes
+    // back out in the form it arrived in.
+    let empty = wire(json!({"roles": []})).roles;
+    assert!(empty.is_asserted());
+    assert!(!empty.is_nulled(), "`[]` is not a null");
+    assert!(matches!(empty, Asserted::Set(_)));
 }
 
 #[test]

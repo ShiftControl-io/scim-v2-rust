@@ -44,7 +44,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 ///
 /// Three states, which are the three things a client can say under RFC 7644
 /// §3.5.1: [`Absent`](Self::Absent) for a member that was not there,
-/// [`Nulled`](Self::Nulled) for a `null` or an `[]`, and
+/// [`Nulled`](Self::Nulled) for a literal `null`, and
 /// [`Set`](Self::Set) for a value.
 ///
 /// Put it on a field with the same two attributes every time, whatever the
@@ -90,8 +90,14 @@ pub enum Asserted<T> {
     /// The member was not on the wire. RFC 7644 §3.5.1: "not asserted by the
     /// client".
     Absent,
-    /// The member was `null`, or `[]` for a multi-valued attribute. RFC 7644
-    /// §3.5.1: the client asked "to clear all values".
+    /// The member was a literal `null`, whatever the attribute holds.
+    ///
+    /// An `[]` on a multi-valued attribute is [`Set`](Self::Set) with no
+    /// values, not this. Both ask the server "to clear all values" under RFC
+    /// 7644 §3.5.1, and keeping them apart is what lets a message go back out
+    /// in the form it arrived in. Ask
+    /// [`clears_values`](Asserted::clears_values) for the instruction, and
+    /// this for the spelling.
     Nulled,
     /// The member carried a value.
     Set(T),
@@ -126,6 +132,11 @@ impl<T> Asserted<T> {
     /// `skip_serializing_if`.
     pub const fn is_absent(&self) -> bool {
         matches!(self, Self::Absent)
+    }
+
+    /// Whether the member carried a value.
+    pub const fn is_set(&self) -> bool {
+        matches!(self, Self::Set(_))
     }
 
     /// Whether the member arrived as `null`.
@@ -171,6 +182,14 @@ impl<T> Asserted<T> {
             Self::Nulled => Asserted::Nulled,
             Self::Absent => Asserted::Absent,
         }
+    }
+}
+
+impl<T: std::ops::Deref> Asserted<T> {
+    /// The value behind its own deref, if the client sent one. `Asserted<String>`
+    /// gives `Option<&str>`.
+    pub fn as_deref(&self) -> Option<&T::Target> {
+        self.as_option().map(std::ops::Deref::deref)
     }
 }
 

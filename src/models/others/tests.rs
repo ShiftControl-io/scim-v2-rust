@@ -1368,7 +1368,7 @@ mod resource_dispatch {
         let g: Group = Group {
             schemas: vec![schema_urns::GROUP.to_string()],
             id: Some("g-1".to_string()),
-            external_id: None,
+            external_id: Asserted::absent(),
             display_name: "Admins".to_string(),
             members: Asserted::absent(),
             meta: None,

@@ -96,7 +96,7 @@
 //!
 //! let page: ListResponse<User<String>> = serde_json::from_str(page)?;
 //! page.validate()?;
-//! assert_eq!(page.resources[0].active, Some(true));
+//! assert_eq!(page.resources[0].active.as_option(), Some(&true));
 //! # }
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```

@@ -12,41 +12,78 @@ use serde::{Deserialize, Serialize};
 pub struct User<T = String> {
     // urn:ietf:params:scim:schemas:core:2.0:User
     pub schemas: Vec<String>,
+    /// Not an `Asserted`: RFC 7643 §3.1 gives `id` "a mutability of
+    /// "readOnly"", and its value "MUST NOT be specified by the client", so
+    /// RFC 7644 §3.5.1's readOnly rule applies: "Any values provided SHALL be
+    /// ignored." A client cannot assert it, so there is nothing to preserve.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<T>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub external_id: Option<String>,
+    #[serde(
+        default = "Asserted::absent",
+        skip_serializing_if = "Asserted::is_absent"
+    )]
+    pub external_id: Asserted<String>,
     pub user_name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<Name>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub display_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub nick_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub profile_url: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub user_type: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub preferred_language: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub locale: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub timezone: Option<String>,
+    #[serde(
+        default = "Asserted::absent",
+        skip_serializing_if = "Asserted::is_absent"
+    )]
+    pub name: Asserted<Name>,
+    #[serde(
+        default = "Asserted::absent",
+        skip_serializing_if = "Asserted::is_absent"
+    )]
+    pub display_name: Asserted<String>,
+    #[serde(
+        default = "Asserted::absent",
+        skip_serializing_if = "Asserted::is_absent"
+    )]
+    pub nick_name: Asserted<String>,
+    #[serde(
+        default = "Asserted::absent",
+        skip_serializing_if = "Asserted::is_absent"
+    )]
+    pub profile_url: Asserted<String>,
+    #[serde(
+        default = "Asserted::absent",
+        skip_serializing_if = "Asserted::is_absent"
+    )]
+    pub title: Asserted<String>,
+    #[serde(
+        default = "Asserted::absent",
+        skip_serializing_if = "Asserted::is_absent"
+    )]
+    pub user_type: Asserted<String>,
+    #[serde(
+        default = "Asserted::absent",
+        skip_serializing_if = "Asserted::is_absent"
+    )]
+    pub preferred_language: Asserted<String>,
+    #[serde(
+        default = "Asserted::absent",
+        skip_serializing_if = "Asserted::is_absent"
+    )]
+    pub locale: Asserted<String>,
+    #[serde(
+        default = "Asserted::absent",
+        skip_serializing_if = "Asserted::is_absent"
+    )]
+    pub timezone: Asserted<String>,
     /// This field is lenient for the same reason every `primary` field is
     /// lenient. A provider may stringify a boolean value, for example
     /// sending `active` as `"True"`. This crate accepts that spelling
     /// instead of rejecting the whole `User`.
     #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_optional_lenient_bool"
+        default = "Asserted::absent",
+        deserialize_with = "crate::utils::serde::deserialize_asserted_lenient_bool",
+        skip_serializing_if = "Asserted::is_absent"
     )]
-    pub active: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub password: Option<String>,
+    pub active: Asserted<bool>,
+    #[serde(
+        default = "Asserted::absent",
+        skip_serializing_if = "Asserted::is_absent"
+    )]
+    pub password: Asserted<String>,
     #[serde(
         default = "Asserted::absent",
         skip_serializing_if = "Asserted::is_absent"
@@ -92,13 +129,17 @@ pub struct User<T = String> {
         skip_serializing_if = "Asserted::is_absent"
     )]
     pub x509_certificates: Asserted<Vec<X509Certificate>>,
+    /// Not an `Asserted`: every `meta` sub-attribute is readOnly (RFC 7643
+    /// §3.1), and RFC 7644 §3.5.1 says of readOnly, "Any values provided
+    /// SHALL be ignored."
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
     #[serde(
         rename = "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User",
-        skip_serializing_if = "Option::is_none"
+        default = "Asserted::absent",
+        skip_serializing_if = "Asserted::is_absent"
     )]
-    pub enterprise_user: Option<EnterpriseUser>,
+    pub enterprise_user: Asserted<EnterpriseUser>,
 }
 
 impl<T> Default for User<T> {
@@ -107,18 +148,18 @@ impl<T> Default for User<T> {
             schemas: vec![crate::schema_urns::USER.to_string()],
             user_name: "".to_string(),
             id: None,
-            external_id: None,
-            name: None,
-            display_name: None,
-            nick_name: None,
-            profile_url: None,
-            title: None,
-            user_type: None,
-            preferred_language: None,
-            locale: None,
-            timezone: None,
-            active: None,
-            password: None,
+            external_id: Asserted::absent(),
+            name: Asserted::absent(),
+            display_name: Asserted::absent(),
+            nick_name: Asserted::absent(),
+            profile_url: Asserted::absent(),
+            title: Asserted::absent(),
+            user_type: Asserted::absent(),
+            preferred_language: Asserted::absent(),
+            locale: Asserted::absent(),
+            timezone: Asserted::absent(),
+            active: Asserted::absent(),
+            password: Asserted::absent(),
             emails: Asserted::absent(),
             addresses: Asserted::absent(),
             phone_numbers: Asserted::absent(),
@@ -129,7 +170,7 @@ impl<T> Default for User<T> {
             roles: Asserted::absent(),
             x509_certificates: Asserted::absent(),
             meta: None,
-            enterprise_user: None,
+            enterprise_user: Asserted::absent(),
         }
     }
 }
@@ -151,20 +192,43 @@ impl<T> Default for User<T> {
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Name {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub formatted: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub family_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub given_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub middle_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub honorific_prefix: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub honorific_suffix: Option<String>,
+    #[serde(
+        default = "Asserted::absent",
+        skip_serializing_if = "Asserted::is_absent"
+    )]
+    pub formatted: Asserted<String>,
+    #[serde(
+        default = "Asserted::absent",
+        skip_serializing_if = "Asserted::is_absent"
+    )]
+    pub family_name: Asserted<String>,
+    #[serde(
+        default = "Asserted::absent",
+        skip_serializing_if = "Asserted::is_absent"
+    )]
+    pub given_name: Asserted<String>,
+    #[serde(
+        default = "Asserted::absent",
+        skip_serializing_if = "Asserted::is_absent"
+    )]
+    pub middle_name: Asserted<String>,
+    #[serde(
+        default = "Asserted::absent",
+        skip_serializing_if = "Asserted::is_absent"
+    )]
+    pub honorific_prefix: Asserted<String>,
+    #[serde(
+        default = "Asserted::absent",
+        skip_serializing_if = "Asserted::is_absent"
+    )]
+    pub honorific_suffix: Asserted<String>,
 }
 
+/// The sub-attributes here stay plain `Option`s. An element of a multi-valued
+/// attribute is replaced with its parent array rather than patched in place,
+/// so an absent sub-attribute and a `null` one are the same unassigned state
+/// under RFC 7643 §2.5, and RFC 7644 §3.5.1 has no separate instruction to
+/// preserve.
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 pub struct Email {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -181,6 +245,11 @@ pub struct Email {
     pub primary: Option<bool>,
 }
 
+/// The sub-attributes here stay plain `Option`s. An element of a multi-valued
+/// attribute is replaced with its parent array rather than patched in place,
+/// so an absent sub-attribute and a `null` one are the same unassigned state
+/// under RFC 7643 §2.5, and RFC 7644 §3.5.1 has no separate instruction to
+/// preserve.
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Address {
@@ -219,6 +288,11 @@ pub struct Address {
     pub primary: Option<bool>,
 }
 
+/// The sub-attributes here stay plain `Option`s. An element of a multi-valued
+/// attribute is replaced with its parent array rather than patched in place,
+/// so an absent sub-attribute and a `null` one are the same unassigned state
+/// under RFC 7643 §2.5, and RFC 7644 §3.5.1 has no separate instruction to
+/// preserve.
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 pub struct PhoneNumber {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -235,6 +309,11 @@ pub struct PhoneNumber {
     pub primary: Option<bool>,
 }
 
+/// The sub-attributes here stay plain `Option`s. An element of a multi-valued
+/// attribute is replaced with its parent array rather than patched in place,
+/// so an absent sub-attribute and a `null` one are the same unassigned state
+/// under RFC 7643 §2.5, and RFC 7644 §3.5.1 has no separate instruction to
+/// preserve.
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 pub struct Im {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -251,6 +330,11 @@ pub struct Im {
     pub primary: Option<bool>,
 }
 
+/// The sub-attributes here stay plain `Option`s. An element of a multi-valued
+/// attribute is replaced with its parent array rather than patched in place,
+/// so an absent sub-attribute and a `null` one are the same unassigned state
+/// under RFC 7643 §2.5, and RFC 7644 §3.5.1 has no separate instruction to
+/// preserve.
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 pub struct Photo {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -267,6 +351,11 @@ pub struct Photo {
     pub primary: Option<bool>,
 }
 
+/// The sub-attributes here stay plain `Option`s. An element of a multi-valued
+/// attribute is replaced with its parent array rather than patched in place,
+/// so an absent sub-attribute and a `null` one are the same unassigned state
+/// under RFC 7643 §2.5, and RFC 7644 §3.5.1 has no separate instruction to
+/// preserve.
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 pub struct Group {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -279,6 +368,11 @@ pub struct Group {
     pub r#type: Option<String>,
 }
 
+/// The sub-attributes here stay plain `Option`s. An element of a multi-valued
+/// attribute is replaced with its parent array rather than patched in place,
+/// so an absent sub-attribute and a `null` one are the same unassigned state
+/// under RFC 7643 §2.5, and RFC 7644 §3.5.1 has no separate instruction to
+/// preserve.
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 pub struct Entitlement {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -295,6 +389,11 @@ pub struct Entitlement {
     pub primary: Option<bool>,
 }
 
+/// The sub-attributes here stay plain `Option`s. An element of a multi-valued
+/// attribute is replaced with its parent array rather than patched in place,
+/// so an absent sub-attribute and a `null` one are the same unassigned state
+/// under RFC 7643 §2.5, and RFC 7644 §3.5.1 has no separate instruction to
+/// preserve.
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 pub struct Role {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -311,6 +410,11 @@ pub struct Role {
     pub primary: Option<bool>,
 }
 
+/// The sub-attributes here stay plain `Option`s. An element of a multi-valued
+/// attribute is replaced with its parent array rather than patched in place,
+/// so an absent sub-attribute and a `null` one are the same unassigned state
+/// under RFC 7643 §2.5, and RFC 7644 §3.5.1 has no separate instruction to
+/// preserve.
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 pub struct X509Certificate {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -345,7 +449,7 @@ impl<T: std::fmt::Display> Validate for User<T> {
         if self.user_name.is_empty() {
             return Err(ValidationError::missing_required("userName"));
         }
-        if self.enterprise_user.is_some()
+        if self.enterprise_user.is_set()
             && !self
                 .schemas
                 .iter()
@@ -395,7 +499,7 @@ impl<T: std::fmt::Display> Validate for User<T> {
                 if self.id.as_ref().is_none_or(|id| id.to_string().is_empty()) {
                     return Err(ValidationError::missing_required("id"));
                 }
-                if self.password.is_some() {
+                if self.password.is_asserted() {
                     return Err(ValidationError::invalid_value(
                         "password",
                         "is returned: never and MUST NOT appear in a response (RFC 7643 §4.1)",

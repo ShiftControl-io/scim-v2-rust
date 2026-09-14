@@ -53,6 +53,22 @@ where
     Ok(Option::<Vec<T>>::deserialize(deserializer)?.unwrap_or_default())
 }
 
+/// Deserializes a lenient boolean into an [`Asserted`](crate::Asserted).
+///
+/// A `null` gives `Nulled` and a value gives `Set`. An absent member never
+/// reaches here, so pair this with `default = "Asserted::absent"`.
+pub(crate) fn deserialize_asserted_lenient_bool<'de, D>(
+    deserializer: D,
+) -> Result<crate::Asserted<bool>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(match deserialize_optional_lenient_bool(deserializer)? {
+        Some(value) => crate::Asserted::Set(value),
+        None => crate::Asserted::Nulled,
+    })
+}
+
 /// Deserializes a boolean value from a JSON boolean, a string that
 /// represents a boolean, or a JSON null.
 ///
