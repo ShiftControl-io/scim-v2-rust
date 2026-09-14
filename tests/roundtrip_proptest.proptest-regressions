@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 795a3b295441c5ce87a225950e8814b20240f9c0b9422b2ec5163f41bb42592c # shrinks to users = [User { schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"], id: None, external_id: None, user_name: "a", name: None, display_name: None, nick_name: None, profile_url: None, title: None, user_type: None, preferred_language: None, locale: None, timezone: None, active: None, password: None, emails: [], addresses: [], phone_numbers: [], ims: [], photos: [], groups: [], entitlements: [], roles: [], x509_certificates: [], meta: None, enterprise_user: None }], upper = true

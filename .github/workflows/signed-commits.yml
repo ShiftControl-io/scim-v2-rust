@@ -1,0 +1,85 @@
+name: Signed commits required
+
+# Lifted from ShiftControl-io/skills, then extended: the upstream version
+# reports GitHub's `verification.reason` code verbatim, which is accurate but
+# not actionable. Every reason below has a different fix, and contributors to
+# this repo have hit at least two of them — PRs #40 and #44 both needed a
+# "signed re-push", and #48's author was verified-by-email-mismatch and then
+# by signature type. So the failure message names the specific remedy.
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  verify:
+    name: Verify every commit is signed
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check signatures
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          fail=0
+          summary=""
+
+          commits="$(gh api "repos/$REPO/pulls/$PR/commits" --paginate --jq '.[].sha')"
+          for sha in $commits; do
+            # Capture in an assignment, not a process substitution: `set -e`
+            # cannot see a failure inside `< <( ... )`, so a rate limit or a
+            # transient 5xx killed the loop mid-way and reported it as an
+            # unsigned commit with an empty summary.
+            if ! resp="$(gh api "repos/$REPO/commits/$sha" \
+                  --jq '[.commit.verification.verified, .commit.verification.reason] | @tsv')"; then
+              echo "::error::could not read signature verification for $sha (API failure, not a signature problem)"
+              exit 1
+            fi
+            read -r verified reason <<<"$resp"
+            short="${sha:0:8}"
+
+            if [ "$verified" = "true" ]; then
+              echo "  ok      $short"
+              continue
+            fi
+
+            fail=1
+            case "$reason" in
+              unsigned)
+                fix="This commit carries no signature. Enable signing, then re-push: git config --global gpg.format ssh && git config --global user.signingkey ~/.ssh/id_ed25519.pub && git config --global commit.gpgsign true, then sign the existing history with: git rebase --exec 'git commit --amend --no-edit -S' origin/main" ;;
+              unverified_email|bad_email)
+                fix="The signature is valid but the commit's author email is not a verified email on the signing account. Add that address under GitHub Settings -> Emails, or set git config user.email to an address already verified there, then re-push." ;;
+              unknown_signature_type)
+                fix="GitHub does not accept this signature type for verification. X.509/S-MIME needs an uploaded certificate; SSH and GPG are the reliable options. Re-sign with SSH or GPG." ;;
+              unknown_key|not_signing_key)
+                fix="The key that signed this commit is not registered as a *Signing Key* on the account. Add the public key under GitHub Settings -> SSH and GPG keys, choosing the 'Signing Key' type rather than 'Authentication Key'." ;;
+              expired_key)
+                fix="The signing key has expired. Extend or replace it, upload the new public key as a Signing Key, and re-sign the history." ;;
+              *)
+                fix="GitHub reported reason '$reason'. See CONTRIBUTING.md for signing setup." ;;
+            esac
+
+            echo "::error::Commit $short is not verified (reason: $reason). $fix"
+            summary="$summary"$'\n'"- \`$short\` — **$reason**: $fix"
+          done
+
+          if [ "$fail" -ne 0 ]; then
+            {
+              echo "## Unverified commits"
+              echo
+              echo "GitHub could not verify the signature on the commits below."
+              echo "$summary"
+              echo
+              echo "After fixing, force-push the branch: \`git push --force-with-lease\`."
+              echo
+              echo "Full setup instructions: [CONTRIBUTING.md](../blob/main/CONTRIBUTING.md#commit-signing--required)"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          exit $fail
