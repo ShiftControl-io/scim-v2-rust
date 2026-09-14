@@ -1,6 +1,6 @@
+use crate::asserted::Asserted;
 use crate::models::enterprise_user::EnterpriseUser;
 use crate::models::scim_schema::Meta;
-use crate::multi::Multi;
 use crate::utils::serde::deserialize_optional_lenient_bool;
 use crate::utils::validation::{
     Context, Validate, ValidationError, at_most_one_primary, require_schema_urn,
@@ -47,24 +47,51 @@ pub struct User<T = String> {
     pub active: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub password: Option<String>,
-    #[serde(default = "Multi::absent", skip_serializing_if = "Multi::is_absent")]
-    pub emails: Multi<Email>,
-    #[serde(default = "Multi::absent", skip_serializing_if = "Multi::is_absent")]
-    pub addresses: Multi<Address>,
-    #[serde(default = "Multi::absent", skip_serializing_if = "Multi::is_absent")]
-    pub phone_numbers: Multi<PhoneNumber>,
-    #[serde(default = "Multi::absent", skip_serializing_if = "Multi::is_absent")]
-    pub ims: Multi<Im>,
-    #[serde(default = "Multi::absent", skip_serializing_if = "Multi::is_absent")]
-    pub photos: Multi<Photo>,
-    #[serde(default = "Multi::absent", skip_serializing_if = "Multi::is_absent")]
-    pub groups: Multi<Group>,
-    #[serde(default = "Multi::absent", skip_serializing_if = "Multi::is_absent")]
-    pub entitlements: Multi<Entitlement>,
-    #[serde(default = "Multi::absent", skip_serializing_if = "Multi::is_absent")]
-    pub roles: Multi<Role>,
-    #[serde(default = "Multi::absent", skip_serializing_if = "Multi::is_absent")]
-    pub x509_certificates: Multi<X509Certificate>,
+    #[serde(
+        default = "Asserted::absent",
+        skip_serializing_if = "Asserted::is_absent"
+    )]
+    pub emails: Asserted<Vec<Email>>,
+    #[serde(
+        default = "Asserted::absent",
+        skip_serializing_if = "Asserted::is_absent"
+    )]
+    pub addresses: Asserted<Vec<Address>>,
+    #[serde(
+        default = "Asserted::absent",
+        skip_serializing_if = "Asserted::is_absent"
+    )]
+    pub phone_numbers: Asserted<Vec<PhoneNumber>>,
+    #[serde(
+        default = "Asserted::absent",
+        skip_serializing_if = "Asserted::is_absent"
+    )]
+    pub ims: Asserted<Vec<Im>>,
+    #[serde(
+        default = "Asserted::absent",
+        skip_serializing_if = "Asserted::is_absent"
+    )]
+    pub photos: Asserted<Vec<Photo>>,
+    #[serde(
+        default = "Asserted::absent",
+        skip_serializing_if = "Asserted::is_absent"
+    )]
+    pub groups: Asserted<Vec<Group>>,
+    #[serde(
+        default = "Asserted::absent",
+        skip_serializing_if = "Asserted::is_absent"
+    )]
+    pub entitlements: Asserted<Vec<Entitlement>>,
+    #[serde(
+        default = "Asserted::absent",
+        skip_serializing_if = "Asserted::is_absent"
+    )]
+    pub roles: Asserted<Vec<Role>>,
+    #[serde(
+        default = "Asserted::absent",
+        skip_serializing_if = "Asserted::is_absent"
+    )]
+    pub x509_certificates: Asserted<Vec<X509Certificate>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
     #[serde(
@@ -92,15 +119,15 @@ impl<T> Default for User<T> {
             timezone: None,
             active: None,
             password: None,
-            emails: Multi::absent(),
-            addresses: Multi::absent(),
-            phone_numbers: Multi::absent(),
-            ims: Multi::absent(),
-            photos: Multi::absent(),
-            groups: Multi::absent(),
-            entitlements: Multi::absent(),
-            roles: Multi::absent(),
-            x509_certificates: Multi::absent(),
+            emails: Asserted::absent(),
+            addresses: Asserted::absent(),
+            phone_numbers: Asserted::absent(),
+            ims: Asserted::absent(),
+            photos: Asserted::absent(),
+            groups: Asserted::absent(),
+            entitlements: Asserted::absent(),
+            roles: Asserted::absent(),
+            x509_certificates: Asserted::absent(),
             meta: None,
             enterprise_user: None,
         }

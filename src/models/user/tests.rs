@@ -643,7 +643,7 @@ fn validate_rejects_a_second_primary() {
     let two = User::<String> {
         schemas: vec![crate::schema_urns::USER.to_string()],
         user_name: "bjensen".to_string(),
-        emails: Multi::from(vec![
+        emails: Asserted::set(vec![
             Email {
                 value: Some("a@example.com".to_string()),
                 primary: Some(true),
@@ -661,7 +661,7 @@ fn validate_rejects_a_second_primary() {
     assert_eq!(err.path(), "emails");
 
     let one = User::<String> {
-        emails: Multi::from(vec![
+        emails: Asserted::set(vec![
             Email {
                 value: Some("a@example.com".to_string()),
                 primary: Some(true),
@@ -825,7 +825,7 @@ fn multi_valued_attributes_treat_absent_null_and_empty_alike() {
 /// for a single-valued attribute, or an empty array "[]" for a multi-valued
 /// attribute, to clear all values".
 ///
-/// `Multi<T>` keeps the two apart. An attribute nobody assigned stays off
+/// `Asserted<Vec<T>>` keeps the two apart. An attribute nobody assigned stays off
 /// the wire, and a cleared one reaches the wire as `[]`.
 #[test]
 fn an_unassigned_multi_valued_attribute_stays_off_the_wire() {
@@ -856,16 +856,17 @@ fn an_unassigned_multi_valued_attribute_stays_off_the_wire() {
     assert!(!json.to_string().contains("null"));
 }
 
-/// The RFC 7644 §3.5.1 clear-all idiom, end to end: a client that empties a
-/// multi-valued attribute produces a body carrying `[]` for it, which is
-/// the form the RFC says clears existing values on the server.
+/// The RFC 7644 §3.5.1 clear-all idiom, end to end, in both of the forms the
+/// RFC names. `clear()` writes the `[]` the RFC names for a multi-valued
+/// attribute. `Asserted::Nulled` writes the `null` that a body carrying
+/// `null` reads back as. Both ask the server to clear all values.
 #[test]
-fn a_cleared_attribute_reaches_the_wire_as_an_empty_array() {
-    let user = User::<String> {
+fn a_nulled_attribute_reaches_the_wire_in_either_named_form() {
+    let mut user = User::<String> {
         schemas: vec![crate::schema_urns::USER.to_string()],
         user_name: "bjensen".to_string(),
-        roles: Multi::cleared(),
-        emails: Multi::from(vec![Email {
+        roles: Asserted::nulled(),
+        emails: Asserted::set(vec![Email {
             value: Some("bjensen@example.com".to_string()),
             ..Default::default()
         }]),
@@ -874,8 +875,16 @@ fn a_cleared_attribute_reaches_the_wire_as_an_empty_array() {
     let json = serde_json::to_value(&user).unwrap();
     assert_eq!(
         json["roles"],
+        serde_json::Value::Null,
+        "Asserted::Nulled writes null"
+    );
+
+    user.roles = Asserted::set(Vec::new());
+    let json = serde_json::to_value(&user).unwrap();
+    assert_eq!(
+        json["roles"],
         serde_json::json!([]),
-        "cleared roles must be []"
+        "clear() writes the [] §3.5.1 names for a multi-valued attribute"
     );
     assert_eq!(
         json["emails"].as_array().unwrap().len(),
@@ -908,7 +917,7 @@ mod rfc7644_samples {
 
     /// JumpCloud sends `"emails": null` on a minimal PUT. RFC 7643 §2.5
     /// makes that equivalent to unassigned, and this is the payload that
-    /// makes `Multi<T>`'s own `Deserialize` load-bearing rather than
+    /// makes `Asserted<Vec<T>>`'s own `Deserialize` load-bearing rather than
     /// theoretical: with `#[serde(default)]` alone, modelling `emails` as
     /// `Vec<Email>` would reject this real provider response outright.
     #[test]
@@ -924,11 +933,11 @@ mod rfc7644_samples {
         assert_eq!(user.user_name, "testuser@example.io");
         assert_eq!(user.active, Some(true));
 
-        // `[]` on the way back out, never `null` and never omitted:
-        // §2.5 makes the state equivalent, and `[]` keeps a §3.5.1
-        // clear-all expressible.
+        // The same `null` on the way back out. The client asked to clear
+        // the values, and the crate writes back the form the client used
+        // rather than substituting the other §3.5.1 spelling.
         let back = serde_json::to_value(&user).unwrap();
-        assert_eq!(back["emails"], serde_json::json!([]));
+        assert_eq!(back["emails"], serde_json::Value::Null);
     }
 
     /// The full JumpCloud PUT carries empty arrays for `phoneNumbers` and

@@ -18,9 +18,9 @@
 //! the RFCs never describe. This crate decides those cases instead of passing
 //! the problem to you, and the doc comment on each decision quotes the RFC
 //! sentence it rests on. Where the decision is genuinely yours, the type
-//! hands it to you rather than choosing for you. [`Multi<T>`](Multi) is the
+//! hands it to you rather than choosing for you. [`Asserted<T>`](Asserted) is the
 //! clearest example. RFC 7644 §3.5.1 makes an omitted attribute a different
-//! instruction from a cleared one, so [`Multi<T>`](Multi) keeps the two apart
+//! instruction from a cleared one, so [`Asserted<T>`](Asserted) keeps the two apart
 //! and your server decides what each one means.
 //!
 //! The scope is narrow. This crate models the wire format, parses the two
@@ -313,16 +313,16 @@ pub mod schema_urns;
 #[cfg(feature = "models")]
 pub use models::datetime::{ParseScimDateTimeError, ScimDateTime};
 
+pub use asserted::Asserted;
 pub use case_insensitive::CaseInsensitive;
-pub use multi::Multi;
 
 pub use utils::validation::{
     Context, ContextMarker, CreateRequest, ReplaceRequest, Response, Strict, Valid, Validate,
     ValidationError, ValidationErrorKind, at_most_one_primary, require_schema_urn,
 };
 
+pub mod asserted;
 pub mod case_insensitive;
-pub mod multi;
 
 /// Declaring the utils module which contains the error submodule
 pub mod utils {

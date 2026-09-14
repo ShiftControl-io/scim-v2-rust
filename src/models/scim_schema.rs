@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::asserted::Asserted;
 use crate::models::datetime::ScimDateTime;
-use crate::multi::Multi;
 use crate::utils::error::SCIMError;
 use crate::utils::validation::{Validate, ValidationError, require_schema_urn};
 #[cfg(feature = "schemas")]
@@ -50,10 +50,10 @@ pub struct Attributes {
     pub required: Option<bool>,
     #[serde(
         rename = "canonicalValues",
-        default = "Multi::absent",
-        skip_serializing_if = "Multi::is_absent"
+        default = "Asserted::absent",
+        skip_serializing_if = "Asserted::is_absent"
     )]
-    pub canonical_values: Multi<String>,
+    pub canonical_values: Asserted<Vec<String>>,
     #[serde(rename = "caseExact", skip_serializing_if = "Option::is_none")]
     pub case_exact: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -64,16 +64,16 @@ pub struct Attributes {
     pub uniqueness: Option<String>,
     #[serde(
         rename = "subAttributes",
-        default = "Multi::absent",
-        skip_serializing_if = "Multi::is_absent"
+        default = "Asserted::absent",
+        skip_serializing_if = "Asserted::is_absent"
     )]
-    pub sub_attributes: Multi<SubAttributes>,
+    pub sub_attributes: Asserted<Vec<SubAttributes>>,
     #[serde(
         rename = "referenceTypes",
-        default = "Multi::absent",
-        skip_serializing_if = "Multi::is_absent"
+        default = "Asserted::absent",
+        skip_serializing_if = "Asserted::is_absent"
     )]
-    pub reference_types: Multi<String>,
+    pub reference_types: Asserted<Vec<String>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -88,10 +88,10 @@ pub struct SubAttributes {
     pub required: Option<bool>,
     #[serde(
         rename = "canonicalValues",
-        default = "Multi::absent",
-        skip_serializing_if = "Multi::is_absent"
+        default = "Asserted::absent",
+        skip_serializing_if = "Asserted::is_absent"
     )]
-    pub canonical_values: Multi<String>,
+    pub canonical_values: Asserted<Vec<String>>,
     #[serde(rename = "caseExact", skip_serializing_if = "Option::is_none")]
     pub case_exact: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -102,10 +102,10 @@ pub struct SubAttributes {
     pub uniqueness: Option<String>,
     #[serde(
         rename = "referenceTypes",
-        default = "Multi::absent",
-        skip_serializing_if = "Multi::is_absent"
+        default = "Asserted::absent",
+        skip_serializing_if = "Asserted::is_absent"
     )]
-    pub reference_types: Multi<String>,
+    pub reference_types: Asserted<Vec<String>>,
 }
 
 #[cfg(feature = "schemas")]

@@ -1,8 +1,8 @@
 use crate::utils::validation::{Validate, ValidationError, require_schema_urn};
 use serde::{Deserialize, Serialize};
 
+use crate::asserted::Asserted;
 use crate::models::scim_schema::Meta;
-use crate::multi::Multi;
 use crate::schema_urns;
 use crate::utils::error::SCIMError;
 
@@ -23,10 +23,10 @@ pub struct ResourceType {
     pub schema: String,
     #[serde(
         rename = "schemaExtensions",
-        default = "Multi::absent",
-        skip_serializing_if = "Multi::is_absent"
+        default = "Asserted::absent",
+        skip_serializing_if = "Asserted::is_absent"
     )]
-    pub schema_extensions: Multi<SchemaExtension>,
+    pub schema_extensions: Asserted<Vec<SchemaExtension>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
 }
@@ -40,7 +40,7 @@ impl Default for ResourceType {
             description: None,
             endpoint: "".to_string(),
             schema: "".to_string(),
-            schema_extensions: Multi::absent(),
+            schema_extensions: Asserted::absent(),
             meta: None,
         }
     }
@@ -119,13 +119,13 @@ pub fn get_resource_types(
                     // RFC 7643 Figure 8 omits `schemaExtensions` on the Group
                     // resource type rather than sending an empty array.
                     schema_extensions: if has_enterprise_user {
-                        Multi::from(vec![SchemaExtension {
+                        Asserted::set(vec![SchemaExtension {
                             schema: "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User"
                                 .to_string(),
                             required: true,
                         }])
                     } else {
-                        Multi::absent()
+                        Asserted::absent()
                     },
                     meta: Some(Meta {
                         location: Some("https://example.com/v2/ResourceTypes/User".to_string()),
@@ -145,7 +145,7 @@ pub fn get_resource_types(
                     endpoint: "/Groups".to_string(),
                     description: Some("Group".to_string()),
                     schema: "urn:ietf:params:scim:schemas:core:2.0:Group".to_string(),
-                    schema_extensions: Multi::absent(),
+                    schema_extensions: Asserted::absent(),
                     meta: Some(Meta {
                         location: Some("https://example.com/v2/ResourceTypes/Group".to_string()),
                         resource_type: Some("ResourceType".to_string()),

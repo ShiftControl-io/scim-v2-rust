@@ -1,5 +1,5 @@
 use super::*;
-use crate::multi::Multi;
+use crate::asserted::Asserted;
 use crate::utils::validation::ValidationErrorKind;
 use test_case::test_case;
 
@@ -1370,7 +1370,7 @@ mod resource_dispatch {
             id: Some("g-1".to_string()),
             external_id: None,
             display_name: "Admins".to_string(),
-            members: Multi::absent(),
+            members: Asserted::absent(),
             meta: None,
         };
         let r = Resource::Group(Box::new(g));

@@ -3,8 +3,8 @@ use crate::utils::validation::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::asserted::Asserted;
 use crate::models::scim_schema::Meta;
-use crate::multi::Multi;
 use crate::schema_urns;
 use crate::utils::error::SCIMError;
 
@@ -27,10 +27,10 @@ pub struct ServiceProviderConfig {
     pub etag: Supported,
     #[serde(
         rename = "authenticationSchemes",
-        default = "Multi::absent",
-        skip_serializing_if = "Multi::is_absent"
+        default = "Asserted::absent",
+        skip_serializing_if = "Asserted::is_absent"
     )]
-    pub authentication_schemes: Multi<AuthenticationScheme>,
+    pub authentication_schemes: Asserted<Vec<AuthenticationScheme>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
 }
@@ -46,7 +46,7 @@ impl Default for ServiceProviderConfig {
             change_password: Supported { supported: false },
             sort: Supported { supported: false },
             etag: Supported { supported: false },
-            authentication_schemes: Multi::absent(),
+            authentication_schemes: Asserted::absent(),
             meta: None,
         }
     }

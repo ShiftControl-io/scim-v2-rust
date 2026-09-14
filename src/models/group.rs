@@ -1,6 +1,6 @@
 //Schema for group
+use crate::asserted::Asserted;
 use crate::models::scim_schema::Meta;
-use crate::multi::Multi;
 use crate::utils::validation::{Context, Validate, ValidationError, require_schema_urn};
 use serde::{Deserialize, Serialize};
 
@@ -13,8 +13,11 @@ pub struct Group<T = String> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub external_id: Option<String>,
     pub display_name: String,
-    #[serde(default = "Multi::absent", skip_serializing_if = "Multi::is_absent")]
-    pub members: Multi<Member<T>>,
+    #[serde(
+        default = "Asserted::absent",
+        skip_serializing_if = "Asserted::is_absent"
+    )]
+    pub members: Asserted<Vec<Member<T>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
 }

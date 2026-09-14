@@ -13,7 +13,7 @@ use scim_v2::filter::Filter;
 use scim_v2::models::errors::ScimType;
 use scim_v2::models::others::{ListResponse, Resource, SearchRequest};
 use scim_v2::models::user::User;
-use scim_v2::{CaseInsensitive, Multi, ScimDateTime, Validate, schema_urns};
+use scim_v2::{Asserted, CaseInsensitive, ScimDateTime, Validate, schema_urns};
 
 /// Every field of `SearchRequest` is reachable and reaches the wire.
 /// `excluded_attributes` in particular was never `pub` before 1.0.
@@ -111,7 +111,7 @@ fn only_an_asserted_multi_valued_attribute_reaches_the_wire() {
     let json = serde_json::to_value(&user).expect("User must serialize");
     assert_eq!(json.get("roles"), None, "nobody assigned roles");
 
-    user.roles.clear();
+    user.roles = Asserted::set(Vec::new());
     let json = serde_json::to_value(&user).expect("User must serialize");
     assert_eq!(
         json["roles"],
@@ -134,7 +134,7 @@ fn the_common_types_are_re_exported_at_the_root() {
     assert_eq!(user.user_name, "bjensen");
     assert!(user.emails.is_absent(), "the body named no emails");
     // `Multi` goes in a handler signature too, so it is reachable at the root.
-    let cleared: Multi<scim_v2::models::user::Email> = Multi::cleared();
+    let cleared: Asserted<Vec<scim_v2::models::user::Email>> = Asserted::nulled();
     assert!(cleared.is_asserted() && cleared.is_empty());
 
     let created: ScimDateTime = "2010-01-23T04:56:22Z".parse().expect("valid dateTime");

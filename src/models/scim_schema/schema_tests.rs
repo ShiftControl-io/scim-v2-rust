@@ -87,7 +87,7 @@ fn multi_valued_sub_attributes_write_back_what_arrived() {
         (format!("{{{BASE}}}"), None),
         (
             format!(r#"{{{BASE},"canonicalValues":null,"referenceTypes":null}}"#),
-            Some(serde_json::json!([])),
+            Some(serde_json::Value::Null),
         ),
         (
             format!(r#"{{{BASE},"canonicalValues":[],"referenceTypes":[]}}"#),

@@ -6,7 +6,7 @@ fn validate_and_validate_context() {
         id: None,
         external_id: None,
         display_name: "Tour Guides".to_string(),
-        members: Multi::absent(),
+        members: Asserted::absent(),
         meta: None,
     };
     assert!(base.validate().is_ok());
@@ -121,7 +121,7 @@ fn members_read_alike_and_write_back_what_arrived() {
         (
             "null",
             format!(r#"{{"schemas":["{urn}"],"displayName":"Tour Guides","members":null}}"#),
-            Some(serde_json::json!([])),
+            Some(serde_json::Value::Null),
         ),
         (
             "empty",
