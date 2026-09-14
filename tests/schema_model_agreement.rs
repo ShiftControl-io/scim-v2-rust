@@ -118,6 +118,13 @@ fn assert_agrees(schema_json: &str, source: &str, struct_name: &str) {
             // Group resource type. A provider that copies the figure would be
             // rejected, so the field stays omittable.
             ("ResourceType", "schemaExtensions") => false,
+            // The fourth, and the mirror of the first. §7's prose says "The
+            // schema's human-readable name.  When applicable, service
+            // providers MUST specify the name, e.g., "User" or "Group".
+            // OPTIONAL.", while the §7 schema definition declares
+            // `"required": true` for that same attribute. The prose is
+            // normative, so the field is an `Option`.
+            ("Schema", "name") => false,
             _ => attr["required"].as_bool().unwrap_or(false),
         };
         let multi = attr["multiValued"].as_bool().unwrap_or(false);

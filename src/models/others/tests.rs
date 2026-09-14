@@ -1862,3 +1862,50 @@ fn a_pathless_replace_rejects_an_empty_value() {
         "one attribute is enough"
     );
 }
+
+/// The doc on `SortOrder` promises case-insensitive deserialization, so it
+/// compares the whole string rather than enumerating spellings.
+#[cfg(feature = "filter")]
+#[test]
+fn sort_order_accepts_any_casing() {
+    use crate::models::others::SortOrder;
+    for (raw, want) in [
+        ("ascending", SortOrder::Ascending),
+        ("Ascending", SortOrder::Ascending),
+        ("ASCENDING", SortOrder::Ascending),
+        ("aScEnDiNg", SortOrder::Ascending),
+        ("descending", SortOrder::Descending),
+        ("dEsCeNdInG", SortOrder::Descending),
+        ("DESCENDING", SortOrder::Descending),
+    ] {
+        let got: SortOrder =
+            serde_json::from_str(&format!("\"{raw}\"")).unwrap_or_else(|e| panic!("{raw}: {e}"));
+        assert_eq!(got, want, "{raw}");
+    }
+    assert!(serde_json::from_str::<SortOrder>("\"sideways\"").is_err());
+    // Serialization stays canonical.
+    assert_eq!(
+        serde_json::to_string(&SortOrder::Descending).unwrap(),
+        "\"descending\""
+    );
+}
+
+/// A schemas-less discovery object carrying both discriminator sets is
+/// ambiguous. Picking one would drop the other's attributes on the way out.
+#[test]
+fn an_object_with_both_discriminator_sets_is_rejected() {
+    use crate::models::others::Resource;
+    let both = r#"{"id":"X","name":"X","description":"d","attributes":[],
+                   "endpoint":"/Users","schema":"urn:ietf:params:scim:schemas:core:2.0:User",
+                   "schemaExtensions":[],"meta":{"resourceType":"ResourceType"}}"#;
+    let err = serde_json::from_str::<Resource<String>>(both)
+        .expect_err("both discriminator sets is ambiguous");
+    assert!(err.to_string().contains("both"), "{err}");
+
+    // Each set on its own still resolves.
+    let schema_only = r#"{"id":"X","name":"X","attributes":[],"meta":{"resourceType":"Schema"}}"#;
+    assert!(matches!(
+        serde_json::from_str::<Resource<String>>(schema_only),
+        Ok(Resource::Schema(_))
+    ));
+}

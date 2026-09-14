@@ -5,7 +5,7 @@ fn get_schemas_returns_correct_schemas_for_valid_input() {
     let schemas = get_schemas(vec!["user"]).unwrap();
     assert_eq!(schemas.len(), 1);
     assert_eq!(schemas[0].id, "urn:ietf:params:scim:schemas:core:2.0:User");
-    assert_eq!(schemas[0].name, "User");
+    assert_eq!(schemas[0].name.as_deref(), Some("User"));
     assert_eq!(schemas[0].description.as_deref(), Some("User Account"));
     assert_eq!(schemas[0].attributes.len(), 21);
     assert_eq!(

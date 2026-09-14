@@ -32,11 +32,20 @@ pub struct Schema {
     #[serde(default)]
     pub schemas: Vec<String>,
     pub id: String,
-    pub name: String,
+    /// Optional, following RFC 7643 §7's prose: "The schema's human-readable name.
+    /// When applicable, service providers MUST specify the name, e.g.,
+    /// "User" or "Group".  OPTIONAL." The §7 schema definition declares
+    /// `"required": true` for the same attribute, contradicting its own
+    /// prose. RFC 7643 §7's prose is normative, which is the precedent
+    /// `Group.displayName` already sets, where the two disagree the other way
+    /// round.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     /// Not an `Asserted`: §7 marks `description` readOnly, and RFC 7644
     /// §3.5.1 says of readOnly, "Any values provided SHALL be ignored." It is
-    /// also the one Schema attribute §7 marks `"required": false`, so a
-    /// conformant payload may omit it.
+    /// also `"required": false`, and RFC 7643 §7's prose agrees: "The schema's
+    /// human-readable description.  When applicable, service providers MUST
+    /// specify the description.  OPTIONAL."
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     pub attributes: Vec<Attributes>,

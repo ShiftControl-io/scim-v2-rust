@@ -118,14 +118,32 @@ impl SearchRequest<MaybeFilter> {
 /// Deserialization is case-insensitive. This choice matches the crate's
 /// posture on provider spelling.
 #[cfg(feature = "filter")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SortOrder {
     #[default]
-    #[serde(alias = "Ascending", alias = "ASCENDING")]
     Ascending,
-    #[serde(alias = "Descending", alias = "DESCENDING")]
     Descending,
+}
+
+#[cfg(feature = "filter")]
+impl<'de> Deserialize<'de> for SortOrder {
+    /// Compares the whole string without regard to case. A serde `alias` can
+    /// only enumerate spellings, so it accepts the three a provider is most
+    /// likely to send and rejects the rest, which is not what the docs above
+    /// promise.
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = String::deserialize(deserializer)?;
+        if raw.eq_ignore_ascii_case("ascending") {
+            Ok(Self::Ascending)
+        } else if raw.eq_ignore_ascii_case("descending") {
+            Ok(Self::Descending)
+        } else {
+            Err(serde::de::Error::custom(format!(
+                "{raw:?} is not a sortOrder; RFC 7644 §3.4.2.3 defines \"ascending\" and \"descending\""
+            )))
+        }
+    }
 }
 
 #[cfg(feature = "filter")]
@@ -403,6 +421,15 @@ where
         let has_endpoint = value.get("endpoint").map(Value::is_string).unwrap_or(false);
         let has_schema_field = value.get("schema").map(Value::is_string).unwrap_or(false);
 
+        // No conformant resource carries both discriminator sets. Choosing one
+        // would drop the other's attributes silently, so the ambiguity is an
+        // error rather than a guess.
+        if has_attributes && has_endpoint && has_schema_field {
+            return Err(serde::de::Error::custom(
+                "resource has no `schemas` and carries both the Schema discriminator \
+                 (`attributes`) and the ResourceType discriminators (`endpoint`, `schema`)",
+            ));
+        }
         if has_attributes {
             return serde_json::from_value::<Schema>(value)
                 .map(|s| Resource::Schema(Box::new(s)))
@@ -954,6 +981,12 @@ impl<'de> Deserialize<'de> for OperationTarget {
     }
 }
 
+/// The `op` tag accepts three spellings of each value: the RFC's own
+/// lowercase, plus the title-case and uppercase forms providers send. This is
+/// a bounded leniency and not case-insensitivity, because `#[serde(tag)]`
+/// matches the tag before any code here runs and an alias can only enumerate
+/// spellings. `SortOrder` does compare without regard to case, because it is
+/// a plain value rather than a tag.
 #[cfg(feature = "filter")]
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(tag = "op")]
