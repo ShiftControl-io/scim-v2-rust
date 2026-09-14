@@ -1161,9 +1161,12 @@ impl Validate for PatchOp {
             // "value" attribute SHALL contain a list of one or more
             // attributes that are to be replaced." An empty object names no
             // attribute, so it cannot perform the operation it declares.
-            if let PatchOperation::Replace(OperationTarget::WithoutPath { value }) = operation
-                && value.is_empty()
-            {
+            // A nested `if`, not a let-chain: let-chains are stable from Rust
+            // 1.88 and this crate's MSRV is 1.86.
+            if let PatchOperation::Replace(OperationTarget::WithoutPath { value }) = operation {
+                if !value.is_empty() {
+                    continue;
+                }
                 return Err(ValidationError::invalid_value(
                     format!("Operations[{i}].value"),
                     "a pathless replace SHALL contain one or more attributes (RFC 7644 §3.5.2.3)",
