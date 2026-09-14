@@ -133,7 +133,7 @@ already own.
 If you turn off `filter`, the build drops eight crates: `lalrpop-util`,
 `fluent-uri`, `regex-automata`, `regex-syntax`, `aho-corasick`,
 `borrow-or-share`, `ref-cast` and `ref-cast-impl`. The dependency tree goes
-from 22 crates to 14 crates. The build also removes a regex engine from the
+from 21 crates to 13 crates. The build also removes a regex engine from the
 supply chain. The example below is for a SCIM server that has its own resource
 model and wants only the grammar.
 

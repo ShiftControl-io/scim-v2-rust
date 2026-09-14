@@ -256,7 +256,7 @@
 //! |---------|----------|
 //! | `filter` | `filter` and its parser. Off: eight fewer crates (`lalrpop-util`, `fluent-uri`, `regex-automata`, `regex-syntax`, `aho-corasick`, `borrow-or-share`, `ref-cast`, `ref-cast-impl`) |
 //! | `models` | every resource and protocol message |
-//! | `schemas` | the embedded RFC 7643 schema definitions and the `get_schemas` lookup; ~48 KB of `include_str!` |
+//! | `schemas` | the embedded RFC 7643 schema definitions and the `get_schemas` lookup; ~47 KB of `include_str!` |
 //!
 //! Without `filter` the dependency tree falls from 22 crates to 14, and the
 //! supply chain loses a regex engine. The lost regex engine is the point. The
@@ -286,6 +286,17 @@ struct ReadmeDoctests;
 
 // Include the schema files into the binary.
 #[cfg(feature = "schemas")]
+// These are RFC 7643 §7 and §8.7's schema definitions, copied as published.
+// The RFC contradicts its own prose in four places, and this crate follows the
+// prose where they disagree, so a struct and the definition it is modelled on
+// can differ: `Group.displayName` (prose REQUIRED, definition `false`),
+// `Schema.name` (prose OPTIONAL, definition `true`),
+// `ResourceType.schemaExtensions` (`"multiValued": false` on something its own
+// description calls "A list of URIs"), and the same attribute declared
+// `"required": true` while Figure 8 omits it. The definitions are served
+// unaltered rather than silently corrected, because `get_schemas` exists to
+// return what the RFC publishes. `tests/schema_model_agreement.rs` holds the
+// list and fails if a struct drifts for any other reason.
 pub(crate) const USER_SCHEMA: &str = include_str!("schemas/user.json");
 #[cfg(feature = "schemas")]
 pub(crate) const GROUP_SCHEMA: &str = include_str!("schemas/group.json");
