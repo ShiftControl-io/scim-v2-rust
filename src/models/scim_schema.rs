@@ -33,7 +33,12 @@ pub struct Schema {
     pub schemas: Vec<String>,
     pub id: String,
     pub name: String,
-    pub description: String,
+    /// Not an `Asserted`: §7 marks `description` readOnly, and RFC 7644
+    /// §3.5.1 says of readOnly, "Any values provided SHALL be ignored." It is
+    /// also the one Schema attribute §7 marks `"required": false`, so a
+    /// conformant payload may omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     pub attributes: Vec<Attributes>,
     pub meta: Meta,
 }

@@ -187,7 +187,7 @@ fn validate_requires_authentication_schemes() {
     let mut config = ServiceProviderConfig::try_from(RFC_S5_EXAMPLE).unwrap();
     assert!(config.validate().is_ok());
 
-    config.authentication_schemes = Asserted::set(Vec::new());
+    config.authentication_schemes = Vec::new();
     let err = config.validate().expect_err("empty list must fail");
     assert_eq!(err.path(), "authenticationSchemes");
     assert_eq!(err.scim_type_str(), "invalidValue");

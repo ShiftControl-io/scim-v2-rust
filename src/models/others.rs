@@ -1156,6 +1156,19 @@ impl Validate for PatchOp {
                     "Operations[{i}].value"
                 )));
             }
+            // RFC 7644 §3.5.2.3: "If the "path" parameter is omitted, the
+            // target is assumed to be the resource itself.  In this case, the
+            // "value" attribute SHALL contain a list of one or more
+            // attributes that are to be replaced." An empty object names no
+            // attribute, so it cannot perform the operation it declares.
+            if let PatchOperation::Replace(OperationTarget::WithoutPath { value }) = operation
+                && value.is_empty()
+            {
+                return Err(ValidationError::invalid_value(
+                    format!("Operations[{i}].value"),
+                    "a pathless replace SHALL contain one or more attributes (RFC 7644 §3.5.2.3)",
+                ));
+            }
         }
         Ok(())
     }

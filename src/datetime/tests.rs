@@ -139,7 +139,7 @@ fn constructs_only_through_validating_paths() {
     assert!(ScimDateTime::try_from(String::from("2010-01-23T04:56:22Z")).is_ok());
     assert!(ScimDateTime::try_from("nope").is_err());
     let err = ScimDateTime::try_from(String::from("nope")).expect_err("invalid");
-    assert_eq!(err.value, "nope");
+    assert!(matches!(&err, ParseScimDateTimeError::Malformed { value } if value == "nope"));
 
     // The accessors hand back the value, not a placeholder.
     let ts: ScimDateTime = "2010-01-23T04:56:22Z".parse().expect("valid");
@@ -385,4 +385,52 @@ fn a_trailing_fraction_compares_without_running_off_the_end() {
     assert!(parse("2010-01-23T04:56:22.10").xsd_equivalent(&later));
     assert_eq!(Parts::of("2010-01-23T04:56:22.5").fraction, "5");
     assert_eq!(Parts::of("2010-01-23T04:56:22").fraction, "");
+}
+
+/// XSD 1.1 §3.3.7.2 puts no bound on `yearFrag`, and this crate does, because
+/// its comparison arithmetic cannot represent an unbounded year. The rejection
+/// happens at construction, so every value that exists is comparable.
+#[test]
+fn a_year_past_the_bound_is_rejected_at_construction() {
+    use crate::datetime::MAX_YEAR_DIGITS;
+
+    let too_long = format!("{}-01-01T00:00:00Z", "9".repeat(MAX_YEAR_DIGITS + 1));
+    let err = ScimDateTime::from_str(&too_long).expect_err("past the bound");
+    assert!(
+        matches!(err, ParseScimDateTimeError::YearOutOfRange { digits, .. }
+            if digits == MAX_YEAR_DIGITS + 1),
+        "a conformant value past the bound is not reported as malformed: {err}"
+    );
+
+    // Every path that builds one enforces it.
+    assert!(ScimDateTime::try_from(too_long.as_str()).is_err());
+    assert!(ScimDateTime::try_from(too_long.clone()).is_err());
+    assert!(serde_json::from_value::<ScimDateTime>(serde_json::json!(too_long)).is_err());
+
+    // The bound itself is accepted, and comparing it does not overflow.
+    let at_bound = format!("{}-01-01T00:00:00Z", "9".repeat(MAX_YEAR_DIGITS));
+    let a = ScimDateTime::from_str(&at_bound).expect("the bound is accepted");
+    let b = ScimDateTime::from_str("2010-01-23T04:56:22Z").unwrap();
+    assert_eq!(a.xsd_partial_cmp(&b), Some(std::cmp::Ordering::Greater));
+    assert!(!a.xsd_equivalent(&b));
+}
+
+/// A malformed value still reports as malformed, quoting §2.3.5.
+#[test]
+fn a_malformed_value_is_not_reported_as_out_of_range() {
+    let err = ScimDateTime::from_str("2010-01-23").expect_err("date only");
+    assert!(matches!(err, ParseScimDateTimeError::Malformed { .. }));
+}
+
+/// Leading zeros are not significant, so `0001` is one digit's worth of year
+/// and stays well inside the bound.
+#[test]
+fn leading_zeros_do_not_count_toward_the_bound() {
+    for s in [
+        "0001-01-23T04:56:22Z",
+        "-0001-01-23T04:56:22Z",
+        "0000-01-01T00:00:00Z",
+    ] {
+        assert!(ScimDateTime::from_str(s).is_ok(), "{s}");
+    }
 }

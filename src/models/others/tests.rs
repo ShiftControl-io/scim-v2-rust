@@ -1841,3 +1841,24 @@ fn an_empty_attribute_selection_is_treated_as_absent() {
     };
     assert_eq!(r.validate(), Ok(()));
 }
+
+/// RFC 7644 §3.5.2.3 on a pathless replace: "the "value" attribute SHALL
+/// contain a list of one or more attributes that are to be replaced." An
+/// empty object names none, so it cannot perform its declared operation.
+#[cfg(feature = "filter")]
+#[test]
+fn a_pathless_replace_rejects_an_empty_value() {
+    let body = r#"{"schemas":["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+                   "Operations":[{"op":"replace","value":{}}]}"#;
+    let op: crate::models::others::PatchOp = serde_json::from_str(body).expect("parses");
+    let err = crate::Validate::validate(&op).expect_err("an empty pathless replace is invalid");
+    assert_eq!(err.path(), "Operations[0].value");
+
+    let with_one = r#"{"schemas":["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+                      "Operations":[{"op":"replace","value":{"nickName":"Babs"}}]}"#;
+    let op: crate::models::others::PatchOp = serde_json::from_str(with_one).expect("parses");
+    assert!(
+        crate::Validate::validate(&op).is_ok(),
+        "one attribute is enough"
+    );
+}

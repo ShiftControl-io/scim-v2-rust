@@ -3,7 +3,6 @@ use crate::utils::validation::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::asserted::Asserted;
 use crate::models::scim_schema::Meta;
 use crate::schema_urns;
 use crate::utils::error::SCIMError;
@@ -25,12 +24,15 @@ pub struct ServiceProviderConfig {
     pub change_password: Supported,
     pub sort: Supported,
     pub etag: Supported,
+    /// Not an `Asserted`: §7 marks `authenticationSchemes` `"required": true`
+    /// and readOnly. A ServiceProviderConfig always publishes it, and a client
+    /// cannot assert it, so there is no state to carry.
     #[serde(
         rename = "authenticationSchemes",
-        default = "Asserted::absent",
-        skip_serializing_if = "Asserted::is_absent"
+        default = "Vec::new",
+        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec"
     )]
-    pub authentication_schemes: Asserted<Vec<AuthenticationScheme>>,
+    pub authentication_schemes: Vec<AuthenticationScheme>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
 }
@@ -46,7 +48,7 @@ impl Default for ServiceProviderConfig {
             change_password: Supported { supported: false },
             sort: Supported { supported: false },
             etag: Supported { supported: false },
-            authentication_schemes: Asserted::absent(),
+            authentication_schemes: Vec::new(),
             meta: None,
         }
     }

@@ -10,7 +10,7 @@ fn validate_requires_id_and_checks_the_urn() {
         schemas: Vec::new(),
         id: "urn:ietf:params:scim:schemas:core:2.0:User".to_string(),
         name: "User".to_string(),
-        description: String::new(),
+        description: None,
         attributes: Vec::new(),
         meta: Meta {
             resource_type: None,

@@ -450,6 +450,13 @@ sent. You do the conversion. When `has_offset()` is true, the conversion is one
 line: `OffsetDateTime::parse(created.as_str(), &Rfc3339)`. When `has_offset()`
 is false, you make your own decision. The module docs carry the full list.
 
+The year is the one place this crate accepts less than XSD. `yearFrag` admits
+any number of digits, and this crate accepts at most 19, because the comparison
+converts a year to days and then to seconds. A longer year is rejected at
+construction, with an error that says so rather than calling the value
+malformed. Every `ScimDateTime` that exists is therefore comparable, and no
+comparison can panic.
+
 ### Parsing a SCIM filter
 
 `Filter` implements `FromStr`. Use `.parse()`.

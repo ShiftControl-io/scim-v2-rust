@@ -10,6 +10,14 @@
 //!
 //! # What this type deliberately does not do
 //!
+//! # The one place this crate accepts less than XSD
+//!
+//! XSD 1.1 §3.3.7.2's `yearFrag` admits any number of digits. This crate
+//! accepts at most [`MAX_YEAR_DIGITS`], because [`ScimDateTime::xsd_partial_cmp`]
+//! converts a year to days and then to seconds, and an unbounded year
+//! overflows that arithmetic. The rejection happens at construction and says
+//! so, so every value that exists is comparable and no comparison can panic.
+//!
 //! It validates and carries a lexical form. It does not represent an instant.
 //! There is no arithmetic, no conversion to UTC, and no normalisation to a
 //! canonical spelling.
@@ -75,13 +83,43 @@ use thiserror::Error;
 
 /// A string that is not a valid RFC 7643 §2.3.5 dateTime.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
-#[error(
-    "{value:?} is not a valid dateTime; RFC 7643 §2.3.5: the value \"MUST be encoded as a valid xsd:dateTime as specified in Section 3.3.7 of [XML-Schema] and MUST include both a date and a time\""
-)]
-pub struct ParseScimDateTimeError {
-    /// The rejected input.
-    pub value: String,
+pub enum ParseScimDateTimeError {
+    /// The value is not a valid `xsd:dateTime`.
+    #[error(
+        "{value:?} is not a valid dateTime; RFC 7643 §2.3.5: the value \"MUST be encoded as a valid xsd:dateTime as specified in Section 3.3.7 of [XML-Schema] and MUST include both a date and a time\""
+    )]
+    Malformed {
+        /// The rejected input.
+        value: String,
+    },
+    /// The value is a valid `xsd:dateTime` whose year this crate declines.
+    ///
+    /// XSD 1.1 §3.3.7.2's `yearFrag` admits any number of digits, and
+    /// [`ScimDateTime::xsd_partial_cmp`] does calendar arithmetic that cannot
+    /// represent a year past [`MAX_YEAR_DIGITS`] digits. Rejecting the value
+    /// at construction keeps every accepted value comparable, rather than
+    /// deferring the failure to a comparison that would overflow.
+    #[error(
+        "{value:?} carries a year of {digits} digits; this crate accepts at most {MAX_YEAR_DIGITS}, \
+         because its comparison arithmetic cannot represent a larger one"
+    )]
+    YearOutOfRange {
+        /// The rejected input.
+        value: String,
+        /// How many significant digits the year carried.
+        digits: usize,
+    },
 }
+
+/// The largest year this crate accepts, in significant digits.
+///
+/// XSD 1.1 §3.3.7.2 puts no bound on `yearFrag`. This crate does, because
+/// [`ScimDateTime::xsd_partial_cmp`] converts a year to days and then to
+/// seconds, and an unbounded year overflows that arithmetic. The bound leaves
+/// roughly twelve orders of magnitude of headroom, so no accepted value can
+/// overflow, and it is the one place the crate knowingly accepts less than
+/// the XSD lexical space.
+pub const MAX_YEAR_DIGITS: usize = 19;
 
 /// An RFC 7643 §2.3.5 dateTime, guaranteed well-formed.
 ///
@@ -184,17 +222,43 @@ impl AsRef<str> for ScimDateTime {
     }
 }
 
+/// Significant digits in the value's `yearFrag`, ignoring the leading zeros
+/// that only the exactly-four-digit form may carry.
+fn year_digits(s: &str) -> usize {
+    let b = s.as_bytes();
+    let start = usize::from(b[0] == b'-');
+    let end = start + b[start..].iter().take_while(|c| c.is_ascii_digit()).count();
+    let digits = &b[start..end];
+    digits
+        .iter()
+        .position(|c| *c != b'0')
+        .map_or(1, |i| digits.len() - i)
+}
+
+/// The whole acceptance check: the XSD lexical space, then this crate's own
+/// year bound.
+fn check(s: &str) -> Result<(), ParseScimDateTimeError> {
+    if !is_date_time(s) {
+        return Err(ParseScimDateTimeError::Malformed {
+            value: s.to_owned(),
+        });
+    }
+    let digits = year_digits(s);
+    if digits > MAX_YEAR_DIGITS {
+        return Err(ParseScimDateTimeError::YearOutOfRange {
+            value: s.to_owned(),
+            digits,
+        });
+    }
+    Ok(())
+}
+
 impl FromStr for ScimDateTime {
     type Err = ParseScimDateTimeError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if is_date_time(s) {
-            Ok(Self(s.to_owned()))
-        } else {
-            Err(ParseScimDateTimeError {
-                value: s.to_owned(),
-            })
-        }
+        check(s)?;
+        Ok(Self(s.to_owned()))
     }
 }
 
@@ -210,11 +274,8 @@ impl TryFrom<String> for ScimDateTime {
     type Error = ParseScimDateTimeError;
 
     fn try_from(s: String) -> Result<Self, Self::Error> {
-        if is_date_time(&s) {
-            Ok(Self(s))
-        } else {
-            Err(ParseScimDateTimeError { value: s })
-        }
+        check(&s)?;
+        Ok(Self(s))
     }
 }
 

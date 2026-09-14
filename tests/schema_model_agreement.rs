@@ -102,10 +102,23 @@ fn assert_agrees(schema_json: &str, source: &str, struct_name: &str) {
         // attribute's own `description` while declaring `"required": false`.
         // The prose is normative, so the struct follows it and this test
         // records the defect rather than the schema's `false`.
-        let required = if (struct_name, name) == ("Group<T = String>", "displayName") {
-            true
-        } else {
-            attr["required"].as_bool().unwrap_or(false)
+        let required = match (struct_name, name) {
+            // RFC 7643 contradicts itself twice, in opposite directions, and
+            // this test records both rather than bending the struct to a flag
+            // the RFC's own text disagrees with.
+            //
+            // §4.2 says of `Group.displayName`, "A human-readable name for the
+            // Group.  REQUIRED.", and §8.7.1 copies that same sentence into
+            // the attribute's own `description` while declaring
+            // `"required": false`. The prose is normative, so the field is a
+            // bare `String`.
+            ("Group<T = String>", "displayName") => true,
+            // §7 declares `ResourceType.schemaExtensions` `"required": true`,
+            // and Figure 8, the RFC's own example, omits it entirely from the
+            // Group resource type. A provider that copies the figure would be
+            // rejected, so the field stays omittable.
+            ("ResourceType", "schemaExtensions") => false,
+            _ => attr["required"].as_bool().unwrap_or(false),
         };
         let multi = attr["multiValued"].as_bool().unwrap_or(false);
         let mutability = attr["mutability"].as_str().unwrap_or("readWrite");
@@ -118,7 +131,7 @@ fn assert_agrees(schema_json: &str, source: &str, struct_name: &str) {
             continue;
         }
 
-        if multi && mutability != "readOnly" {
+        if multi && mutability != "readOnly" && name != "schemaExtensions" {
             assert!(
                 ty.starts_with("Asserted<Vec<"),
                 "{struct_name}.{name} is multiValued in §8.7, so it is Asserted<Vec<_>>, not {ty}"
@@ -126,6 +139,19 @@ fn assert_agrees(schema_json: &str, source: &str, struct_name: &str) {
         }
 
         match mutability {
+            // The third contradiction, and the clearest. §7 declares
+            // `ResourceType.schemaExtensions` `"multiValued": false` while its
+            // own `description` in the same object reads "A list of URIs of
+            // the resource type's schema extensions", and Figure 7 shows a
+            // JSON array. It is a list, so the field holds one, and it is an
+            // `Asserted` rather than a bare `Vec` because Figure 8 omits the
+            // attribute on the Group resource type.
+            "readOnly" if (struct_name, name) == ("ResourceType", "schemaExtensions") => {
+                assert!(
+                    ty.starts_with("Asserted<Vec<"),
+                    "{struct_name}.{name} is a list the RFC lets a provider omit, not {ty}"
+                )
+            }
             "readOnly" if multi => assert!(
                 ty.starts_with("Vec<"),
                 "{struct_name}.{name} is a readOnly multiValued attribute in §8.7, so it carries \
@@ -170,5 +196,32 @@ fn the_enterprise_user_struct_matches_its_schema() {
         include_str!("../src/schemas/enterprise_user.json"),
         include_str!("../src/models/enterprise_user.rs"),
         "EnterpriseUser",
+    );
+}
+
+#[test]
+fn the_schema_struct_matches_the_schema_schema() {
+    assert_agrees(
+        include_str!("../src/schemas/scim_schema.json"),
+        include_str!("../src/models/scim_schema.rs"),
+        "Schema",
+    );
+}
+
+#[test]
+fn the_resource_type_struct_matches_its_schema() {
+    assert_agrees(
+        include_str!("../src/schemas/resource_type.json"),
+        include_str!("../src/models/resource_types.rs"),
+        "ResourceType",
+    );
+}
+
+#[test]
+fn the_service_provider_config_struct_matches_its_schema() {
+    assert_agrees(
+        include_str!("../src/schemas/service_provider_config.json"),
+        include_str!("../src/models/service_provider_config.rs"),
+        "ServiceProviderConfig",
     );
 }
