@@ -109,11 +109,17 @@ pub struct User<T = String> {
         skip_serializing_if = "Asserted::is_absent"
     )]
     pub photos: Asserted<Vec<Photo>>,
+    /// Not an `Asserted`: RFC 7643 §8.7.1 gives `groups` a mutability of
+    /// `readOnly`, and §4.1.2 says a client modifies membership through the
+    /// `Group` resource instead. RFC 7644 §3.5.1 says of readOnly, "Any
+    /// values provided SHALL be ignored", so there is no client assertion to
+    /// preserve, and a plain `Vec` is the natural type with no assertion
+    /// state.
     #[serde(
-        default = "Asserted::absent",
-        skip_serializing_if = "Asserted::is_absent"
+        default = "Vec::new",
+        deserialize_with = "crate::utils::serde::deserialize_null_as_empty_vec"
     )]
-    pub groups: Asserted<Vec<Group>>,
+    pub groups: Vec<Group>,
     #[serde(
         default = "Asserted::absent",
         skip_serializing_if = "Asserted::is_absent"
@@ -165,7 +171,7 @@ impl<T> Default for User<T> {
             phone_numbers: Asserted::absent(),
             ims: Asserted::absent(),
             photos: Asserted::absent(),
-            groups: Asserted::absent(),
+            groups: Vec::new(),
             entitlements: Asserted::absent(),
             roles: Asserted::absent(),
             x509_certificates: Asserted::absent(),

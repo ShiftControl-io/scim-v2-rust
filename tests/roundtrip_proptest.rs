@@ -157,7 +157,7 @@ prop_compose! {
               roles in asserted(proptest::collection::vec(role(), 0..2)),
               ims in asserted(proptest::collection::vec(im(), 0..2)),
               photos in asserted(proptest::collection::vec(photo(), 0..2)),
-              groups in asserted(proptest::collection::vec(user_group(), 0..2)),
+              groups in proptest::collection::vec(user_group(), 0..2),
               entitlements in asserted(proptest::collection::vec(entitlement(), 0..2)),
               x509_certificates in asserted(proptest::collection::vec(cert(), 0..2)),
               meta in proptest::option::of(meta()),

@@ -842,7 +842,6 @@ fn an_unassigned_multi_valued_attribute_stays_off_the_wire() {
         "phoneNumbers",
         "ims",
         "photos",
-        "groups",
         "entitlements",
         "roles",
         "x509Certificates",
@@ -853,6 +852,9 @@ fn an_unassigned_multi_valued_attribute_stays_off_the_wire() {
             "{attr} was never assigned, so asserting it would clear values nobody asked to clear"
         );
     }
+    // `groups` is the exception. §8.7.1 makes it readOnly, so it carries no
+    // assertion state and always reaches the wire, as a plain `Vec` does.
+    assert_eq!(obj.get("groups"), Some(&serde_json::json!([])));
     assert!(!json.to_string().contains("null"));
 }
 

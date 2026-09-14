@@ -40,10 +40,6 @@ pub(crate) fn drop_unassigned(v: serde_json::Value) -> serde_json::Value {
 /// expected a sequence`. Real providers do send this value. Pair this
 /// function with `#[serde(default = "Vec::new")]` so all three wire forms
 /// map to the same in-memory value.
-// The only callers are `SearchRequest::attributes` and `excluded_attributes`,
-// which the `filter` feature gates. Every resource attribute now uses
-// `Asserted<Vec<T>>`, whose own `Deserialize` handles the three wire forms.
-#[cfg(feature = "filter")]
 pub(crate) fn deserialize_null_as_empty_vec<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
 where
     D: Deserializer<'de>,
