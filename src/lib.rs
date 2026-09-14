@@ -241,8 +241,8 @@
 //! `chrono` and `jiff` each split values with an offset and values without an
 //! offset across two different types. A field with one of those types would
 //! reject conformant input or invent an offset.
-//! [The module docs](models::datetime) give the full limits and show how to
-//! convert (`models::datetime`).
+//! [The module docs](datetime) give the full limits and show how to
+//! convert (`datetime`).
 //!
 //! ## Feature flags
 //!
@@ -295,7 +295,6 @@ pub(crate) const ENTERPRISE_USER_SCHEMA: &str = include_str!("schemas/enterprise
 /// The RFC 7643 resource models and RFC 7644 protocol messages.
 #[cfg(feature = "models")]
 pub mod models {
-    pub mod datetime;
     pub mod enterprise_user;
     pub mod errors;
     pub mod group;
@@ -314,11 +313,9 @@ pub(crate) mod filter_parser;
 pub mod filter;
 pub mod schema_urns;
 
-#[cfg(feature = "models")]
-pub use models::datetime::{ParseScimDateTimeError, ScimDateTime};
-
 pub use asserted::Asserted;
 pub use case_insensitive::CaseInsensitive;
+pub use datetime::{ParseScimDateTimeError, ScimDateTime};
 
 pub use utils::validation::{
     Context, ContextMarker, CreateRequest, ReplaceRequest, Response, Strict, Valid, Validate,
@@ -327,6 +324,7 @@ pub use utils::validation::{
 
 pub mod asserted;
 pub mod case_insensitive;
+pub mod datetime;
 
 /// Declaring the utils module which contains the error submodule
 pub mod utils {

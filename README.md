@@ -125,6 +125,11 @@ A feature switch would let any transitive crate change what every other
 consumer puts on the wire. A wrapper type is a decision that the caller makes
 at the call site.
 
+`Asserted<T>`, `ScimDateTime` and `CaseInsensitive<T>` need no feature at all.
+`default-features = false` gives you those three and nothing else. That is
+enough to fix an assertion-state problem or a timestamp problem in a model you
+already own.
+
 If you turn off `filter`, the build drops eight crates: `lalrpop-util`,
 `fluent-uri`, `regex-automata`, `regex-syntax`, `aho-corasick`,
 `borrow-or-share`, `ref-cast` and `ref-cast-impl`. The dependency tree goes

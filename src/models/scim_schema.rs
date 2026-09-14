@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::asserted::Asserted;
-use crate::models::datetime::ScimDateTime;
+use crate::datetime::ScimDateTime;
 use crate::utils::error::SCIMError;
 use crate::utils::validation::{Validate, ValidationError, require_schema_urn};
 #[cfg(feature = "schemas")]
