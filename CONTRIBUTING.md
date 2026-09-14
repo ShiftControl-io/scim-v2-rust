@@ -152,7 +152,7 @@ word list, which ASD licenses separately.
 - Write one topic in one sentence. Keep an instruction to 20 words or fewer,
   and a description to 25 words or fewer.
 - Write in the active voice. Use the present tense.
-- Use the imperative for an instruction: "Use `Compact` for a response."
+- Use the imperative for an instruction: "Ask `is_asserted` before you write."
 - Do not use a gerund as a noun or as an adjective. Write "deserialization",
   not "deserializing", when you need a noun.
 - Give every pronoun a clear referent in the same sentence or the one before

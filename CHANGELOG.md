@@ -19,7 +19,7 @@ below; 1.0 was the one moment they were free.
   deserialize to an empty `Vec`. An empty attribute serializes as `[]`, since
   RFC 7644 §3.5.1 gives `[]` the meaning "clear all values" that omission
   lacks. Suggested by @travipross in #48, then superseded within this release
-  by `Multi<T>`; see the `Multi<T>` entry under Added.
+  by `Asserted<T>`; see the `Asserted<T>` entry under Added.
 - **`ListResponse` is generic over the resource, not the ID type**:
   `ListResponse<User<String>>` deserializes straight into `Vec<User<String>>`,
   and the heterogeneous form is `ListResponse<Resource<String>>`. `R` is bound
@@ -63,16 +63,23 @@ below; 1.0 was the one moment they were free.
 
 ### Added
 
-- **`Multi<T>` for every multi-valued attribute.** RFC 7643 §2.5 makes an
-  absent member, a `null` and an `[]` one state in a resource. RFC 7644 §3.5.1
-  makes them two instructions in a request: an omitted attribute is "not
-  asserted by the client", while `null` and `[]` "clear all values". A `Vec<T>`
-  holds one of the two, so a bridge that read a message and wrote it back sent
-  a clear-all for every attribute the upstream never mentioned. `Multi<T>` holds
-  three states, absent, cleared and set, and derefs to `[T]` so `len`, `iter`,
-  indexing and `for x in &multi` are unchanged. A read followed by a write now
-  reproduces the message that arrived. A server applying a `PUT` asks
-  `is_asserted()`.
+- **`Asserted<T>` on every attribute a client can assert.** RFC 7643 §2.5 makes
+  an absent member, a `null` and an `[]` one state in a resource. RFC 7644
+  §3.5.1 makes them instructions in a request: an omitted attribute is "not
+  asserted by the client", while `null` clears a single-valued attribute and
+  `[]` clears a multi-valued one. An `Option<T>` holds two of the three, so a
+  server could not tell silence from an instruction to clear, and a proxy that
+  read a message and wrote it back sent a clear for every attribute the
+  upstream never mentioned. `Asserted<T>` is `Absent | Nulled | Set(T)`, and it
+  carries 45 attributes across `User`, `Name`, `EnterpriseUser`, `Manager`,
+  `Group`, `Schema`, `ResourceType` and `ServiceProviderConfig`. Each state
+  writes back the form it came from, so a message that arrives and leaves
+  unchanged is unchanged. `Asserted<Vec<T>>` derefs to `[T]`, so `len`, `iter`
+  and indexing read as they did; a single-valued attribute answers
+  `as_option()` and `as_deref()`. A server applying a `PUT` asks
+  `is_asserted()`, and `clears_values()` answers the §3.5.1 clear question on a
+  multi-valued attribute. Attributes a client cannot assert stay plain
+  `Option`s and say why in their doc comments.
 - **Feature flags** `filter`, `models` and `schemas`, all on by default and
   all additive. `default-features = false, features = ["filter"]` gives a
   server the grammar alone and drops eight crates.

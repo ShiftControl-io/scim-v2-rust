@@ -25,9 +25,9 @@ RFCs leave some questions open, and real providers send forms the RFCs never
 describe. This crate decides those cases instead of passing the problem to you,
 and the doc comment on each decision quotes the RFC sentence it rests on. Where
 the decision is genuinely yours, the type hands it to you rather than choosing
-for you. `Multi<T>` is the clearest example. RFC 7644 §3.5.1 makes an omitted
-attribute a different instruction from a cleared one, so `Multi<T>` keeps the
-two apart and your server decides what each one means.
+for you. `Asserted<T>` is the clearest example. RFC 7644 §3.5.1 makes an
+omitted attribute a different instruction from a cleared one, so `Asserted<T>`
+keeps the two apart and your server decides what each one means.
 
 ## Quick start
 
@@ -92,6 +92,8 @@ that the RFC marks REQUIRED.
   grammar and the §3.5.2 PATCH path rule, with a depth guard.
 - **Validation** — the `Validate` trait. The trait reports a failure by the
   SCIM wire path. A server returns that path in an RFC 7644 §3.12 response.
+- **Assertion state** — `Asserted<T>` on every attribute a client can assert,
+  which keeps an omitted member apart from one the client asked to clear.
 
 The crate performs no I/O. The crate evaluates no filter against storage. The
 crate does not wrap `serde`. Use `serde_json` directly. A parse of a filter
@@ -270,21 +272,56 @@ RFC 7644 §3.4.3 allows a heterogeneous page for a query on the root `/.search`
 endpoint. For such a page, use `ListResponse<Resource<String>>` and match on
 the `Resource` variant.
 
-### Multi-valued attributes
+### Attributes the client asserts
 
-RFC 7643 §2.5 makes three wire forms equivalent in state: an unassigned
-attribute, an explicit `null`, and an empty array. Therefore a multi-valued
-attribute is a `Vec<T>` and not an `Option<Vec<T>>`. All three wire forms
-deserialize to an empty `Vec`.
+RFC 7643 §2.5 makes three wire forms equivalent **in a resource**: an absent
+member, an explicit `null`, and an empty array. A request is not a resource.
+RFC 7644 §3.5.1 says an omitted readWrite attribute is "not asserted by the
+client", and the provider "MAY assume that any existing values are to be
+cleared, or ... MAY assign a default value". The same section gives the client
+the deterministic form: clients "MAY specify "null" for a single-valued
+attribute, or an empty array "[]" for a multi-valued attribute, to clear all
+values".
 
-Serialization writes an empty `Vec` as `[]`. Serialization never writes `null`,
-and never omits the attribute. This behaviour is deliberate. RFC 7644 §3.5.1
-says that a client "MAY specify … an empty array `[]` for a multi-valued
-attribute, to clear all values". An omitted attribute is only "not asserted",
-and the server may keep the value or apply a default. These models are request
-bodies as well as representations. `[]` keeps a conformant clear-all
-expressible. An attribute that nobody assigned is absent, and `Multi<T>`
-leaves it off the wire without any wrapper.
+So a client says one of three things about an attribute. It says nothing. It
+asks to clear the value. It supplies a value. An `Option<T>` holds two of the
+three, so a server cannot tell silence from an instruction to clear.
+
+Every attribute a client can assert is an `Asserted<T>`, single-valued and
+multi-valued alike, carrying the same two serde attributes:
+
+```rust,ignore
+#[serde(default = "Asserted::absent", skip_serializing_if = "Asserted::is_absent")]
+pub title: Asserted<String>,
+
+#[serde(default = "Asserted::absent", skip_serializing_if = "Asserted::is_absent")]
+pub emails: Asserted<Vec<Email>>,
+```
+
+Each state writes back the form it came from, so a message that arrives and
+leaves unchanged is unchanged:
+
+| wire form | state | writes back as |
+|---|---|---|
+| member absent | `Absent` | omitted |
+| `null` | `Nulled` | `null` |
+| `[]` | `Set` with no values | `[]` |
+| a value | `Set` | the value |
+
+`Nulled` is only ever a literal `null`. An `[]` is `Set` holding nothing. Both
+ask the server to clear, which `clears_values()` answers on a multi-valued
+attribute; `is_nulled()` is the whole answer on a single-valued one.
+
+Reading is unchanged for anyone who does not care about the distinction. An
+`Asserted<Vec<T>>` derefs to `[T]`, so `user.emails.len()`,
+`user.emails.iter()`, `user.emails[0]` and `for email in &user.emails` all
+work. A single-valued attribute answers `as_option()` and `as_deref()`.
+
+Attributes a client **cannot** assert stay plain `Option`s, and each says why
+in its doc comment. `id` and `meta` are readOnly, and §3.5.1 says of readOnly,
+"Any values provided SHALL be ignored." The sub-attributes inside a
+multi-valued attribute's elements stay plain too, because an element is
+replaced with its parent array rather than patched.
 
 ```rust
 use scim_v2::models::user::User;
@@ -316,7 +353,7 @@ deterministic alternative: clients "MAY specify "null" for a single-valued
 attribute, or an empty array "[]" for a multi-valued attribute, to clear all
 values".
 
-`Multi<T>` keeps those two apart, so a bridge needs no wrapper and no extra
+`Asserted<T>` keeps those apart, so a bridge needs no wrapper and no extra
 call. A message that arrives and leaves unchanged is unchanged:
 
 ```rust
@@ -335,11 +372,12 @@ assert!(outbound.get("phoneNumbers").is_none()); // never asserted, still absent
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-| upstream sent | §3.5.1 meaning | `Multi<T>` state | goes downstream as |
+| upstream sent | §3.5.1 meaning | state | goes downstream as |
 |---|---|---|---|
-| `"emails": null` | clear all values | cleared | `[]` |
-| `"emails": []` | clear all values | cleared | `[]` |
-| no `phoneNumbers` member | not asserted | absent | omitted |
+| `"emails": null` | clear all values | `Nulled` | `null` |
+| `"emails": []` | clear all values | `Set`, no values | `[]` |
+| no `phoneNumbers` member | not asserted | `Absent` | omitted |
+| `"title": null` | clear the value | `Nulled` | `null` |
 
 A server applying a `PUT` asks the field directly:
 
@@ -352,9 +390,9 @@ if body.emails.is_asserted() {
 // absent: the client asserted nothing, so leave the stored value alone
 ```
 
-Everything else reads as before. `Multi<T>` derefs to `[T]`, so `user.emails.len()`,
-`user.emails.iter()`, `user.emails[0]` and `for email in &user.emails` are
-unchanged. A reader that does not care about the distinction never sees it.
+You can also normalise on the way through. To read a `null` and assert nothing
+downstream, assign `Asserted::absent()`. The crate carries what you chose and
+has no opinion of its own.
 
 ### Timestamps
 

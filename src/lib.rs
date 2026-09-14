@@ -140,6 +140,9 @@
 //! - **Validation** — the [`Validate`] trait. The trait reports a failure by
 //!   its SCIM wire path, so a server can echo the path in an RFC 7644 §3.12
 //!   response.
+//! - **Assertion state** — [`Asserted<T>`](Asserted) on every attribute a
+//!   client can assert. It keeps an omitted member apart from one the client
+//!   asked to clear.
 //!
 //! ## Validation — deserialization does not validate
 //!
@@ -186,8 +189,9 @@
 //! | Accepted on input | Emitted | Why |
 //! |---|---|---|
 //! | `"true"` / `"True"` for a boolean | `true` | Entra; RFC 7643 §2.3.2 defines the JSON literal |
-//! | `null` or `[]` for a multi-valued attribute | `[]` | RFC 7644 §3.5.1 gives `[]` clear-all meaning |
-//! | an absent multi-valued attribute | omitted | RFC 7644 §3.5.1 makes it "not asserted by the client" |
+//! | `null` on any attribute a client asserts | `null` | RFC 7644 §3.5.1 names it the single-valued clear |
+//! | `[]` on a multi-valued attribute | `[]` | RFC 7644 §3.5.1 names it the multi-valued clear |
+//! | an absent asserted attribute | omitted | RFC 7644 §3.5.1 makes it "not asserted by the client" |
 //! | `Add` / `ADD` for a PATCH `op` | `add` | RFC 7644 §3.5.2 spells it lowercase; Entra does not |
 //! | `Ascending`, `GROUP` for `sortOrder` / `members.type` | `ascending`, `Group` | schema `caseExact: false` |
 //! | a `members.type` or `scimType` outside the RFC's list | preserved verbatim | RFC 7643 §7: canonical values are *suggested* |

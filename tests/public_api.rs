@@ -133,7 +133,7 @@ fn the_common_types_are_re_exported_at_the_root() {
     let user: User = scim_v2::case_insensitive::from_str(body).expect("§2.1: any casing");
     assert_eq!(user.user_name, "bjensen");
     assert!(user.emails.is_absent(), "the body named no emails");
-    // `Multi` goes in a handler signature too, so it is reachable at the root.
+    // `Asserted` goes in a handler signature too, so it is reachable at the root.
     let cleared: Asserted<Vec<scim_v2::models::user::Email>> = Asserted::nulled();
     assert!(cleared.is_asserted() && cleared.is_empty());
 
