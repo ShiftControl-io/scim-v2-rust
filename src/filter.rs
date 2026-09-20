@@ -1,31 +1,35 @@
-//! SCIM filter expressions (RFC 7644 §3.4.2.2) and PATCH paths (RFC 7644 §3.5.2).
+//! SCIM filter expressions (RFC 7644 §3.4.2.2) and PATCH paths
+//! (RFC 7644 §3.5.2).
 //!
 //! # Overview
 //!
-//! This module provides the AST types for SCIM filter expressions and PATCH operation
-//! paths. The two main entry points are [`Filter`] and [`PatchPath`].
+//! This module provides the AST types for SCIM filter expressions and
+//! PATCH operation paths. The two main entry points are [`Filter`] and
+//! [`PatchPath`].
 //!
 //! # SCIM server: evaluating an incoming filter
 //!
 //! Filters arrive already deserialized inside other SCIM message types:
 //!
-//! - [`SearchRequest::filter`](crate::models::others::SearchRequest::filter) — from a
+//! - `SearchRequest::filter` comes from a
 //!   `POST /.search` body.
-//! - [`ListQuery::filter`](crate::models::others::ListQuery::filter) — from a `GET`
-//!   query string (`?filter=...`), parsed by your web framework into this struct.
-//! - [`PatchOperation`](crate::models::others::PatchOperation) — each operation's
+//! - `ListQuery::filter` comes from a `GET`
+//!   query string (`?filter=...`). Your web framework parses the query string
+//!   into this struct.
+//! - Each `PatchOperation`'s
 //!   `path` field deserializes as a [`PatchPath`].
 //!
-//! By default these types fail deserialization when the filter expression is
-//! malformed, which takes `start_index`, `count`, and other fields down with
-//! it. To produce an RFC 7644 §3.12 `invalidFilter` response instead, use the
-//! [`TolerantListQuery`](crate::models::others::TolerantListQuery) /
-//! [`TolerantSearchRequest`](crate::models::others::TolerantSearchRequest)
-//! aliases (equivalently `ListQuery<MaybeFilter>` / `SearchRequest<MaybeFilter>`)
-//! and match on [`MaybeFilter::Valid`] vs [`MaybeFilter::Invalid`] to build
+//! By default, these types fail deserialization when the filter expression is
+//! malformed. As a result, `start_index`, `count`, and other fields also fail
+//! to deserialize. To produce an RFC 7644 §3.12 `invalidFilter` response
+//! instead, use the `TolerantListQuery` /
+//! `TolerantSearchRequest` aliases (equivalently `ListQuery<MaybeFilter>` /
+//! `SearchRequest<MaybeFilter>`).
+//! Match on [`MaybeFilter::Valid`] vs [`MaybeFilter::Invalid`] to build
 //! the error body from the captured `raw` string and [`ParseError`].
 //!
-//! Once you have a [`Filter`], recursively `match` on its variants to evaluate it:
+//! Once you have a [`Filter`], use a recursive `match` on its variants to
+//! evaluate it:
 //!
 //! ```
 //! # use scim_v2::filter::*;
@@ -36,8 +40,8 @@
 //!         {
 //!             user_name == v
 //!         }
-//!         Filter::And(lhs, rhs) => matches_user(lhs, user_name) && matches_user(rhs, user_name),
-//!         Filter::Or(lhs, rhs) => matches_user(lhs, user_name) || matches_user(rhs, user_name),
+//!         Filter::And(items) => items.iter().all(|f| matches_user(f, user_name)),
+//!         Filter::Or(items) => items.iter().any(|f| matches_user(f, user_name)),
 //!         Filter::Not(inner) => !matches_user(inner, user_name),
 //!         _ => false,
 //!     }
@@ -48,97 +52,237 @@
 //! assert!(!matches_user(&filter, "jsmith"));
 //! ```
 //!
-//! # Depth limit
+//! # Depth and size limits
 //!
-//! [`Filter::from_str`] and [`PatchPath::from_str`] (and the corresponding
-//! [`Deserialize`](serde::Deserialize) impls, which delegate to
-//! [`FromStr`](std::str::FromStr)) reject any input whose parsed AST would exceed
-//! [`MAX_FILTER_DEPTH`]. This bounds the call stack used by the crate's own
-//! recursive [`Display`], derived [`PartialEq`] / [`Debug`], serialization, and
-//! `Drop` impls, so a hostile `?filter=` value with thousands of chained
-//! `not`/`and`/`or` operators cannot crash the server after the filter has
-//! been accepted. Hand-constructed [`Filter`] values bypass this check and are
-//! the caller's responsibility.
+//! [`Filter::from_str`](std::str::FromStr::from_str) and
+//! [`PatchPath::from_str`](std::str::FromStr::from_str) reject any input
+//! whose parsed AST exceeds [`MAX_FILTER_DEPTH`] levels of nesting or
+//! [`MAX_FILTER_TERMS`] attribute expressions. The corresponding
+//! [`Deserialize`] impls delegate to [`FromStr`](std::str::FromStr), so they
+//! reject the same input. The depth bound protects the crate's own
+//! recursive [`Display`], derived [`PartialEq`] / [`Debug`], serialization,
+//! and `Drop` impls from stack overflow. A hostile `?filter=` value with
+//! thousands of nested `not (…)` terms cannot crash the server after the
+//! filter passes this check. The term bound gives the same memory
+//! protection for a filter with many terms rather than deep nesting. The
+//! parser enforces both bounds while it runs. It rejects an input that
+//! crosses either bound at that point, before it reads the rest of the
+//! input. As a result, the limits bound peak allocation for a hostile
+//! input, not the input's length.
+//!
+//! The two limits are independent because `and`/`or` are n-ary. `a or b or
+//! c …` is one [`Filter::Or`] node, however many operands it has. So a
+//! hundred-id batch lookup has depth 2 and parses, while the same hundred
+//! terms would have depth 100 in a binary tree. Depth counts only genuine
+//! nesting: `not`, grouping that changes the operator, and a value path's
+//! inner filter. One filter has one depth budget: a value path's inner
+//! filter continues the count from where its enclosing filter left off,
+//! rather than starting a new count. Hand-constructed [`Filter`] values
+//! bypass both checks. A caller who builds a filter by hand must keep it
+//! within the limits. Build such filters with [`Filter::and`] /
+//! [`Filter::or`] to keep the same shape the parser produces.
 //!
 //! # SCIM client: building a filter to send in a request
 //!
 //! Construct the AST directly and assign it to the `filter` field of
-//! [`SearchRequest`](crate::models::others::SearchRequest) or
-//! [`ListQuery`](crate::models::others::ListQuery). Those types implement
-//! `serde::Serialize`, so the filter is serialized automatically as a JSON
-//! string when you serialize the containing struct. You can also call
-//! `.to_string()` directly when you need the raw filter string for a query
-//! parameter:
+//! `SearchRequest` or
+//! `ListQuery`. Those types implement
+//! `serde::Serialize`. When you serialize the containing struct, the filter
+//! serializes automatically as a JSON string. Call `.to_string()` directly
+//! when you need the raw filter string for a query parameter:
 //!
 //! ```
 //! # use scim_v2::filter::*;
-//! let filter = Filter::And(
-//!     Box::new(Filter::Attr(AttrExp::Present(AttrPath::with_name("title")))),
-//!     Box::new(Filter::Attr(AttrExp::Comparison(
+//! let filter = Filter::and(
+//!     Filter::Attr(AttrExp::Present(AttrPath::with_name("title"))),
+//!     Filter::Attr(AttrExp::Comparison(
 //!         AttrPath::with_name("userType"),
 //!         CompareOp::Eq,
 //!         "Employee".into(),
-//!     ))),
+//!     )),
 //! );
 //! assert_eq!(filter.to_string(), r#"title pr and userType eq "Employee""#);
+//!
+//! // `and`/`or` are n-ary: chaining flattens rather than nesting.
+//! let three = Filter::and(filter, Filter::Attr(AttrExp::Present(AttrPath::with_name("active"))));
+//! assert!(matches!(&three, Filter::And(items) if items.len() == 3));
+//! assert_eq!(three.to_string(), r#"title pr and userType eq "Employee" and active pr"#);
 //! ```
 
 use fluent_uri::Uri;
 use lalrpop_util::ParseError as LalrParseError;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::cell::Cell;
 use std::fmt::{Display, Formatter};
+use std::ops::{Deref, DerefMut};
+use std::sync::OnceLock;
 use thiserror::Error;
+
+/// This function builds the generated parser once. When the code builds a
+/// parser, it compiles the lexer's regex set, which is about 400 KiB and
+/// takes measurable time to compile. Earlier versions of this crate compiled
+/// the regex set on every call to `from_str`. The parser itself is
+/// stateless, so one instance serves every call without extra cost.
+fn filter_parser() -> &'static crate::filter_parser::FilterParser {
+    static PARSER: OnceLock<crate::filter_parser::FilterParser> = OnceLock::new();
+    PARSER.get_or_init(crate::filter_parser::FilterParser::new)
+}
+
+fn path_parser() -> &'static crate::filter_parser::PathParser {
+    static PARSER: OnceLock<crate::filter_parser::PathParser> = OnceLock::new();
+    PARSER.get_or_init(crate::filter_parser::PathParser::new)
+}
 
 /// Maximum allowed nesting depth for a parsed [`Filter`] or [`ValFilter`] tree.
 ///
-/// [`Filter::from_str`] and [`PatchPath::from_str`] reject any input whose parsed
-/// AST would exceed this depth, returning
-/// [`ParseError::User`] wrapping [`FilterActionError::DepthExceeded`]. The same
-/// enforcement runs on the [`Deserialize`] paths (SCIM `SearchRequest.filter`,
-/// `ListQuery.filter`, `PatchOperation.path`), so a remote attacker cannot submit
-/// a pathologically nested filter like `(((…(title pr)…)))` or
-/// `a pr and a pr and …` that would later overflow the call stack when the
-/// library's recursive [`Display`], derived [`PartialEq`] / [`Debug`],
-/// [`Serialize`], or [`Drop`] impls walk the tree.
+/// [`Filter::from_str`](std::str::FromStr::from_str) and
+/// [`PatchPath::from_str`](std::str::FromStr::from_str) reject any input
+/// whose parsed AST exceeds this depth. Rejection returns
+/// [`ParseError::User`] wrapping [`FilterActionError::DepthExceeded`]. The
+/// same enforcement runs on the [`Deserialize`] paths: SCIM
+/// `SearchRequest.filter`, `ListQuery.filter`, and `PatchOperation.path`. As
+/// a result, a remote attacker cannot submit a pathologically nested filter,
+/// such as `(((…(title pr)…)))` or `a pr and a pr and …`. Such a filter
+/// would otherwise overflow the call stack later, when the library's
+/// recursive [`Display`], derived [`PartialEq`] / [`Debug`], [`Serialize`],
+/// or [`Drop`] impls walk the tree.
 ///
-/// Hand-constructed [`Filter`] values that bypass the parser do not pass through
-/// this check; it is the caller's responsibility to keep programmatically built
-/// filters within this limit.
+/// Hand-constructed [`Filter`] values bypass the parser, so they do not pass
+/// through this check. A caller who builds a filter programmatically must
+/// keep it within this limit.
 pub const MAX_FILTER_DEPTH: usize = 64;
 
-/// Error produced by fallible grammar actions (`=>?` rules in the LALRPOP grammar)
-/// and by post-parse validation.
+/// Maximum number of attribute expressions (terms) in one filter or PATCH
+/// path, across every `and`/`or` chain and value path.
+///
+/// This limit is distinct from [`MAX_FILTER_DEPTH`] on purpose. The AST is
+/// n-ary, so a flat `a or b or … ` chain has depth 2 however long it is. So
+/// depth no longer bounds the *size* of an accepted filter. This term limit
+/// bounds size instead. This limit is generous: a client that resolves a
+/// batch of a hundred ids in one `or` chain sends an ordinary request, and
+/// it parses.
+/// At the same time, the limit still keeps a hostile `?filter=` value from
+/// allocating without limit. RFC 7644 §3.4.2.2 sets no term limit.
+/// `ServiceProviderConfig.filter.maxResults` bounds results, not terms. So
+/// this limit is the crate's own hygiene bound.
+///
+/// When a filter exceeds this limit, parsing returns
+/// [`FilterActionError::TooManyTerms`]. A server should answer this error
+/// with RFC 7644 §3.12 `tooMany` or `invalidFilter`.
+///
+/// The parser enforces both this limit and [`MAX_FILTER_DEPTH`] *during*
+/// parsing, not after. It charges each attribute expression against a
+/// budget as it reduces the expression, and it tracks open brackets as it
+/// shifts them. So the parser rejects an input that crosses a limit at that
+/// point. The parser never reads or allocates the rest of that input. As a
+/// result, peak memory for a hostile filter is bounded by the limits, not by
+/// the input's length.
+pub const MAX_FILTER_TERMS: usize = 1024;
+
+/// This struct is the parse-time resource budget that the generated parser
+/// uses.
+///
+/// This struct charges each attribute expression against
+/// [`MAX_FILTER_TERMS`]. It charges each open `(` or `[` against
+/// [`MAX_FILTER_DEPTH`]. Parsing fails the moment either limit is exceeded.
+/// Because parsing fails immediately, the limits bound allocation. They do
+/// not merely check an already-built tree.
+#[derive(Debug, Default)]
+pub(crate) struct ParseBudget {
+    terms: Cell<usize>,
+    depth: Cell<usize>,
+}
+
+impl ParseBudget {
+    /// Charge one attribute expression.
+    pub(crate) fn term(&self) -> Result<(), FilterActionError> {
+        let n = self.terms.get() + 1;
+        if n > MAX_FILTER_TERMS {
+            return Err(FilterActionError::TooManyTerms(n));
+        }
+        self.terms.set(n);
+        Ok(())
+    }
+
+    /// Enter one level of syntactic nesting (`(`, `not (`, or `[`).
+    pub(crate) fn enter(&self) -> Result<(), FilterActionError> {
+        let d = self.depth.get() + 1;
+        if d > MAX_FILTER_DEPTH {
+            return Err(FilterActionError::DepthExceeded(d));
+        }
+        self.depth.set(d);
+        Ok(())
+    }
+
+    /// Leave one level of syntactic nesting.
+    pub(crate) fn leave(&self) {
+        self.depth.set(self.depth.get().saturating_sub(1));
+    }
+}
+
+/// Fallible grammar actions (the LALRPOP grammar's `=>?` rules) and
+/// post-parse validation produce this error.
+/// This enum is `#[non_exhaustive]`. Minor releases will add further grammar
+/// and depth diagnostics.
+#[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum FilterActionError {
     /// An `attrPath` token contained more than one sub-attribute segment.
     #[error("attrPath '{0}' has more than one sub-attribute segment")]
     InvalidAttrPath(String),
+    /// A segment of an `attrPath` token is not an RFC 7644 §3.4.2.2
+    /// `ATTRNAME`. An `ATTRNAME` is a letter followed by letters, digits,
+    /// `_`, or `-`. This variant covers an empty sub-attribute (`name.`), a
+    /// segment that starts with a digit or a dash, and an empty name after
+    /// a URN prefix.
+    #[error(
+        "attrPath '{0}': each segment must be ATTRNAME = ALPHA *(nameChar) (RFC 7644 §3.4.2.2)"
+    )]
+    InvalidAttrName(String),
     /// A comparison value contained an invalid JSON escape or format.
     #[error("invalid comparison value: {0}")]
     InvalidCompValue(#[from] serde_json::Error),
-    /// The parsed filter's nesting depth exceeded [`MAX_FILTER_DEPTH`].
+    /// The filter's nesting depth exceeded [`MAX_FILTER_DEPTH`].
     ///
-    /// The wrapped value is the depth at which the limit was first breached.
+    /// The wrapped value is the depth at which the input first exceeded the
+    /// limit. The crate measures nesting two ways, against the same limit.
+    /// The first way counts the number of brackets open at once: `(`,
+    /// `not (`, or `[`. This count rejects an over-deep input before the
+    /// parser reads its interior. The second way counts the depth of the
+    /// finished AST. In the finished AST, `not (…)`, a value path's inner
+    /// filter, and an operator change (for example, an `or` inside an
+    /// `and`) each add one level. Neither way counts the length of a
+    /// same-operator chain.
+    /// [`TooManyTerms`](FilterActionError::TooManyTerms) bounds that
+    /// instead.
     #[error("filter nesting depth exceeds maximum of {MAX_FILTER_DEPTH} (at depth {0})")]
     DepthExceeded(usize),
+    /// The filter contains more attribute expressions than
+    /// [`MAX_FILTER_TERMS`].
+    ///
+    /// The wrapped value is the count that exceeded the limit.
+    #[error("filter has too many terms: {0} exceeds the maximum of {MAX_FILTER_TERMS}")]
+    TooManyTerms(usize),
 }
 
-/// Error returned by [`Filter::from_str`] and [`PatchPath::from_str`] when the
-/// input is not a valid filter or path expression.
+/// [`Filter::from_str`](std::str::FromStr::from_str) and
+/// [`PatchPath::from_str`](std::str::FromStr::from_str) return this error
+/// when the input is not a valid filter or path expression.
 pub type ParseError = LalrParseError<usize, String, FilterActionError>;
 
 /// Payload of [`MaybeFilter::Invalid`] and error type of the
 /// `TryFrom<Tolerant*>` / `into_strict` conversions on
-/// [`TolerantListQuery`](crate::models::others::TolerantListQuery) and
-/// [`TolerantSearchRequest`](crate::models::others::TolerantSearchRequest).
+/// `TolerantListQuery` and
+/// `TolerantSearchRequest`.
 ///
-/// Captures the original filter string and underlying [`ParseError`] so
-/// callers can build an RFC 7644 §3.12 `invalidFilter` response body
-/// (typically via `.map_err(...)` into the caller's SCIM error type).
+/// This struct captures the original filter string and the underlying
+/// [`ParseError`]. A caller can use them to build an RFC 7644 §3.12
+/// `invalidFilter` response body, typically via `.map_err(...)` into the
+/// caller's own SCIM error type.
 #[derive(Debug, Error)]
 #[error("invalid SCIM filter {raw:?}: {error}")]
 pub struct InvalidFilterError {
-    /// The original filter string as received from the wire.
+    /// The original filter string from the wire.
     pub raw: String,
     /// The underlying parse failure.
     pub error: ParseError,
@@ -146,8 +290,9 @@ pub struct InvalidFilterError {
 
 /// A SCIM filter expression (RFC 7644 §3.4.2.2).
 ///
-/// Filters are used in SCIM `GET` requests (`?filter=...`) and in conditional
-/// operations. The expression forms a tree of logical and comparison nodes.
+/// SCIM uses filter expressions in `GET` requests (`?filter=...`) and in
+/// conditional operations. Each expression forms a tree of logical and
+/// comparison nodes.
 ///
 /// ## Operator precedence
 ///
@@ -173,8 +318,9 @@ pub struct InvalidFilterError {
 ///
 /// ## Matching
 ///
-/// Use a recursive `match` to walk the tree when evaluating a filter against a
-/// resource. See the [module-level examples](self) for a complete pattern.
+/// Use a recursive `match` to walk the tree when you evaluate a filter
+/// against a resource. See the [module-level examples](self) for a
+/// complete pattern.
 ///
 /// ## Serde
 ///
@@ -187,30 +333,223 @@ pub enum Filter {
     /// Examples: `title pr`, `userName eq "bjensen"`.
     Attr(AttrExp),
 
-    /// An attribute path with a bracketed sub-filter applied to its values.
+    /// An attribute path with a bracketed sub-filter for its values.
     ///
     /// Example: `emails[type eq "work" and value co "@example.com"]`.
     ///
-    /// This form filters the elements of a multi-valued attribute; only elements
-    /// matching the inner [`ValFilter`] are considered.
+    /// This form filters the elements of a multi-valued attribute. The
+    /// filter considers only elements that match the inner [`ValFilter`].
     ValuePath(ValuePath),
 
     /// Logical negation of the inner filter.
     ///
-    /// Serializes as `not (<inner>)`. The inner filter is always parenthesised.
+    /// This variant serializes as `not (<inner>)` and always parenthesises
+    /// the inner filter.
     Not(Box<Filter>),
 
-    /// Logical conjunction — both operands must match.
+    /// Logical conjunction. Both operands must match.
     ///
-    /// Binds more tightly than [`Or`](Filter::Or).
-    And(Box<Filter>, Box<Filter>),
+    /// This variant binds more tightly than [`Or`](Filter::Or).
+    ///
+    /// This variant is n-ary. `a and b and c` is one `And` variant with
+    /// three operands, not two nested pairs. The grammar flattens
+    /// same-operator chains on the way in. So the tree's depth reflects
+    /// genuine nesting only: `not`, grouping, a value path, or an `or`
+    /// inside an `and`. The depth never reflects the length of a chain.
+    /// This is why a 100-term batch lookup parses, while
+    /// [`MAX_FILTER_DEPTH`] still bounds the recursion of the derived
+    /// impls. [`Operands`] guarantees at least two operands, however the
+    /// caller built the value.
+    And(Operands<Filter>),
 
-    /// Logical disjunction — at least one operand must match.
+    /// Logical disjunction. At least one operand must match.
     ///
-    /// Lowest precedence operator. When an `Or` expression appears as a
-    /// direct child of an `And`, [`Display`] wraps it in parentheses to
-    /// preserve the original precedence on round-trip.
-    Or(Box<Filter>, Box<Filter>),
+    /// This is the lowest-precedence operator. When an `Or` expression
+    /// appears as a direct child of an `And`, [`Display`] wraps it in
+    /// parentheses to preserve the original precedence on round-trip.
+    ///
+    /// This variant is n-ary, like [`And`](Filter::And).
+    Or(Operands<Filter>),
+}
+
+/// A logical operator has fewer than two operands.
+///
+/// [`Operands::new`] returns this error. The wrapped value is the operand
+/// count the caller supplied.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+#[error("a logical operator needs at least two operands, got {0}")]
+pub struct TooFewOperands(pub usize);
+
+/// This struct holds the operands of an n-ary [`Filter::And`] or
+/// [`Filter::Or`], and of the equivalent [`ValFilter`] variants. It always
+/// holds at least two operands, by construction.
+///
+/// The SCIM grammar has no way to write a conjunction of one thing, or of
+/// nothing. So a tree holding only one operand would not survive a
+/// `Display` call followed by a re-parse. Rather than check for this at
+/// every use, the type rules it out. There are only four ways to obtain an
+/// `Operands` value: [`Operands::new`] (which refuses fewer than two
+/// operands), [`Operands::pair`], the flattening constructors
+/// [`Filter::and`] / [`Filter::or`], and the parser. `Operands` dereferences
+/// to a slice, so `.len()`, `.iter()`, indexing, and slice patterns all work
+/// on it. [`push`](Operands::push) is the only way to grow an `Operands`
+/// value, and there is no way to shrink one.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Operands<T>(Vec<T>);
+
+impl<T> Operands<T> {
+    /// Wrap `items`. `items` must hold at least two operands.
+    pub fn new(items: Vec<T>) -> Result<Self, TooFewOperands> {
+        if items.len() < 2 {
+            return Err(TooFewOperands(items.len()));
+        }
+        Ok(Self(items))
+    }
+
+    /// Wrap exactly two operands, `first` and `second`.
+    pub fn pair(first: T, second: T) -> Self {
+        Self(vec![first, second])
+    }
+
+    /// Append an operand.
+    pub fn push(&mut self, item: T) {
+        self.0.push(item);
+    }
+
+    /// The operands as a slice.
+    pub fn as_slice(&self) -> &[T] {
+        &self.0
+    }
+
+    /// Return the operands as a `Vec`.
+    pub fn into_vec(self) -> Vec<T> {
+        self.0
+    }
+
+    fn extend_from(&mut self, other: Operands<T>) {
+        self.0.extend(other.0);
+    }
+}
+
+impl<T> Deref for Operands<T> {
+    type Target = [T];
+    fn deref(&self) -> &[T] {
+        &self.0
+    }
+}
+
+/// A caller can replace elements in place. The length cannot change through
+/// a slice. So the two-operand floor still holds.
+impl<T> DerefMut for Operands<T> {
+    fn deref_mut(&mut self) -> &mut [T] {
+        &mut self.0
+    }
+}
+
+impl<T> IntoIterator for Operands<T> {
+    type Item = T;
+    type IntoIter = std::vec::IntoIter<T>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+impl<'a, T> IntoIterator for &'a Operands<T> {
+    type Item = &'a T;
+    type IntoIter = std::slice::Iter<'a, T>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
+}
+
+impl Filter {
+    /// `lhs and rhs`, with flattening. An `And` operand contributes its own
+    /// operands rather than nesting inside the result, since `and` is
+    /// associative. The parser uses this constructor. Use it also when you
+    /// build filters programmatically, so the tree keeps the same shape the
+    /// parser produces.
+    pub fn and(lhs: Filter, rhs: Filter) -> Filter {
+        let mut items = match lhs {
+            Filter::And(items) => items,
+            other => Operands(vec![other]),
+        };
+        match rhs {
+            Filter::And(more) => items.extend_from(more),
+            other => items.push(other),
+        }
+        Filter::And(items)
+    }
+
+    /// `lhs or rhs`, flattened the same way as [`Filter::and`].
+    pub fn or(lhs: Filter, rhs: Filter) -> Filter {
+        let mut items = match lhs {
+            Filter::Or(items) => items,
+            other => Operands(vec![other]),
+        };
+        match rhs {
+            Filter::Or(more) => items.extend_from(more),
+            other => items.push(other),
+        }
+        Filter::Or(items)
+    }
+
+    /// The conjunction of `items`. The result is `None` for zero items, the
+    /// item itself for one item, and a flattened [`And`](Filter::And) for
+    /// more than one item.
+    ///
+    /// Use this constructor to fold a computed list of conditions, such as
+    /// an allow-list. An empty list must reach the caller's own control
+    /// flow, not become an empty filter. A server could read an empty
+    /// filter as "match everything".
+    pub fn all(items: impl IntoIterator<Item = Filter>) -> Option<Filter> {
+        items.into_iter().reduce(Filter::and)
+    }
+
+    /// The disjunction of `items`. It behaves the same way as
+    /// [`Filter::all`].
+    pub fn any(items: impl IntoIterator<Item = Filter>) -> Option<Filter> {
+        items.into_iter().reduce(Filter::or)
+    }
+}
+
+impl ValFilter {
+    /// `lhs and rhs`, flattened the same way as [`Filter::and`].
+    pub fn and(lhs: ValFilter, rhs: ValFilter) -> ValFilter {
+        let mut items = match lhs {
+            ValFilter::And(items) => items,
+            other => Operands(vec![other]),
+        };
+        match rhs {
+            ValFilter::And(more) => items.extend_from(more),
+            other => items.push(other),
+        }
+        ValFilter::And(items)
+    }
+
+    /// `lhs or rhs`, flattened the same way as [`Filter::or`].
+    pub fn or(lhs: ValFilter, rhs: ValFilter) -> ValFilter {
+        let mut items = match lhs {
+            ValFilter::Or(items) => items,
+            other => Operands(vec![other]),
+        };
+        match rhs {
+            ValFilter::Or(more) => items.extend_from(more),
+            other => items.push(other),
+        }
+        ValFilter::Or(items)
+    }
+
+    /// The conjunction of `items`. It behaves the same way as
+    /// [`Filter::all`].
+    pub fn all(items: impl IntoIterator<Item = ValFilter>) -> Option<ValFilter> {
+        items.into_iter().reduce(ValFilter::and)
+    }
+
+    /// The disjunction of `items`. It behaves the same way as
+    /// [`Filter::any`].
+    pub fn any(items: impl IntoIterator<Item = ValFilter>) -> Option<ValFilter> {
+        items.into_iter().reduce(ValFilter::or)
+    }
 }
 
 impl Display for Filter {
@@ -219,18 +558,30 @@ impl Display for Filter {
             Filter::Attr(e) => write!(f, "{e}"),
             Filter::ValuePath(vp) => write!(f, "{}[{}]", vp.attr, vp.filter),
             Filter::Not(inner) => write!(f, "not ({inner})"),
-            Filter::And(lhs, rhs) => {
-                fmt_and_operand_filter(lhs, f)?;
-                write!(f, " and ")?;
-                fmt_and_operand_filter(rhs, f)
+            Filter::And(items) => {
+                for (i, item) in items.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, " and ")?;
+                    }
+                    fmt_and_operand_filter(item, f)?;
+                }
+                Ok(())
             }
-            Filter::Or(lhs, rhs) => write!(f, "{lhs} or {rhs}"),
+            Filter::Or(items) => {
+                for (i, item) in items.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, " or ")?;
+                    }
+                    write!(f, "{item}")?;
+                }
+                Ok(())
+            }
         }
     }
 }
 
 fn fmt_and_operand_filter(operand: &Filter, f: &mut Formatter<'_>) -> std::fmt::Result {
-    if matches!(operand, Filter::Or(_, _)) {
+    if matches!(operand, Filter::Or(_)) {
         write!(f, "({operand})")
     } else {
         write!(f, "{operand}")
@@ -253,26 +604,29 @@ impl<'de> Deserialize<'de> for Filter {
     }
 }
 
-/// Deserialize-side wrapper that rescues invalid filter expressions.
+/// This is a deserialize-side wrapper that rescues invalid filter
+/// expressions.
 ///
 /// SCIM handlers that receive a malformed `?filter=...` need to return a
-/// `400 invalidFilter` response per RFC 7644 §3.12. Using this wrapper in
-/// place of [`Filter`] lets the surrounding
-/// [`ListQuery`](crate::models::others::ListQuery) /
-/// [`SearchRequest`](crate::models::others::SearchRequest) deserialize
-/// successfully so the handler can inspect `start_index`, `count`, etc. and
-/// produce an RFC-compliant error body instead of a generic 400.
+/// `400 invalidFilter` response per RFC 7644 §3.12. Use this wrapper in
+/// place of [`Filter`]. Then the surrounding
+/// `ListQuery` /
+/// `SearchRequest` deserializes
+/// successfully. The handler can then inspect `start_index`, `count`, and
+/// other fields, and produce an RFC-compliant error body instead of a
+/// generic 400.
 ///
 /// `MaybeFilter` intentionally does **not** implement `Serialize`. To emit a
 /// filter on the wire, pattern-match the [`MaybeFilter::Valid`] variant and
-/// serialize the inner [`Filter`] — `Filter` itself is `Serialize`.
+/// serialize the inner [`Filter`]. `Filter` itself implements `Serialize`.
 #[derive(Debug)]
 pub enum MaybeFilter {
     /// The filter string parsed successfully.
     Valid(Filter),
     /// The filter string did not parse. The wrapped [`InvalidFilterError`]
-    /// carries the original input and underlying [`ParseError`] for
-    /// constructing an RFC 7644 §3.12 `invalidFilter` error response.
+    /// carries the original input and the underlying [`ParseError`], so a
+    /// handler can construct an RFC 7644 §3.12 `invalidFilter` error
+    /// response.
     Invalid(InvalidFilterError),
 }
 
@@ -296,8 +650,11 @@ impl std::str::FromStr for Filter {
     type Err = ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let parsed = crate::filter_parser::FilterParser::new()
-            .parse(s.trim())
+        // The budget bounds terms and syntactic nesting while parsing; the AST
+        // depth walk below is the exact structural check on what came out.
+        let budget = ParseBudget::default();
+        let parsed = filter_parser()
+            .parse(&budget, s.trim())
             .map_err(|e| e.map_token(|t| t.to_string()))?;
         if let Some(depth) = filter_depth_exceeds(&parsed, MAX_FILTER_DEPTH) {
             drop_filter_iteratively(parsed);
@@ -311,7 +668,8 @@ impl std::str::FromStr for Filter {
 
 /// The `attrPath "[" valFilter "]"` form of a filter (RFC 7644 §3.4.2.2).
 ///
-/// Selects elements of a multi-valued attribute that satisfy the inner filter.
+/// This form selects elements of a multi-valued attribute that satisfy the
+/// inner filter.
 ///
 /// ```
 /// # use scim_v2::filter::*;
@@ -327,30 +685,33 @@ impl std::str::FromStr for Filter {
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct ValuePath {
-    /// The multi-valued attribute being filtered.
+    /// The multi-valued attribute that this value path filters.
     pub attr: AttrPath,
-    /// The filter applied to each element of the attribute's values.
+    /// The filter that applies to each element of the attribute's values.
     pub filter: Box<ValFilter>,
 }
 
-/// A filter expression used inside `[...]` brackets (RFC 7644 §3.4.2.2).
+/// A filter expression for use inside `[...]` brackets (RFC 7644 §3.4.2.2).
 ///
-/// Structurally identical to [`Filter`] but does not allow nested
-/// [`ValuePath`] expressions. The RFC specifies that the expression inside
-/// square brackets must be a valid filter expression based on sub-attributes
-/// of the parent attribute.
+/// This type is structurally identical to [`Filter`], but it does not allow
+/// nested [`ValuePath`] expressions. The RFC specifies that the expression
+/// inside square brackets must be a valid filter expression based on
+/// sub-attributes of the parent attribute.
 ///
-/// Used as the inner filter of [`ValuePath`] and [`PatchValuePath`].
+/// This type serves as the inner filter of [`ValuePath`] and
+/// [`PatchValuePath`].
 #[derive(Debug, Clone, PartialEq)]
 pub enum ValFilter {
     /// A single attribute expression (presence test or comparison).
     Attr(AttrExp),
     /// Logical negation. Serializes as `not (<inner>)`.
     Not(Box<ValFilter>),
-    /// Logical conjunction — both operands must match.
-    And(Box<ValFilter>, Box<ValFilter>),
-    /// Logical disjunction — at least one operand must match.
-    Or(Box<ValFilter>, Box<ValFilter>),
+    /// Logical conjunction. Both operands must match.
+    /// This variant is n-ary, like [`Filter::And`].
+    And(Operands<ValFilter>),
+    /// Logical disjunction. At least one operand must match.
+    /// This variant is n-ary, like [`Filter::Or`].
+    Or(Operands<ValFilter>),
 }
 
 /// An atomic filter expression: a presence test or an attribute comparison.
@@ -371,18 +732,21 @@ pub enum ValFilter {
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub enum AttrExp {
-    /// The `pr` (present) operator. Matches when the attribute exists and is not null.
+    /// This is the `pr` (present) operator. It matches when the attribute
+    /// exists and is not null.
     ///
     /// Example: `title pr`
     Present(AttrPath),
 
     /// A comparison operator with a value.
     ///
-    /// Example: `userName eq "bjensen"`, `meta.lastModified gt "2024-01-01T00:00:00Z"`
+    /// Example: `userName eq "bjensen"`,
+    /// `meta.lastModified gt "2024-01-01T00:00:00Z"`
     Comparison(AttrPath, CompareOp, CompValue),
 }
 
-/// A SCIM attribute path, optionally qualified with a schema URI and/or a sub-attribute.
+/// A SCIM attribute path, optionally qualified with a schema URI, a
+/// sub-attribute, or both.
 ///
 /// An attribute path can take three forms:
 ///
@@ -407,7 +771,8 @@ pub enum AttrExp {
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct AttrPath {
-    /// Optional schema URI prefix, e.g. `"urn:ietf:params:scim:schemas:core:2.0:User"`.
+    /// Optional schema URI prefix, e.g.
+    /// `"urn:ietf:params:scim:schemas:core:2.0:User"`.
     pub uri: Option<String>,
     /// Attribute name, e.g. `"userName"`.
     pub name: String,
@@ -416,7 +781,8 @@ pub struct AttrPath {
 }
 
 impl AttrPath {
-    /// Create an `AttrPath` for a simple attribute name (no URI prefix, no sub-attribute).
+    /// Create an `AttrPath` for a simple attribute name (no URI prefix, no
+    /// sub-attribute).
     pub fn with_name(name: impl Into<String>) -> Self {
         Self {
             uri: None,
@@ -425,7 +791,8 @@ impl AttrPath {
         }
     }
 
-    /// Create an `AttrPath` for a dotted sub-attribute path (e.g. `name.familyName`).
+    /// Create an `AttrPath` for a dotted sub-attribute path (e.g.
+    /// `name.familyName`).
     pub fn with_sub_attr(name: impl Into<String>, sub_attr: impl Into<String>) -> Self {
         Self {
             uri: None,
@@ -437,37 +804,38 @@ impl AttrPath {
 
 /// SCIM comparison operators (RFC 7644 §3.4.2.2, Table 3).
 ///
-/// Operators are case-insensitive when parsed (`EQ`, `Eq`, and `eq` are all
-/// accepted) but are always displayed in lowercase.
+/// The parser accepts an operator without regard to case. For example,
+/// `EQ`, `Eq`, and `eq` all parse to the same operator. [`Display`] always
+/// shows an operator in lowercase.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CompareOp {
-    /// `eq` — equal.
+    /// `eq`: equal.
     Eq,
-    /// `ne` — not equal.
+    /// `ne`: not equal.
     Ne,
-    /// `co` — contains (substring match).
+    /// `co`: contains (substring match).
     Co,
-    /// `sw` — starts with.
+    /// `sw`: starts with.
     Sw,
-    /// `ew` — ends with.
+    /// `ew`: ends with.
     Ew,
-    /// `gt` — greater than.
+    /// `gt`: greater than.
     Gt,
-    /// `lt` — less than.
+    /// `lt`: less than.
     Lt,
-    /// `ge` — greater than or equal to.
+    /// `ge`: greater than or equal to.
     Ge,
-    /// `le` — less than or equal to.
+    /// `le`: less than or equal to.
     Le,
 }
 
 /// The comparison value (right-hand side of a filter comparison).
 ///
-/// Corresponds to the JSON scalar types allowed in SCIM filter expressions.
-/// [`Display`] produces the JSON representation (e.g. `Str("foo")` → `"foo"`
-/// with surrounding quotes and proper escaping).
+/// This enum corresponds to the JSON scalar types allowed in SCIM filter
+/// expressions. [`Display`] produces the JSON representation (e.g.
+/// `Str("foo")` → `"foo"` with surrounding quotes and proper escaping).
 ///
-/// String values can be constructed with `.into()`:
+/// Construct a string value with `.into()`:
 ///
 /// ```
 /// # use scim_v2::filter::*;
@@ -527,15 +895,29 @@ pub(crate) fn parse_attr_path(s: &str) -> Result<AttrPath, FilterActionError> {
 
     let (name, sub_attr) = rest
         .split_once('.')
-        .map_or((rest, None), |(name, sub_attr)| {
-            (name, Some(sub_attr.to_string()))
-        });
+        .map_or((rest, None), |(name, sub_attr)| (name, Some(sub_attr)));
+
+    // Both segments are ATTRNAME: "ATTRNAME = ALPHA *(nameChar)" with
+    // "nameChar = "-" / "_" / DIGIT / ALPHA". The lexer admits the token
+    // shape as a whole, so `name.` (empty sub-attribute) and `name.1x` reach
+    // here and must be refused.
+    if !is_attr_name(name) || sub_attr.is_some_and(|sub| !is_attr_name(sub)) {
+        return Err(FilterActionError::InvalidAttrName(s.to_string()));
+    }
 
     Ok(AttrPath {
         uri,
         name: name.to_string(),
-        sub_attr,
+        sub_attr: sub_attr.map(str::to_string),
     })
+}
+
+/// RFC 7644 §3.4.2.2 `ATTRNAME`: an ASCII letter followed by letters, digits,
+/// `_` or `-`.
+fn is_attr_name(s: &str) -> bool {
+    let mut chars = s.chars();
+    chars.next().is_some_and(|c| c.is_ascii_alphabetic())
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
 /// A SCIM PATCH operation path (RFC 7644 §3.5.2).
@@ -593,8 +975,8 @@ pub enum PatchPath {
 
 /// The `valuePath [subAttr]` form of a PATCH path (RFC 7644 §3.5.2).
 ///
-/// Identifies a specific subset of a multi-valued attribute's elements, and
-/// optionally a sub-attribute within those elements.
+/// This struct identifies a specific subset of a multi-valued attribute's
+/// elements, and optionally a sub-attribute within those elements.
 ///
 /// ```
 /// # use scim_v2::filter::*;
@@ -611,13 +993,13 @@ pub enum PatchPath {
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct PatchValuePath {
-    /// The multi-valued attribute being targeted.
+    /// The multi-valued attribute that this path targets.
     pub attr: AttrPath,
     /// The filter that selects which elements of the attribute to modify.
     pub filter: ValFilter,
     /// Optional sub-attribute after the closing bracket (e.g. `"value"` in
     /// `emails[type eq "work"].value`). When `None`, the operation targets
-    /// the entire matching element.
+    /// the whole matched element.
     pub sub_attr: Option<String>,
 }
 
@@ -681,18 +1063,30 @@ impl Display for ValFilter {
         match self {
             ValFilter::Attr(e) => write!(f, "{e}"),
             ValFilter::Not(inner) => write!(f, "not ({inner})"),
-            ValFilter::And(lhs, rhs) => {
-                fmt_and_operand_val_filter(lhs, f)?;
-                write!(f, " and ")?;
-                fmt_and_operand_val_filter(rhs, f)
+            ValFilter::And(items) => {
+                for (i, item) in items.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, " and ")?;
+                    }
+                    fmt_and_operand_val_filter(item, f)?;
+                }
+                Ok(())
             }
-            ValFilter::Or(lhs, rhs) => write!(f, "{lhs} or {rhs}"),
+            ValFilter::Or(items) => {
+                for (i, item) in items.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, " or ")?;
+                    }
+                    write!(f, "{item}")?;
+                }
+                Ok(())
+            }
         }
     }
 }
 
 fn fmt_and_operand_val_filter(operand: &ValFilter, f: &mut Formatter<'_>) -> std::fmt::Result {
-    if matches!(operand, ValFilter::Or(_, _)) {
+    if matches!(operand, ValFilter::Or(_)) {
         write!(f, "({operand})")
     } else {
         write!(f, "{operand}")
@@ -738,20 +1132,21 @@ impl std::str::FromStr for PatchPath {
     type Err = ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let parsed = crate::filter_parser::PathParser::new()
-            .parse(s.trim())
+        let budget = ParseBudget::default();
+        let parsed = path_parser()
+            .parse(&budget, s.trim())
             .map_err(|e| e.map_token(|t| t.to_string()))?;
         match parsed {
             PatchPath::Attr(a) => Ok(PatchPath::Attr(a)),
-            PatchPath::Value(vp) => match val_filter_depth_exceeds(&vp.filter, MAX_FILTER_DEPTH) {
-                Some(depth) => {
+            PatchPath::Value(vp) => {
+                if let Some(depth) = val_filter_depth_exceeds(&vp.filter, MAX_FILTER_DEPTH) {
                     drop_val_filter_iteratively(vp.filter);
-                    Err(LalrParseError::User {
+                    return Err(LalrParseError::User {
                         error: FilterActionError::DepthExceeded(depth),
-                    })
+                    });
                 }
-                None => Ok(PatchPath::Value(vp)),
-            },
+                Ok(PatchPath::Value(vp))
+            }
         }
     }
 }
@@ -773,23 +1168,32 @@ fn filter_depth_exceeds(root: &Filter, limit: usize) -> Option<usize> {
         match node {
             Filter::Attr(_) => {}
             Filter::ValuePath(vp) => {
-                if let Some(d) = val_filter_depth_exceeds(&vp.filter, limit) {
+                // One budget for the whole filter: the inner filter continues
+                // from this node's depth rather than starting a fresh count.
+                if let Some(d) = val_filter_depth_exceeds_from(&vp.filter, depth + 1, limit) {
                     return Some(d);
                 }
             }
             Filter::Not(inner) => worklist.push((inner, depth + 1)),
-            Filter::And(lhs, rhs) | Filter::Or(lhs, rhs) => {
-                worklist.push((lhs, depth + 1));
-                worklist.push((rhs, depth + 1));
+            Filter::And(items) | Filter::Or(items) => {
+                worklist.extend(items.iter().map(|item| (item, depth + 1)));
             }
         }
     }
     None
 }
 
-/// `ValFilter` mirror of [`filter_depth_exceeds`].
+/// This function is the `ValFilter` mirror of [`filter_depth_exceeds`].
 fn val_filter_depth_exceeds(root: &ValFilter, limit: usize) -> Option<usize> {
-    let mut worklist: Vec<(&ValFilter, usize)> = vec![(root, 1)];
+    val_filter_depth_exceeds_from(root, 1, limit)
+}
+
+/// This function behaves like [`val_filter_depth_exceeds`], but `root`
+/// starts at `start` instead of at 1. As a result, a value path's inner
+/// filter charges against the budget its enclosing filter has already
+/// spent.
+fn val_filter_depth_exceeds_from(root: &ValFilter, start: usize, limit: usize) -> Option<usize> {
+    let mut worklist: Vec<(&ValFilter, usize)> = vec![(root, start)];
     while let Some((node, depth)) = worklist.pop() {
         if depth > limit {
             return Some(depth);
@@ -797,17 +1201,17 @@ fn val_filter_depth_exceeds(root: &ValFilter, limit: usize) -> Option<usize> {
         match node {
             ValFilter::Attr(_) => {}
             ValFilter::Not(inner) => worklist.push((inner, depth + 1)),
-            ValFilter::And(lhs, rhs) | ValFilter::Or(lhs, rhs) => {
-                worklist.push((lhs, depth + 1));
-                worklist.push((rhs, depth + 1));
+            ValFilter::And(items) | ValFilter::Or(items) => {
+                worklist.extend(items.iter().map(|item| (item, depth + 1)));
             }
         }
     }
     None
 }
 
-/// Drop a [`Filter`] without recursing, so an over-deep AST can be rejected
-/// without the derived recursive `Drop` overflowing the stack.
+/// Drop a [`Filter`] without recursion. This lets the code reject an
+/// over-deep AST without overflowing the stack in the derived recursive
+/// `Drop` impl.
 fn drop_filter_iteratively(root: Filter) {
     let mut stack: Vec<Filter> = vec![root];
     while let Some(node) = stack.pop() {
@@ -815,569 +1219,22 @@ fn drop_filter_iteratively(root: Filter) {
             Filter::Attr(_) => {}
             Filter::ValuePath(vp) => drop_val_filter_iteratively(*vp.filter),
             Filter::Not(inner) => stack.push(*inner),
-            Filter::And(lhs, rhs) | Filter::Or(lhs, rhs) => {
-                stack.push(*lhs);
-                stack.push(*rhs);
-            }
+            Filter::And(items) | Filter::Or(items) => stack.extend(items),
         }
     }
 }
 
-/// `ValFilter` mirror of [`drop_filter_iteratively`].
+/// This function is the `ValFilter` mirror of [`drop_filter_iteratively`].
 fn drop_val_filter_iteratively(root: ValFilter) {
     let mut stack: Vec<ValFilter> = vec![root];
     while let Some(node) = stack.pop() {
         match node {
             ValFilter::Attr(_) => {}
             ValFilter::Not(inner) => stack.push(*inner),
-            ValFilter::And(lhs, rhs) | ValFilter::Or(lhs, rhs) => {
-                stack.push(*lhs);
-                stack.push(*rhs);
-            }
+            ValFilter::And(items) | ValFilter::Or(items) => stack.extend(items),
         }
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use test_case::test_case;
-
-    #[test]
-    fn test_scim_filter_simple_eq() {
-        let f = crate::filter_parser::FilterParser::new()
-            .parse(r#"userName eq "bjensen""#)
-            .unwrap();
-        assert_eq!(
-            f,
-            Filter::Attr(AttrExp::Comparison(
-                AttrPath {
-                    uri: None,
-                    name: "userName".into(),
-                    sub_attr: None
-                },
-                CompareOp::Eq,
-                CompValue::Str("bjensen".into()),
-            ))
-        );
-    }
-
-    #[test]
-    fn test_scim_filter_case_insensitive_op() {
-        // RFC: "Attribute names and attribute operators used in filters are case insensitive"
-        let f1 = crate::filter_parser::FilterParser::new()
-            .parse(r#"userName Eq "john""#)
-            .unwrap();
-        let f2 = crate::filter_parser::FilterParser::new()
-            .parse(r#"userName eq "john""#)
-            .unwrap();
-        assert_eq!(f1, f2);
-    }
-
-    #[test]
-    fn test_scim_filter_pr() {
-        let f = crate::filter_parser::FilterParser::new()
-            .parse("title pr")
-            .unwrap();
-        assert_eq!(
-            f,
-            Filter::Attr(AttrExp::Present(AttrPath {
-                uri: None,
-                name: "title".into(),
-                sub_attr: None,
-            }))
-        );
-    }
-
-    #[test]
-    fn test_scim_filter_sub_attr() {
-        let f = crate::filter_parser::FilterParser::new()
-            .parse(r#"name.familyName co "O'Malley""#)
-            .unwrap();
-        assert_eq!(
-            f,
-            Filter::Attr(AttrExp::Comparison(
-                AttrPath {
-                    uri: None,
-                    name: "name".into(),
-                    sub_attr: Some("familyName".into()),
-                },
-                CompareOp::Co,
-                CompValue::Str("O'Malley".into()),
-            ))
-        );
-    }
-
-    #[test]
-    fn test_scim_filter_uri_prefix() {
-        let f = crate::filter_parser::FilterParser::new()
-            .parse(r#"urn:ietf:params:scim:schemas:core:2.0:User:userName sw "J""#)
-            .unwrap();
-        assert_eq!(
-            f,
-            Filter::Attr(AttrExp::Comparison(
-                AttrPath {
-                    uri: Some("urn:ietf:params:scim:schemas:core:2.0:User".into()),
-                    name: "userName".into(),
-                    sub_attr: None,
-                },
-                CompareOp::Sw,
-                CompValue::Str("J".into()),
-            ))
-        );
-    }
-
-    #[test]
-    fn test_scim_filter_and() {
-        let f = crate::filter_parser::FilterParser::new()
-            .parse(r#"title pr and userType eq "Employee""#)
-            .unwrap();
-        assert_eq!(
-            f,
-            Filter::And(
-                Box::new(Filter::Attr(AttrExp::Present(AttrPath {
-                    uri: None,
-                    name: "title".into(),
-                    sub_attr: None,
-                }))),
-                Box::new(Filter::Attr(AttrExp::Comparison(
-                    AttrPath {
-                        uri: None,
-                        name: "userType".into(),
-                        sub_attr: None
-                    },
-                    CompareOp::Eq,
-                    CompValue::Str("Employee".into()),
-                ))),
-            )
-        );
-    }
-
-    #[test]
-    fn test_scim_filter_or() {
-        let f = crate::filter_parser::FilterParser::new()
-            .parse(r#"title pr or userType eq "Intern""#)
-            .unwrap();
-        assert_eq!(
-            f,
-            Filter::Or(
-                Box::new(Filter::Attr(AttrExp::Present(AttrPath {
-                    uri: None,
-                    name: "title".into(),
-                    sub_attr: None,
-                }))),
-                Box::new(Filter::Attr(AttrExp::Comparison(
-                    AttrPath {
-                        uri: None,
-                        name: "userType".into(),
-                        sub_attr: None
-                    },
-                    CompareOp::Eq,
-                    CompValue::Str("Intern".into()),
-                ))),
-            )
-        );
-    }
-
-    #[test]
-    fn test_scim_filter_and_precedence_over_or() {
-        // "A and B or C" should parse as "(A and B) or C"
-        let f = crate::filter_parser::FilterParser::new()
-            .parse(r#"title pr and userType eq "Employee" or emails pr"#)
-            .unwrap();
-
-        assert!(matches!(f, Filter::Or(_, _)));
-        if let Filter::Or(left, _) = f {
-            assert!(matches!(*left, Filter::And(_, _)));
-        }
-    }
-
-    #[test]
-    fn test_scim_filter_not() {
-        let f = crate::filter_parser::FilterParser::new()
-            .parse(r#"not (emails co "example.com")"#)
-            .unwrap();
-        assert!(matches!(f, Filter::Not(_)));
-    }
-
-    #[test]
-    fn test_scim_filter_grouping() {
-        // Parens change precedence: "A or (B and C)" — inner group is And
-        let f = crate::filter_parser::FilterParser::new()
-            .parse(r#"userType eq "Employee" and (emails co "example.com" or emails.value co "example.org")"#)
-            .unwrap();
-        assert!(matches!(f, Filter::And(_, _)));
-    }
-
-    #[test]
-    fn test_scim_filter_value_path() {
-        let f = crate::filter_parser::FilterParser::new()
-            .parse(r#"emails[type eq "work" and value co "@example.com"]"#)
-            .unwrap();
-        assert!(matches!(f, Filter::ValuePath(_)));
-        if let Filter::ValuePath(vp) = f {
-            assert_eq!(vp.attr.name, "emails");
-            assert!(matches!(*vp.filter, ValFilter::And(_, _)));
-        }
-    }
-
-    // All RFC Figure 2 examples: parse must succeed and display must round-trip.
-    #[test_case(r#"userName eq "bjensen""# ; "simple_eq")]
-    #[test_case(r#"name.familyName co "O'Malley""# ; "sub_attr_co")]
-    #[test_case(r#"userName sw "J""# ; "sw")]
-    #[test_case(r#"urn:ietf:params:scim:schemas:core:2.0:User:userName sw "J""# ; "uri_prefix_sw")]
-    #[test_case("title pr" ; "pr")]
-    #[test_case(r#"meta.lastModified gt "2011-05-13T04:42:34Z""# ; "datetime_gt")]
-    #[test_case(r#"meta.lastModified ge "2011-05-13T04:42:34Z""# ; "datetime_ge")]
-    #[test_case(r#"meta.lastModified lt "2011-05-13T04:42:34Z""# ; "datetime_lt")]
-    #[test_case(r#"meta.lastModified le "2011-05-13T04:42:34Z""# ; "datetime_le")]
-    #[test_case(r#"title pr and userType eq "Employee""# ; "and")]
-    #[test_case(r#"title pr or userType eq "Intern""# ; "or")]
-    #[test_case(r#"schemas eq "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User""# ; "urn_value")]
-    #[test_case(r#"userType eq "Employee" and (emails co "example.com" or emails.value co "example.org")"# ; "and_grouped_or")]
-    #[test_case(r#"userType ne "Employee" and not (emails co "example.com" or emails.value co "example.org")"# ; "and_not_grouped_or")]
-    #[test_case(r#"userType eq "Employee" and (emails.type eq "work")"# ; "and_grouped_sub_attr")]
-    #[test_case(r#"userType eq "Employee" and emails[type eq "work" and value co "@example.com"]"# ; "and_value_path")]
-    #[test_case(r#"emails[type eq "work" and value co "@example.com"] or ims[type eq "xmpp" and value co "@foo.com"]"# ; "two_value_paths_or")]
-    fn filter_parses_and_round_trips(s: &str) {
-        let f: Filter = s.parse().unwrap_or_else(|e| panic!("parse {s:?}: {e:?}"));
-        let displayed = f.to_string();
-        let reparsed: Filter = displayed
-            .parse()
-            .unwrap_or_else(|e| panic!("re-parse of {displayed:?}: {e:?}"));
-        assert_eq!(f, reparsed, "round-trip mismatch for {s:?}");
-    }
-
-    // ---------------------------------------------------------------------------
-    // SCIM PATCH path tests (RFC 7644 §3.5.2)
-    // ---------------------------------------------------------------------------
-
-    #[test]
-    fn test_scim_patch_path_attr() {
-        let p = crate::filter_parser::PathParser::new()
-            .parse("userName")
-            .unwrap();
-        assert_eq!(
-            p,
-            PatchPath::Attr(AttrPath {
-                uri: None,
-                name: "userName".into(),
-                sub_attr: None
-            })
-        );
-    }
-
-    #[test]
-    fn test_scim_patch_path_sub_attr() {
-        let p = crate::filter_parser::PathParser::new()
-            .parse("name.familyName")
-            .unwrap();
-        assert_eq!(
-            p,
-            PatchPath::Attr(AttrPath {
-                uri: None,
-                name: "name".into(),
-                sub_attr: Some("familyName".into()),
-            })
-        );
-    }
-
-    #[test]
-    fn test_scim_patch_path_value_path() {
-        let p = crate::filter_parser::PathParser::new()
-            .parse(r#"emails[type eq "work"]"#)
-            .unwrap();
-        let PatchPath::Value(vp) = p else {
-            panic!("expected PatchPath::Value");
-        };
-        assert_eq!(vp.attr.name, "emails");
-        assert!(vp.sub_attr.is_none());
-    }
-
-    #[test]
-    fn test_scim_patch_path_value_path_sub_attr() {
-        let p = crate::filter_parser::PathParser::new()
-            .parse(r#"emails[type eq "work"].value"#)
-            .unwrap();
-        let PatchPath::Value(vp) = p else {
-            panic!("expected PatchPath::Value");
-        };
-        assert_eq!(vp.attr.name, "emails");
-        assert_eq!(vp.sub_attr.as_deref(), Some("value"));
-    }
-
-    // Patch paths that must be rejected by the parser.
-    #[test_case(r#"emails[type eq "work"].value.extra"# ; "dotted_sub_attr")]
-    #[test_case(r#"emails[type eq "work"].urn:foo:bar"# ; "trailing_urn")]
-    #[test_case("name.family.given" ; "too_many_sub_attrs")]
-    fn path_rejected(s: &str) {
-        assert!(crate::filter_parser::PathParser::new().parse(s).is_err());
-    }
-
-    // Filter strings with invalid comp-values that must be rejected.
-    #[test_case(r#"userName eq "\q""# ; "unknown_escape")]
-    #[test_case(r#"userName eq "\uGHIJ""# ; "invalid_unicode_escape")]
-    fn filter_comp_value_rejected(s: &str) {
-        assert!(crate::filter_parser::FilterParser::new().parse(s).is_err());
-    }
-
-    // Invalid attrPaths that do not conform to RFC 7644 Figure 1.
-    #[test_case("name." ; "empty_sub_attr")]
-    #[test_case("name.family.given pr" ; "too_many_sub_attrs")]
-    #[test_case(r#"emails[name.family.given eq "x"]"# ; "value_path_inner_too_many_sub_attrs")]
-    fn invalid_attr_path_rejected(s: &str) {
-        assert!(crate::filter_parser::FilterParser::new().parse(s).is_err());
-    }
-
-    // The RFC ABNF requires SP separators around compare/logical operators.
-    #[test_case(r#"userName eq"bjensen""# ; "missing_space_before_comp_value")]
-    #[test_case(r#"emails[type eq"work"]"# ; "missing_space_in_value_path")]
-    #[test_case(r#"title prand userType eq "Employee""# ; "missing_space_before_and")]
-    fn filter_requires_required_spaces(s: &str) {
-        assert!(crate::filter_parser::FilterParser::new().parse(s).is_err());
-    }
-
-    #[test]
-    fn test_comp_value_surrogate_pair_handled() {
-        // \uD800\uDC00 is a surrogate pair representing U+10000
-        let f = crate::filter_parser::FilterParser::new()
-            .parse(r#"userName eq "\uD800\uDC00""#)
-            .unwrap();
-        if let Filter::Attr(AttrExp::Comparison(_, _, CompValue::Str(s))) = f {
-            assert_eq!(s, "\u{10000}");
-        } else {
-            panic!("unexpected parse result");
-        }
-    }
-
-    #[test]
-    fn test_scim_patch_path_complex_filter() {
-        let p = crate::filter_parser::PathParser::new()
-            .parse(r#"emails[type eq "work" and value co "@example.com"].value"#)
-            .unwrap();
-        let PatchPath::Value(vp) = p else {
-            panic!("expected PatchPath::Value");
-        };
-        let ValFilter::And(_, _) = vp.filter else {
-            panic!("expected ValFilter::And, got {:?}", vp.filter);
-        };
-        assert_eq!(vp.sub_attr.as_deref(), Some("value"));
-    }
-
-    #[test]
-    fn test_val_filter_parenthesized_grouping() {
-        // Parenthesized grouping inside [...] should be accepted
-        let f = crate::filter_parser::FilterParser::new()
-            .parse(r#"emails[(type eq "work") and value pr]"#)
-            .unwrap();
-        assert!(matches!(f, Filter::ValuePath(_)));
-        if let Filter::ValuePath(vp) = f {
-            assert!(matches!(*vp.filter, ValFilter::And(_, _)));
-        }
-    }
-
-    #[test]
-    fn test_filter_from_str() {
-        let f: Filter = r#"userName eq "bjensen""#.parse().unwrap();
-        assert!(matches!(f, Filter::Attr(AttrExp::Comparison(..))));
-    }
-
-    #[test]
-    fn test_patch_path_from_str() {
-        let p: PatchPath = r#"emails[type eq "work"].value"#.parse().unwrap();
-        assert!(matches!(p, PatchPath::Value(_)));
-    }
-
-    #[test]
-    fn test_filter_from_str_error() {
-        assert!(r#"not a valid filter !!!"#.parse::<Filter>().is_err());
-    }
-
-    // ---------------------------------------------------------------------------
-    // Display / round-trip tests
-    // ---------------------------------------------------------------------------
-
-    #[test_case("userName" ; "simple_attr")]
-    #[test_case("name.familyName" ; "sub_attr")]
-    #[test_case(r#"emails[type eq "work"]"# ; "value_path")]
-    #[test_case(r#"emails[type eq "work"].value"# ; "value_path_sub_attr")]
-    #[test_case(r#"emails[type eq "work" and value co "@example.com"].value"# ; "complex_filter")]
-    fn patch_path_round_trips(s: &str) {
-        let p: PatchPath = s.parse().unwrap_or_else(|e| panic!("parse {s:?}: {e:?}"));
-        let displayed = p.to_string();
-        let reparsed: PatchPath = displayed
-            .parse()
-            .unwrap_or_else(|e| panic!("re-parse of {displayed:?}: {e:?}"));
-        assert_eq!(p, reparsed, "round-trip mismatch for {s:?}");
-    }
-
-    #[test]
-    fn test_display_attr_path() {
-        let p = AttrPath {
-            uri: Some("urn:ietf:params:scim:schemas:core:2.0:User".into()),
-            name: "userName".into(),
-            sub_attr: None,
-        };
-        assert_eq!(
-            p.to_string(),
-            "urn:ietf:params:scim:schemas:core:2.0:User:userName"
-        );
-    }
-
-    #[test]
-    fn test_display_comp_value_string_escaping() {
-        // Newline in string must be JSON-escaped
-        let v = CompValue::Str("foo\nbar".into());
-        assert_eq!(v.to_string(), r#""foo\nbar""#);
-    }
-
-    #[test]
-    fn test_display_and_wraps_or_children() {
-        // "(A or B) and C" — Or child must be wrapped in parens
-        let f: Filter = r#"(title pr or userType eq "Intern") and emails pr"#
-            .parse()
-            .unwrap();
-        let s = f.to_string();
-        // Re-parse must yield the same tree
-        let reparsed: Filter = s.parse().unwrap();
-        assert_eq!(f, reparsed);
-        // The output must contain parens around the Or
-        assert!(s.contains('('), "expected parens in {s:?}");
-    }
-
-    // ---------------------------------------------------------------------------
-    // Depth-limit enforcement (DoS hardening against deeply nested filters)
-    // ---------------------------------------------------------------------------
-
-    fn assert_depth_exceeded<T: std::fmt::Debug>(res: Result<T, ParseError>) {
-        match res {
-            Err(LalrParseError::User {
-                error: FilterActionError::DepthExceeded(_),
-            }) => {}
-            Err(other) => panic!("expected ParseError::User(DepthExceeded), got {other:?}"),
-            Ok(ok) => panic!("expected rejection, but parse succeeded: {ok:?}"),
-        }
-    }
-
-    // Build a filter string whose parsed AST has depth exactly `depth` using
-    // nested `not`s: `not (not (... (title pr) ...))` with `depth - 1` `not`s
-    // gives a Not-chain with a leaf Attr underneath → AST depth = depth.
-    fn not_chain(depth: usize) -> String {
-        assert!(depth >= 1);
-        let nots = depth - 1;
-        format!("{}title pr{}", "not (".repeat(nots), ")".repeat(nots))
-    }
-
-    // Same, for `ValFilter` content inside `emails[...]`.
-    fn val_not_chain(depth: usize) -> String {
-        assert!(depth >= 1);
-        let nots = depth - 1;
-        format!(
-            r#"{}type eq "work"{}"#,
-            "not (".repeat(nots),
-            ")".repeat(nots)
-        )
-    }
-
-    #[test]
-    fn not_chain_within_limit_parses() {
-        let s = not_chain(MAX_FILTER_DEPTH);
-        s.parse::<Filter>()
-            .unwrap_or_else(|e| panic!("expected success at depth {MAX_FILTER_DEPTH}: {e:?}"));
-    }
-
-    #[test]
-    fn not_chain_exceeding_limit_rejected() {
-        let s = not_chain(MAX_FILTER_DEPTH + 5);
-        assert_depth_exceeded(s.parse::<Filter>());
-    }
-
-    #[test]
-    fn and_chain_within_limit_parses() {
-        // `a and b and c` is left-associative, so N leaves produce a depth-N AST
-        // (N-1 And nodes on the left spine + 1 leaf).
-        let n = MAX_FILTER_DEPTH;
-        let mut s = String::from("title pr");
-        for _ in 0..n - 1 {
-            s.push_str(" and title pr");
-        }
-        s.parse::<Filter>()
-            .unwrap_or_else(|e| panic!("expected success with {n} leaves: {e:?}"));
-    }
-
-    #[test]
-    fn and_chain_exceeding_limit_rejected() {
-        let n = MAX_FILTER_DEPTH + 10;
-        let mut s = String::from("title pr");
-        for _ in 0..n - 1 {
-            s.push_str(" and title pr");
-        }
-        assert_depth_exceeded(s.parse::<Filter>());
-    }
-
-    #[test]
-    fn or_chain_exceeding_limit_rejected() {
-        let n = MAX_FILTER_DEPTH + 10;
-        let mut s = String::from("title pr");
-        for _ in 0..n - 1 {
-            s.push_str(" or title pr");
-        }
-        assert_depth_exceeded(s.parse::<Filter>());
-    }
-
-    #[test]
-    fn value_path_inner_depth_bounded() {
-        // Over-deep ValFilter inside a ValuePath triggers val_filter_depth_exceeds.
-        let s = format!("emails[{}]", val_not_chain(MAX_FILTER_DEPTH + 5));
-        assert_depth_exceeded(s.parse::<Filter>());
-    }
-
-    #[test]
-    fn patch_path_value_path_depth_bounded() {
-        // Same, routed through PatchPath::from_str.
-        let s = format!("emails[{}]", val_not_chain(MAX_FILTER_DEPTH + 5));
-        assert_depth_exceeded(s.parse::<PatchPath>());
-    }
-
-    #[test]
-    fn patch_path_plain_attr_not_affected() {
-        // PatchPath::Attr has no recursive structure — depth check is a no-op.
-        let p: PatchPath = "name.familyName".parse().unwrap();
-        assert!(matches!(p, PatchPath::Attr(_)));
-    }
-
-    #[test]
-    fn deserialize_rejects_deep_nesting() {
-        // The Deserialize path delegates to FromStr; ensure a JSON-wrapped
-        // over-deep filter is rejected.
-        let raw = not_chain(MAX_FILTER_DEPTH + 5);
-        let json = serde_json::to_string(&raw).unwrap();
-        let err = serde_json::from_str::<Filter>(&json).unwrap_err();
-        assert!(
-            err.to_string().contains("depth"),
-            "expected depth error, got: {err}"
-        );
-    }
-
-    #[test]
-    fn display_round_trip_at_limit_does_not_overflow() {
-        // Confirm the whole recursive path (Display, PartialEq, Debug,
-        // Serialize) is safe at the limit.
-        let s = not_chain(MAX_FILTER_DEPTH);
-        let f: Filter = s.parse().unwrap();
-        let displayed = f.to_string();
-        let reparsed: Filter = displayed.parse().unwrap();
-        assert_eq!(f, reparsed);
-        let _ = format!("{f:?}");
-        let _ = serde_json::to_string(&f).unwrap();
-    }
-
-    #[test]
-    fn extremely_deep_input_rejected_without_panic() {
-        // Regression for the H-1 finding: 10_000 nested `not`s must return an
-        // error rather than overflowing the stack during parse, depth-check,
-        // or drop of the rejected AST.
-        let s = not_chain(10_000);
-        assert_depth_exceeded(s.parse::<Filter>());
-    }
-}
+mod tests;
