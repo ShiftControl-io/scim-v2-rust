@@ -39,9 +39,9 @@ fluent-uri = { version = "0.4", optional = true }
 thiserror = "2.0"
 
 [dev-dependencies]
-proptest = "1.6"
+proptest = "1.11"
 pretty_assertions = "1.4"
-test-case = "3.3"
+test-case = "3.4"
 uuid = { version = "1", features = ["serde"] }
 
 [lib]
