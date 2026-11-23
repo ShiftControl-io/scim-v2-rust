@@ -2,6 +2,7 @@
 
 [advisories]
 # Fail on any RUSTSEC advisory affecting the resolved tree.
+unmaintained = "all"
 yanked = "deny"
 
 [licenses]
